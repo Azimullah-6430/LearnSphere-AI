@@ -1,0 +1,12 @@
+{
+  "name": "learnsphere-ai-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LearnSphere AI Unified Application",
+  "scripts": {
+    "dev": "cd learnsphere-ai && npm run dev",
+    "start": "python backend/server.py",
+    "server": "python backend/server.py",
+    "build": "cd learnsphere-ai && npm run build"
+  }
+}

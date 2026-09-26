@@ -1,0 +1,313 @@
+import { useState } from 'react'
+import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
+import { getDynamicSubjects, getDynamicScenarios, getDynamicChapters } from '../data/syllabusData.js'
+import { useApp } from '../context/AppContext.jsx'
+import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers } from 'lucide-react'
+
+const difficultyTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
+const DEFAULT_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics', 'Biology']
+
+function analyseAnswer(answer, concepts) {
+  const lower = answer.toLowerCase()
+  return (concepts || []).map((c) => {
+    const keywords = c.concept.toLowerCase().split(/[\s/,()]+/).filter((w) => w.length > 3)
+    const hit = keywords.some((kw) => lower.includes(kw))
+    return { ...c, covered: hit }
+  })
+}
+
+function QualityMeter({ pct }) {
+  const color = pct >= 70 ? 'var(--success)' : pct >= 45 ? 'var(--warning)' : 'var(--error)'
+  const label = pct >= 80 ? 'Excellent' : pct >= 65 ? 'Good' : pct >= 45 ? 'Partial' : 'Needs work'
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1.5">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Application quality</div>
+        <div className="text-[13.5px] font-extrabold" style={{ color }}>{pct}% · {label}</div>
+      </div>
+      <div className="h-2.5 bg-[var(--surface-alt)] rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    </div>
+  )
+}
+
+export default function RealityLab() {
+  const { user, profile, syllabusData, recordActivity } = useApp()
+  const activeProfile = { ...user, ...profile }
+  const isCollege = activeProfile?.level === 'college'
+
+  const dynamicSubs = getDynamicSubjects(activeProfile, syllabusData)
+  const subjects = dynamicSubs.length ? dynamicSubs : DEFAULT_SUBJECTS
+
+  const [activeSubject, setActiveSubject] = useState(subjects[0] || 'Physics')
+  const [activeDifficulty, setActiveDifficulty] = useState('All')
+  const [activeModule, setActiveModule] = useState('All')
+  const [scenarioIdx, setScenarioIdx] = useState(0)
+  const [answer, setAnswer] = useState('')
+  const [result, setResult] = useState(null)
+  const [showModel, setShowModel] = useState(false)
+  const [showAnswer, setShowAnswer] = useState(false)
+
+  const modules = getDynamicChapters(activeSubject, activeProfile, syllabusData)
+  const scenarios = getDynamicScenarios(activeSubject, activeProfile, syllabusData, activeDifficulty, activeModule)
+  const scenario = scenarios[scenarioIdx]
+
+  const switchSubject = (sub) => {
+    setActiveSubject(sub)
+    setActiveModule('All')
+    setScenarioIdx(0)
+    resetState()
+  }
+
+  const switchDifficulty = (diff) => {
+    setActiveDifficulty(diff)
+    setScenarioIdx(0)
+    resetState()
+  }
+
+  const switchModule = (mod) => {
+    setActiveModule(mod)
+    setScenarioIdx(0)
+    resetState()
+  }
+
+  const resetState = () => {
+    setAnswer('')
+    setResult(null)
+    setShowModel(false)
+    setShowAnswer(false)
+  }
+
+  const handleAnalyse = () => {
+    if (!answer.trim() || !scenario) return
+    const analysed = analyseAnswer(answer, scenario.expectedConcepts)
+    const required = analysed.filter((c) => c.required)
+    const coveredRequired = required.filter((c) => c.covered).length
+    const pct = Math.round((coveredRequired / Math.max(required.length, 1)) * 100)
+    setResult({ concepts: analysed, qualityPct: pct })
+    setShowModel(false)
+    recordActivity('lab', `Completed Reality Lab scenario: ${scenario?.title} (${pct}%)`, { score: pct, subject: activeSubject })
+  }
+
+  const handleNext = () => {
+    if (!scenarios.length) return
+    setScenarioIdx((i) => (i + 1) % scenarios.length)
+    resetState()
+  }
+
+  const handleRandom = () => {
+    if (!scenarios.length) return
+    const candidates = scenarios.map((_, i) => i).filter((i) => i !== scenarioIdx)
+    setScenarioIdx(candidates[Math.floor(Math.random() * candidates.length)] ?? 0)
+    resetState()
+  }
+
+  if (!scenario) return (
+    <div className="p-8">
+      <div className="flex gap-1.5 flex-wrap mb-5">
+        {subjects.map((sub) => (
+          <button key={sub} onClick={() => switchSubject(sub)} className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border ${activeSubject === sub ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] text-[var(--text-soft)]'}`}>{sub}</button>
+        ))}
+      </div>
+      <div className="p-6 border border-[var(--border)] rounded-xl text-center text-[var(--text-soft)]">No scenarios found for this filter. <button onClick={() => { setActiveDifficulty('All'); setActiveModule('All'); }} className="text-[var(--accent)] underline font-bold ml-1">Reset Filters</button></div>
+    </div>
+  )
+
+  return (
+    <>
+      <PageHead
+        title="Knowledge-to-Reality Lab"
+        subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena. 20 Questions per Module."
+        action={
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-[var(--text-faint)] font-semibold">{scenarioIdx + 1}/{scenarios.length}</span>
+            <button onClick={handleNext} className="px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">Next</button>
+            <button onClick={handleRandom} className="flex items-center gap-1 px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">
+              <Shuffle size={12} /> Random
+            </button>
+          </div>
+        }
+      />
+
+      {/* Subject Tabs */}
+      <div className="flex gap-1.5 flex-wrap mb-4">
+        {subjects.map((sub) => (
+          <button
+            key={sub}
+            onClick={() => switchSubject(sub)}
+            className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border transition-all ${
+              activeSubject === sub
+                ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                : 'border-[var(--border-strong)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
+            }`}
+          >
+            {sub}
+          </button>
+        ))}
+      </div>
+
+      {/* Module & Difficulty Filter Bar */}
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5 p-2 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+        {/* Module Selector */}
+        <div className="flex items-center gap-2">
+          <Layers size={14} className="text-[var(--accent)] ml-1" />
+          <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Module:</span>
+          <select
+            value={activeModule}
+            onChange={(e) => switchModule(e.target.value)}
+            className="px-3 py-1 rounded-lg border border-[var(--border-strong)] text-[12px] font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[280px] truncate"
+          >
+            <option value="All">All Modules ({scenarios.length} total Qs)</option>
+            {modules.map((m) => (
+              <option key={m.name} value={m.name}>{m.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Difficulty Selector */}
+        <div className="flex items-center gap-1">
+          {[
+            { id: 'All', label: 'All Modes' },
+            { id: 'Easy', label: '🟢 Easy' },
+            { id: 'Medium', label: '🟡 Medium' },
+            { id: 'Hard', label: '🔴 Hard' }
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => switchDifficulty(id)}
+              className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${
+                activeDifficulty === id
+                  ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                  : 'text-[var(--text-faint)] hover:text-[var(--text-soft)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-[760px] space-y-4">
+        {/* Scenario card */}
+        <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
+          <div className="absolute top-4 right-5 opacity-8">
+            <FlaskConical size={72} strokeWidth={1} />
+          </div>
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <Globe size={13} className="text-[var(--accent)]" />
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">{scenario.context}</span>
+            <span className="mx-1 text-[var(--border-strong)]">·</span>
+            <Badge tone={difficultyTone[scenario.difficulty]}>{scenario.difficulty}</Badge>
+            {isCollege && <Badge tone="neutral">{scenario.subject}</Badge>}
+            {scenario.chapter && <Badge tone="neutral">{scenario.chapter}</Badge>}
+          </div>
+          <h2 className="text-[17px] font-extrabold leading-snug max-w-[540px]">{scenario.title}</h2>
+        </div>
+
+        {!result && !showAnswer ? (
+          <>
+            {/* Answer input */}
+            <Card>
+              <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your explanation</div>
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                placeholder="Explain this real-world phenomenon using academic concepts, principles, and equations from your syllabus…"
+                rows={6}
+                className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
+              />
+              <div className="flex items-center justify-between mt-3">
+                <button
+                  onClick={() => setShowAnswer(true)}
+                  className="flex items-center gap-1.5 text-[12px] text-[var(--text-faint)] hover:text-[var(--text-soft)] transition-colors font-semibold"
+                >
+                  <Eye size={13} /> Show answer directly
+                </button>
+                <Button onClick={handleAnalyse} disabled={!answer.trim()}>
+                  Analyse My Answer
+                </Button>
+              </div>
+            </Card>
+
+            {/* Concept preview */}
+            <Card>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Concepts being tested</div>
+              <div className="flex flex-wrap gap-2">
+                {scenario.expectedConcepts.map((c, i) => (
+                  <span key={i} className={`px-2.5 py-1 rounded-full text-[11.5px] font-semibold border ${
+                    c.required
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent-soft-strong)]'
+                      : 'bg-[var(--surface-alt)] text-[var(--text-soft)] border-[var(--border)]'
+                  }`}>
+                    {c.concept}{!c.required && <span className="ml-1 opacity-60">· bonus</span>}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          </>
+        ) : showAnswer && !result ? (
+          /* Direct answer reveal */
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <BookOpen size={15} className="text-[var(--accent)]" />
+              <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--accent)]">Model Answer</div>
+            </div>
+            <div className="text-[13.5px] leading-relaxed mb-5">{scenario.modelAnswer}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Key concepts covered</div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {scenario.expectedConcepts.filter(c => c.required).map((c, i) => (
+                <span key={i} className="px-2.5 py-1 rounded-full text-[11.5px] font-semibold border bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent-soft-strong)]">
+                  {c.concept}
+                </span>
+              ))}
+            </div>
+            <Button onClick={handleNext} className="w-full justify-center">Next Scenario</Button>
+          </Card>
+        ) : (
+          <>
+            {/* Results */}
+            <Card>
+              <QualityMeter pct={result.qualityPct} />
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">Concept coverage</div>
+              <div className="space-y-2 mb-5">
+                {result.concepts.map((c, i) => (
+                  <div key={i} className={`flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg border ${
+                    c.covered ? 'border-[var(--border)] bg-[var(--success-soft)]' : 'border-[var(--border)] bg-[var(--surface-alt)]'
+                  }`}>
+                    {c.covered
+                      ? <CheckCircle2 size={15} className="text-[var(--success)] shrink-0 mt-px" />
+                      : <XCircle size={15} className="text-[var(--error)] shrink-0 mt-px" />
+                    }
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[13px] font-semibold">{c.concept}</span>
+                      {!c.required && <span className="ml-2 text-[10.5px] text-[var(--text-faint)] font-medium">bonus</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-[var(--surface-alt)] rounded-lg p-3.5 mb-4">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Your answer</div>
+                <div className="text-[13px] leading-relaxed text-[var(--text-soft)]">{answer}</div>
+              </div>
+
+              {!showModel ? (
+                <button onClick={() => setShowModel(true)} className="text-[12.5px] font-semibold text-[var(--accent)] hover:opacity-70 transition-opacity">
+                  Show model answer →
+                </button>
+              ) : (
+                <div className="border border-[var(--border)] rounded-lg p-3.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Model answer</div>
+                  <div className="text-[13.5px] leading-relaxed">{scenario.modelAnswer}</div>
+                </div>
+              )}
+            </Card>
+
+            <Button onClick={handleNext} className="w-full justify-center">Next Scenario</Button>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
