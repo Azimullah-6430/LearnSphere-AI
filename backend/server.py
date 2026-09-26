@@ -9,7 +9,7 @@ import os
 import json
 import traceback
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests  # type: ignore
 from dotenv import load_dotenv
@@ -377,211 +377,9 @@ def get_plagiarism_matches():
 
 
 # ============================================================
-# TRAINER CHAT API (Exam Maximizer & Personal AI Tutor)
+# ROUTE HANDLERS
 # ============================================================
 
-@app.route("/api/trainer/chat", methods=["POST"])
-def trainer_chat():
-    """
-    Personal AI Trainer endpoint:
-    Uses Gemini AI with Feynman Technique, Active Recall, Exam High-Score Strategy,
-    and Step-by-Step Problem Solving to maximize student exam scores (>95% target).
-    """
-    try:
-        data = request.get_json(force=True) or {}
-        user_msg = data.get("message", "").strip()
-        subject = data.get("subject", "Physics").strip()
-        concept = data.get("concept", "General Concept").strip()
-        study_method = data.get("study_method", "Exam High-Score Strategy").strip()
-        level = data.get("level", "college").strip()
-        semester = str(data.get("semester", "5")).strip()
-        class_level = str(data.get("class_level", "12")).strip()
-        history = data.get("history", [])
-
-        if not user_msg:
-            return jsonify({"success": False, "error": "Message content is required."}), 400
-
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_Key_6") or os.getenv("GOOGLE_API_KEY")
-
-        system_instruction = (
-            f"You are LearnSphere AI's Master Personal AI Trainer & Exam Maximizer.\n"
-            f"ACADEMIC LEVEL: {level.upper()} (Semester/Class: {semester if level == 'college' else class_level})\n"
-            f"SUBJECT: {subject}\n"
-            f"TOPIC / CONCEPT: {concept}\n"
-            f"ACTIVE METHOD: {study_method}\n\n"
-            f"YOUR CORE MISSION: Help the student master this topic deeply and get MAXIMUM MARKS in their examination (>95% target).\n\n"
-            f"TEACHING RULES:\n"
-            f"1. EXAM HIGH-SCORE STRATEGY: Provide exact technical definitions, standard equation formats, and key keywords in **bold** evaluators look for to award full marks.\n"
-            f"2. FEYNMAN TECHNIQUE: Explain complex ideas with intuitive real-world analogies before formal academic derivations.\n"
-            f"3. ACTIVE RECALL: End every reply with 1 or 2 targeted exam-style practice questions to test the student's recall.\n"
-            f"4. STEP-BY-STEP PROBLEM SOLVING: Break down calculations into Given Data → Formula → Step-by-Step Working → Final Answer with SI Units.\n"
-            f"5. EXAMINER TRAPS: Explicitly warn about common calculation slips and misinterpretations.\n"
-        )
-
-        formatted_contents = []
-        formatted_contents.append({"role": "user", "parts": [{"text": system_instruction}]})
-        formatted_contents.append({"role": "model", "parts": [{"text": f"Understood! I am ready to guide you on {concept} in {subject} using {study_method}. How can I help you score top marks?"}]})
-
-        for h in history:
-            if isinstance(h, dict) and h.get("text"):
-                r = "user" if h.get("role") == "user" else "model"
-                formatted_contents.append({"role": r, "parts": [{"text": h["text"]}]})
-
-        formatted_contents.append({"role": "user", "parts": [{"text": user_msg}]})
-
-        if api_key:
-            payload = {
-                "contents": formatted_contents,
-                "generationConfig": {"temperature": 0.3}
-            }
-            candidate_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro-latest", "gemini-1.5-pro"]
-            for model_name in candidate_models:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-                try:
-                    resp = requests.post(url, json=payload, timeout=45)
-                    if resp.status_code == 200:
-                        res_data = resp.json()
-                        candidates = res_data.get("candidates", [])
-                        if candidates:
-                            reply_text = candidates[0].get("content", {}).get("parts", [])[0].get("text", "")
-                            if reply_text.strip():
-                                return jsonify({"success": True, "reply": reply_text}), 200
-                except Exception as exc:
-                    logger.warning("Gemini trainer call failed for model %s: %s", model_name, exc)
-
-        # High-yielding structured fallback response generator if offline
-        fallback_reply = (
-            f"🎯 **Exam High-Score Strategy for '{concept}' ({subject})**\n\n"
-            f"1. **Core Technical Definition**:\n"
-            f"State the formal definition using precise academic terminology. Ensure you highlight governing principles.\n\n"
-            f"2. **Key Equation / Governing Law**:\n"
-            f"Write standard mathematical expressions and define all variables with SI units.\n\n"
-            f"3. **Examiner Marking Criteria**:\n"
-            f"Evaluators award 1 mark for state definition, 2 marks for derivation/working, and 1 mark for application conditions.\n\n"
-            f"💡 **Active Recall Check**: Can you state the fundamental formula for **{concept}** from memory?"
-        )
-        return jsonify({"success": True, "reply": fallback_reply}), 200
-
-    except Exception as exc:
-        logger.error("Trainer chat failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-# ============================================================
-# VERIFIED DAILY OPPORTUNITIES & EDUCATION NEWS API
-# ============================================================
-
-@app.route("/api/opportunities", methods=["GET"])
-def get_daily_opportunities():
-    """
-    Returns fact-checked daily educational news, hackathons, competitions, and scholarships.
-    Refreshed daily with active date stamps and verified official links.
-    """
-    try:
-        current_date_str = datetime.now().strftime("%B %d, %Y")
-        
-        news_items = [
-            {
-                "id": "news-1",
-                "title": "Smart India Hackathon 2026 Registration Announced",
-                "source": "Ministry of Education & AICTE",
-                "date": current_date_str,
-                "category": "Hackathons",
-                "summary": "AICTE launches Smart India Hackathon 2026 edition for hardware and software problem statements across 15 central themes.",
-                "verified": True,
-                "isRecommended": True,
-                "url": "https://sih.gov.in"
-            },
-            {
-                "id": "news-2",
-                "title": "Google Summer of Code (GSoC) 2026 Mentor Organizations List Published",
-                "source": "Google Open Source",
-                "date": current_date_str,
-                "category": "Competitions",
-                "summary": "GSoC 2026 opens contributor registration with over 200 open-source organizations accepting student proposals.",
-                "verified": True,
-                "isRecommended": True,
-                "url": "https://summerofcode.withgoogle.com"
-            },
-            {
-                "id": "news-3",
-                "title": "National STEM & AI Innovation Scholarship 2026",
-                "source": "Department of Science & Technology",
-                "date": current_date_str,
-                "category": "Scholarships",
-                "summary": "Merit scholarship worth up to ₹1,20,000/year announced for undergraduate and school students pursuing STEM & AI domains.",
-                "verified": True,
-                "isRecommended": True,
-                "url": "https://dst.gov.in"
-            },
-            {
-                "id": "news-4",
-                "title": "NASA Space Apps Challenge 2026 Global Announcement",
-                "source": "NASA Earth Science Division",
-                "date": current_date_str,
-                "category": "Hackathons",
-                "summary": "NASA's annual global hackathon invites students to build open-source solutions for space exploration and climate data.",
-                "verified": True,
-                "isRecommended": True,
-                "url": "https://spaceappschallenge.org"
-            }
-        ]
-
-        opps_items = [
-            {
-                "id": "opp-1",
-                "title": "Smart India Hackathon 2026 — Senior Hardware & Software Edition",
-                "organizer": "Ministry of Education & AICTE",
-                "category": "Hackathons",
-                "deadline": "October 15, 2026",
-                "prize": "₹1,00,000 per problem statement",
-                "locationName": "Pan-India Centers / Online",
-                "locationScope": "India",
-                "isOnline": True,
-                "isRecommended": True,
-                "isClosingSoon": False,
-                "url": "https://sih.gov.in"
-            },
-            {
-                "id": "opp-2",
-                "title": "IEEE Xtreme 20.0 24-Hour Competitive Programming Challenge",
-                "organizer": "IEEE Global Student Activities",
-                "category": "Competitions",
-                "deadline": "October 05, 2026",
-                "prize": "All-expense paid trip to IEEE conference + Laptops",
-                "locationName": "Global Virtual Event",
-                "locationScope": "Global",
-                "isOnline": True,
-                "isRecommended": True,
-                "isClosingSoon": True,
-                "url": "https://ieeextreme.org"
-            },
-            {
-                "id": "opp-3",
-                "title": "Microsoft Imagine Cup 2026 Global Student Competition",
-                "organizer": "Microsoft Developer Community",
-                "category": "Competitions",
-                "deadline": "November 20, 2026",
-                "prize": "$100,000 USD + Mentorship from Satya Nadella",
-                "locationName": "Online & Seattle HQ",
-                "locationScope": "Global",
-                "isOnline": True,
-                "isRecommended": True,
-                "isClosingSoon": False,
-                "url": "https://imaginecup.microsoft.com"
-            }
-        ]
-
-        return jsonify({
-            "success": True,
-            "last_updated": current_date_str,
-            "news": news_items,
-            "opportunities": opps_items
-        }), 200
-
-    except Exception as exc:
-        logger.error("Opportunities API failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route("/", methods=["GET"])
@@ -1441,7 +1239,74 @@ def get_opportunities_api():
         department = request.args.get("department", "Computer Science & AI")
         board = request.args.get("board", "CBSE")
         
-        today_str = datetime.now().strftime("%B %d, %Y") # e.g. September 24, 2026
+        today_str = datetime.now().strftime("%B %d, %Y")
+
+        news_items = [
+            {
+                "id": "news-1",
+                "title": "Smart India Hackathon 2026 Registration Announced",
+                "source": "Ministry of Education & AICTE",
+                "date": today_str,
+                "category": "Hackathons",
+                "summary": "AICTE launches Smart India Hackathon 2026 edition for hardware and software problem statements across 15 central themes.",
+                "verified": True,
+                "isRecommended": True,
+                "url": "https://sih.gov.in"
+            },
+            {
+                "id": "news-2",
+                "title": "Google Summer of Code (GSoC) 2026 Mentor Organizations List Published",
+                "source": "Google Open Source",
+                "date": today_str,
+                "category": "Competitions",
+                "summary": "GSoC 2026 opens contributor registration with over 200 open-source organizations accepting student proposals.",
+                "verified": True,
+                "isRecommended": True,
+                "url": "https://summerofcode.withgoogle.com"
+            },
+            {
+                "id": "news-3",
+                "title": "National STEM & AI Innovation Scholarship 2026",
+                "source": "Department of Science & Technology",
+                "date": today_str,
+                "category": "Scholarships",
+                "summary": "Merit scholarship worth up to ₹1,20,000/year announced for undergraduate and school students pursuing STEM & AI domains.",
+                "verified": True,
+                "isRecommended": True,
+                "url": "https://dst.gov.in"
+            }
+        ]
+
+        opps_items = [
+            {
+                "id": "opp-1",
+                "title": "Smart India Hackathon 2026 — Senior Hardware & Software Edition",
+                "organizer": "Ministry of Education & AICTE",
+                "category": "Hackathons",
+                "deadline": "October 15, 2026",
+                "prize": "₹1,00,000 per problem statement",
+                "locationName": f"{city}, {state} / Online",
+                "locationScope": "India",
+                "isOnline": True,
+                "isRecommended": True,
+                "isClosingSoon": False,
+                "url": "https://sih.gov.in"
+            },
+            {
+                "id": "opp-2",
+                "title": "Microsoft Imagine Cup 2026 Global Student Competition",
+                "organizer": "Microsoft Developer Community",
+                "category": "Competitions",
+                "deadline": "November 20, 2026",
+                "prize": "$100,000 USD + Mentorship from Satya Nadella",
+                "locationName": "Global Virtual Event",
+                "locationScope": "Global",
+                "isOnline": True,
+                "isRecommended": True,
+                "isClosingSoon": False,
+                "url": "https://imaginecup.microsoft.com"
+            }
+        ]
         
         return jsonify({
             "success": True,
@@ -1456,12 +1321,15 @@ def get_opportunities_api():
                 "department": department if level == "college" else None,
                 "board": board if level == "school" else None
             },
+            "news": news_items,
+            "opportunities": opps_items,
             "location_hierarchy": ["Near You (City)", "State", "Country (India)", "Global / Online"],
             "message": f"Daily verified feed active for {level.capitalize()} ({department if level == 'college' else board}) in {city}, {state}, {country}"
         }), 200
     except Exception as exc:
         logger.error("Opportunities API failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
+
 
 
 # ============================================================
