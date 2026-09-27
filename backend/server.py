@@ -44,7 +44,12 @@ from app.plagiarism import PlagiarismDetector
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-FRONTEND_DIST = BASE_DIR.parent / "learnsphere-ai" / "dist"
+ROOT_DIR = BASE_DIR.parent
+FRONTEND_DIST = ROOT_DIR / "learnsphere-ai" / "dist"
+
+# Explicitly load .env from backend, root, and current working directory
+load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(ROOT_DIR / ".env", override=True)
 load_dotenv(override=True)
 
 # Initialize Database

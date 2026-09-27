@@ -8,6 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
+_eval_dir = Path(__file__).resolve().parent
+_backend_dir = _eval_dir.parent.parent
+_root_dir = _backend_dir.parent
+
+load_dotenv(_backend_dir / ".env", override=True)
+load_dotenv(_root_dir / ".env", override=True)
 load_dotenv(override=True)
 
 
@@ -37,7 +43,7 @@ class EvaluationAgent:
 
     @property
     def api_key(self) -> str:
-        for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        for name in ("GEMINI_API_KEY", "Gemini_API_Key_6", "GOOGLE_API_KEY", "GEMINI_KEY", "GEMINI_API_TOKEN"):
             value = os.getenv(name, "").strip()
             if value:
                 return value

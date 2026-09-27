@@ -18,6 +18,13 @@ except Exception:
     PYMONGO_AVAILABLE = False
 
 from dotenv import load_dotenv
+
+_db_dir = Path(__file__).resolve().parent
+_backend_dir = _db_dir.parent
+_root_dir = _backend_dir.parent
+
+load_dotenv(_backend_dir / ".env", override=True)
+load_dotenv(_root_dir / ".env", override=True)
 load_dotenv(override=True)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "learnsphere.db"
