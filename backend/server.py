@@ -625,8 +625,11 @@ def evaluate():
         stream = request.form.get("stream", "Science")
         semester = request.form.get("semester", "")
 
+        # Subject is optional. The dynamic evaluator can identify the subject
+        # from the uploaded question paper when the teacher/frontend does not
+        # provide a subject hint.
         if not subject:
-            return jsonify({"success": False, "error": "Subject is required."}), 400
+            subject = "General"
 
         question_paper = request.files.get("question_paper")
         answer_script = request.files.get("answer_script")
@@ -638,6 +641,8 @@ def evaluate():
         if answer_script is None:
             return jsonify({"success": False, "error": "Answer script is required."}), 400
 
+        # Save every input first. The evaluator receives real filesystem paths
+        # and converts them to Gemini Files API inputs internally.
         qp_path = save_uploaded_file(question_paper, "question_paper")
         answer_path = save_uploaded_file(answer_script, "answer_script")
         rubric_path = save_uploaded_file(rubrics, "rubrics") if rubrics and rubrics.filename else None
@@ -658,10 +663,33 @@ def evaluate():
             "syllabus": syllabus_path
         }
 
-        logger.info("Evaluating uploaded paper for student=%s, subject=%s, level=%s", student_name, subject, level)
+        logger.info(
+            "Evaluating uploaded paper for student=%s, subject=%s, level=%s, qp=%s, answer=%s",
+            student_name, subject, level, Path(qp_path).name, Path(answer_path).name
+        )
 
-        # 1. Run Gemini Multimodal Evaluation on uploaded paper
-        result = evaluation_agent.evaluate(evaluation_request)
+        # 1. Run the dynamic, evidence-first Gemini evaluation.
+        #    IMPORTANT: do not create a fallback score if this fails. A 500/422
+        #    response with the real reason is safer than inventing marks.
+        try:
+            result = evaluation_agent.evaluate(evaluation_request)
+        except Exception as eval_error:
+            logger.error("EVALUATION ERROR: %s", eval_error)
+            logger.error(traceback.format_exc())
+            return jsonify({
+                "success": False,
+                "error": str(eval_error),
+                "type": type(eval_error).__name__,
+                "stage": "evaluation",
+            }), 422
+
+        # The evaluator may discover the subject from the question paper.
+        subject = str(
+            result.get("student", {}).get("subject")
+            or subject
+            or "General"
+        ).strip()
+        evaluation_request["subject"] = subject
 
         # 2. Run Plagiarism Check ONLY if Teacher portal request
         plagiarism_result = {"suspected": False, "similarity": 0.0, "details": "Plagiarism check disabled for student evaluation."}
@@ -700,6 +728,14 @@ def evaluate():
             "plagiarism": plagiarism_result,
         }), 200
 
+    except ValueError as exc:
+        logger.warning("Paper evaluation validation failed: %s", exc)
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "stage": "validation",
+        }), 400
     except Exception as exc:
         logger.error("Paper evaluation failed: %s", str(exc))
         logger.error(traceback.format_exc())
@@ -707,6 +743,7 @@ def evaluate():
             "success": False,
             "error": str(exc),
             "type": type(exc).__name__,
+            "stage": "server",
         }), 500
 
 
