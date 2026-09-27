@@ -384,6 +384,9 @@ def get_plagiarism_matches():
 
 @app.route("/", methods=["GET"])
 def home():
+    index_path = os.path.join(app.static_folder, "index.html")
+    if os.path.exists(index_path):
+        return send_from_directory(app.static_folder, "index.html")
     return jsonify({
         "status": "online",
         "service": "LearnSphere AI Backend API",
@@ -391,13 +394,16 @@ def home():
         "version": "2.0"
     })
 
+@app.route("/api/health", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status": "healthy",
-        "service": "LearnSphere AI",
+        "service": "LearnSphere AI Backend API",
         "database": "MongoDB Atlas" if is_using_mongo() else "SQLite",
+        "version": "2.0"
     }), 200
+
 
 
 # ============================================================
