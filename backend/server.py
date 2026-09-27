@@ -624,19 +624,17 @@ def evaluate():
         subject = request.form.get("subject", "").strip()
         student_name = request.form.get("student_name", "").strip() or "Student"
         roll_number = request.form.get("roll_number", "").strip() or "N/A"
-        assessment_title = request.form.get("assessment_title", "").strip() or f"{subject} Examination"
+        assessment_title = request.form.get("assessment_title", "").strip()
         role = request.form.get("role", "student").lower()
 
         level = request.form.get("level", "school")
-        board = request.form.get("board", "CBSE")
-        stream = request.form.get("stream", "Science")
+        board = request.form.get("board", "")
+        stream = request.form.get("stream", "")
         semester = request.form.get("semester", "")
 
-        # Subject is optional. The dynamic evaluator can identify the subject
-        # from the uploaded question paper when the teacher/frontend does not
-        # provide a subject hint.
-        if not subject:
-            subject = "General"
+        # Leave subject empty if generic so evaluator.py dynamically extracts printed subject name from paper
+        if subject.lower() in {"general", "science", "unknown", "n/a"}:
+            subject = ""
 
         question_paper = request.files.get("question_paper")
         answer_script = request.files.get("answer_script")
