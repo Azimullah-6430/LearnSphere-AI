@@ -196,6 +196,7 @@ def store_evaluation_pipeline(
             ans_pres = 1 if q.get("answer_present", True) else 0
             summary = str(q.get("answer_summary", ""))
             fb = q.get("feedback", {})
+            missing = fb.get("missing_points", [])
 
             cursor.execute("""
                 INSERT INTO evaluation_questions
@@ -206,6 +207,28 @@ def store_evaluation_pipeline(
                 summary, json.dumps(fb.get("what_was_done_well", [])), json.dumps(fb.get("missing_points", [])),
                 str(fb.get("expected_answer", "")), str(fb.get("improvement", ""))
             ))
+
+            if awd_m < max_m and len(missing) > 0:
+                cursor.execute("""
+                    INSERT INTO misconceptions
+                    (student_name, subject, topic, concept, description, severity, remedy)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    student_name, subject, f"{subject} — Question {q_num}", str(missing[0]),
+                    f"{student_name}'s reasoning in Q{q_num} indicates a conceptual error: {missing[0]}",
+                    "High" if (awd_m / max_m if max_m else 0) < 0.5 else "Medium",
+                    str(fb.get("improvement", "Targeted practice with AI trainer."))
+                ))
+
+        cursor.execute("""
+            INSERT INTO academic_memory
+            (student_name, subject, topic, mastery, retention_rate, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            student_name, subject, f"{subject} — {assessment_title}",
+            int(percentage), int(min(100, percentage + 10)),
+            "Mastered" if percentage >= 85 else "Learning"
+        ))
 
         conn.commit()
         conn.close()

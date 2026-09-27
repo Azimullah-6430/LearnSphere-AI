@@ -7,7 +7,7 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal,
   const navigate = useNavigate()
 
   return (
-    <header className="h-16 border-b border-[var(--border)] flex items-center justify-between px-7 sticky top-0 bg-[var(--bg)]/90 backdrop-blur z-30">
+    <header className="min-h-[4rem] border-b border-[var(--border)] flex items-center justify-between px-3.5 sm:px-7 py-2.5 sticky top-0 bg-[var(--bg)]/95 backdrop-blur z-30 flex-wrap sm:flex-nowrap gap-2">
       <div className="flex items-center gap-3">
         <button className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--border)]" onClick={onMenuClick}>
           <Menu size={17} />

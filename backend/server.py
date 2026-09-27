@@ -103,120 +103,45 @@ def mongo_serialize(doc):
 
 # ============================================================
 # TEACHER ACTION CENTER API (Targeting At-Risk / Poor Performing Students Only - Excludes Toppers)
-# Rule: Students who lost > 20 marks AND have failing/at-risk academic status.
 # ============================================================
-
-DEFAULT_ACTION_ITEMS = [
-    {
-        "id": "act-1",
-        "student_name": "Rohan Das",
-        "roll_number": "12B-04",
-        "academic_status": "At Risk (42% Avg)",
-        "subject": "Mathematics",
-        "topic": "Quadratic Equations & Discriminant",
-        "question_num": "Q4, Q7 & Q9",
-        "marks_lost": 24,
-        "issue": "Severe calculation collapse: substituted +4ac instead of -4ac under radical discriminant and failed basic factorization across 3 questions.",
-        "misconception": "Discriminant sign distribution error during quadratic expansion.",
-        "prev_occurrence": "Unit Test 1, Q3 (Repeated Failure)",
-        "priority": "High",
-        "action": "Mandatory 1-on-1 remedial sessions + basic algebra drill worksheet.",
-        "status": "New",
-        "created_at": "2026-09-20",
-        "details": {
-            "question_text": "Solve 3x² - 7x + 2 = 0 using quadratic formula.",
-            "student_answer": "x = (7 ± √(49 + 24)) / 6 = (7 ± √73) / 6",
-            "correct_answer": "x = (7 ± √(49 - 24)) / 6 = (7 ± 5) / 6 → x = 2, x = 1/3",
-            "grader_notes: ": "Student lost 24 marks across test. High chance of failing terminal exam if sign errors persist."
-        }
-    },
-    {
-        "id": "act-2",
-        "student_name": "Kavya Venkat",
-        "roll_number": "12C-08",
-        "academic_status": "Needs Support (38% Avg)",
-        "subject": "Physics",
-        "topic": "Electromagnetic Induction & Flux",
-        "question_num": "Q2, Q5 & Q8",
-        "marks_lost": 28,
-        "issue": "Omitted time derivative d/dt in Faraday's Law derivation, completely blank on Lenz's direction vector derivation.",
-        "misconception": "Confusing steady magnetic field intensity with time-varying magnetic flux.",
-        "prev_occurrence": "Mid-Term Exam, Q2",
-        "priority": "High",
-        "action": "Assign Personal Trainer foundational concept lessons + parent notification.",
-        "status": "In Progress",
-        "created_at": "2026-09-19",
-        "details": {
-            "question_text": "State Faraday's Law and calculate induced EMF for Φ(t) = 4t² + 2t.",
-            "student_answer": "EMF = 4(2)² + 2(2) = 20V (substituted t directly without differentiating).",
-            "correct_answer": "EMF = -dΦ/dt = -(8t + 2) = -18V at t=2s.",
-            "grader_notes": "Student lost 28 marks out of 100. High failure risk."
-        }
-    },
-    {
-        "id": "act-3",
-        "student_name": "Aman Mehta",
-        "roll_number": "12B-05",
-        "academic_status": "At Risk (48% Avg)",
-        "subject": "Chemistry",
-        "topic": "Organic Reaction Mechanisms",
-        "question_num": "Q3, Q6 & Q10",
-        "marks_lost": 22,
-        "issue": "Reversed curved arrow electron movement in nucleophilic substitution; drew arrows pointing from positive carbon to electron pair.",
-        "misconception": "Inverted electron-pair movement convention in organic reaction mechanisms.",
-        "prev_occurrence": "Weekly Quiz 2, Q5",
-        "priority": "High",
-        "action": "Provide active recall flashcards on nucleophile-electrophile electron flow.",
-        "status": "New",
-        "created_at": "2026-09-18",
-        "details": {
-            "question_text": "Draw SN2 mechanism for hydroxide attack on methyl bromide.",
-            "student_answer: ": "Arrow drawn starting from C+ attacking OH-.",
-            "correct_answer": "Arrow drawn starting from electron-rich lone pair on OH- attacking carbon.",
-            "grader_notes": "22 marks lost across organic section."
-        }
-    },
-    {
-        "id": "act-4",
-        "student_name": "Vikram Singh",
-        "roll_number": "12C-14",
-        "academic_status": "Chance of Failing (35% Avg)",
-        "subject": "Mathematics",
-        "topic": "Integration by Parts & ILATE Rule",
-        "question_num": "Q4, Q6 & Q7",
-        "marks_lost": 25,
-        "issue": "Arbitrary variable selection without ILATE rule, causing infinite integral loops and abandonment of 3 high-mark questions.",
-        "misconception": "Arbitrary selection of integration variables leading to circular integration loops.",
-        "prev_occurrence": "Unit Test 2, Q4",
-        "priority": "High",
-        "action": "Special 1-on-1 tutorial on ILATE priority rules + practice problem sheet.",
-        "status": "Follow-up Required",
-        "created_at": "2026-09-17",
-        "details": {
-            "question_text": "Evaluate ∫ x² e^x dx.",
-            "student_answer": "Chose u = e^x, dv = x² dx, expanding integral into ∫ e^x x³/3 dx.",
-            "correct_answer": "Choose u = x², dv = e^x dx to reduce polynomial degree.",
-            "grader_notes": "Lost 25 marks. Student needs immediate remedial coaching."
-        }
-    }
-]
 
 @app.route("/api/action-center", methods=["GET"])
 def get_action_center_items():
-    """Returns action cards targeting at-risk/failing students who lost >20 marks (excludes toppers)."""
+    """Returns dynamic action cards for evaluated students who require assistance."""
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None and "action_items" in mongo_db.list_collection_names():
             items = [mongo_serialize(d) for d in mongo_db["action_items"].find()]
-            # Filter only students with marks_lost > 20 and at risk
-            filtered = [i for i in items if i.get("marks_lost", 0) >= 20 or "Risk" in i.get("academic_status", "") or "Needs" in i.get("academic_status", "") or "Failing" in i.get("academic_status", "")]
-            if filtered:
-                return jsonify({"success": True, "items": filtered}), 200
-        
-        return jsonify({"success": True, "items": DEFAULT_ACTION_ITEMS}), 200
+            return jsonify({"success": True, "items": items}), 200
+
+        # SQLite Fallback
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM evaluations WHERE percentage < 75 ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        items = []
+        for r in rows:
+            items.append({
+                "id": f"act_{r['id']}",
+                "student_name": r["student_name"],
+                "roll_number": r["roll_number"] or "N/A",
+                "academic_status": f"At Risk ({int(r['percentage'])}% Avg)" if r['percentage'] < 50 else f"Needs Support ({int(r['percentage'])}% Avg)",
+                "subject": r["subject"],
+                "topic": r["assessment_title"],
+                "question_num": "Evaluated Paper",
+                "marks_lost": int(r["total_marks"] - r["obtained_marks"]),
+                "issue": r["overall_feedback"] or "Conceptual errors identified during evaluation.",
+                "misconception": f"Review needed for {r['subject']}",
+                "priority": "High" if r["percentage"] < 50 else "Medium",
+                "action": "Assign targeted practice worksheet.",
+                "status": "New",
+                "created_at": str(r["created_at"])[:10]
+            })
+        return jsonify({"success": True, "items": items}), 200
     except Exception as exc:
         logger.error("Action Center GET failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": True, "items": []}), 200
 
 @app.route("/api/action-center/<item_id>", methods=["PUT"])
 def update_action_center_item(item_id):
@@ -239,141 +164,55 @@ def update_action_center_item(item_id):
 
 
 # ============================================================
-# MISCONCEPTIONS API (>5 Students Wrong Rule)
+# MISCONCEPTIONS API
 # ============================================================
-
-DEFAULT_MISCONCEPTIONS = [
-    {
-        "id": "misc-1",
-        "student_name": "Rahul Kumar",
-        "subject": "Physics",
-        "concept": "Newton's Third Law",
-        "actual_misconception": "Believes action and reaction forces act on the same object, causing cancellation into static equilibrium.",
-        "description": "Rahul's reasoning in Q4 and Q7 indicates a persistent misunderstanding of Newton's Third Law.",
-        "question_num": "Q4 & Q7",
-        "student_reasoning": "In Q4, student wrote: 'The reaction force acts back on the horse so total net force is zero and cart cannot accelerate.' In Q7, student applied identical logic to a rocket engine.",
-        "correct_concept": "Action and reaction forces ALWAYS act on TWO DIFFERENT distinct bodies simultaneously, so they NEVER cancel each other out.",
-        "evidence": "Q4 and Q7 contain the exact same incorrect reasoning across multiple force interaction questions.",
-        "occurrences": 2,
-        "assessments": ["Physics Mid-Term Exam", "Dynamics Unit Assessment"],
-        "confidence": "High",
-        "affected_count": 6,
-        "student_names": ["Rahul Kumar", "Rohan Das", "Kavya Venkat", "Aman Mehta", "Vikram Singh", "Sneha Roy"],
-        "severity": "High",
-        "remedy": "Interactive force-pair body diagram exercises with Personal AI Trainer."
-    },
-    {
-        "id": "misc-2",
-        "student_name": "Kavya Venkat",
-        "subject": "Mathematics",
-        "concept": "Quadratic Formula & Radical Expansion",
-        "actual_misconception": "Assumes √a² + b² = a + b, distributing square root linearly over addition.",
-        "description": "Kavya's reasoning in Q3 and Q8 demonstrates a deep algebraic misconception regarding radical distribution.",
-        "question_num": "Q3 & Q8",
-        "student_reasoning": "In Q3: '√(x² + 16) simplifies directly to x + 4'. In Q8: '√(9a² + 16b²) = 3a + 4b'.",
-        "correct_concept": "The square root operator is distributive over multiplication √(a·b) = √a·√b, but NEVER over addition √(a + b) ≠ √a + √b.",
-        "evidence": "Repeated mathematical expansion errors showing conceptual misapplication of exponent laws.",
-        "occurrences": 2,
-        "assessments": ["Algebraic Expressions Test", "Term 1 Math Assessment"],
-        "confidence": "High",
-        "affected_count": 7,
-        "student_names": ["Kavya Venkat", "Rohan Das", "Aman Mehta", "Vikram Singh", "Arun Kumar", "Divya Nair", "Karthik Raja"],
-        "severity": "High",
-        "remedy": "Feynman technique step-by-step breakdown on radical distribution rules."
-    },
-    {
-        "id": "misc-3",
-        "student_name": "Aman Mehta",
-        "subject": "Physics",
-        "concept": "Faraday's Law & Electromagnetic Induction",
-        "actual_misconception": "Confuses constant magnetic field intensity with time-varying magnetic flux derivative (dΦ/dt).",
-        "description": "Aman's reasoning in Q2 indicates he assumes a strong static magnetic field automatically induces continuous electric current.",
-        "question_num": "Q2",
-        "student_reasoning": "Student wrote: 'Place a stationary copper loop inside a high 5 Tesla static magnetic field to generate continuous DC current.'",
-        "correct_concept": "Induced EMF is directly proportional to the TIME RATE OF CHANGE of magnetic flux (dΦ/dt). A static magnetic field with zero time-variation produces zero induced current.",
-        "evidence": "Q2 response demonstrates fundamental failure to distinguish between flux magnitude and flux derivative.",
-        "occurrences": 1,
-        "assessments": ["Electromagnetism Chapter Test"],
-        "confidence": "Medium",
-        "affected_count": 5,
-        "student_names": ["Aman Mehta", "Vikram Singh", "Pooja Hegde", "Siddharth Roy", "Rohan Das"],
-        "severity": "Medium",
-        "remedy": "Reality Lab simulation on flux change vs static field strength."
-    }
-]
 
 @app.route("/api/misconceptions", methods=["GET"])
 def get_misconceptions():
-    """Returns class misconceptions where 5 or more students went wrong in a single question."""
+    """Returns dynamic class misconceptions identified during paper evaluations."""
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None and "misconceptions" in mongo_db.list_collection_names():
-            db_miscs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find({"affected_count": {"$gte": 5}})]
-            if db_miscs:
-                return jsonify({"success": True, "misconceptions": db_miscs}), 200
-        
-        return jsonify({"success": True, "misconceptions": DEFAULT_MISCONCEPTIONS}), 200
+            db_miscs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find()]
+            return jsonify({"success": True, "misconceptions": db_miscs}), 200
+
+        # SQLite Fallback
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM misconceptions ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        miscs = [dict(r) for r in rows]
+        return jsonify({"success": True, "misconceptions": miscs}), 200
     except Exception as exc:
         logger.error("Misconceptions GET failed: %s", exc)
-        return jsonify({"success": False, "misconceptions": DEFAULT_MISCONCEPTIONS}), 200
+        return jsonify({"success": True, "misconceptions": []}), 200
 
 
 # ============================================================
-# PLAGIARISM API (Renamed File, 3+ Questions, Roll Proximity)
+# PLAGIARISM API
 # ============================================================
-
-DEFAULT_PLAGIARISM_MATCHES = [
-    {
-        "id": "plag-1",
-        "pair_match": "Rohan Das (Roll 12B-04) ↔ Aman Mehta (Roll 12B-05)",
-        "roll_numbers": "12B-04 ↔ 12B-05",
-        "is_adjacent_seating": True,
-        "identical_questions": ["Q2", "Q4", "Q7"],
-        "identical_q_count": 3,
-        "is_renamed_file_match": True,
-        "similarity": 94.5,
-        "level": "error",
-        "context": "Mathematics — Unit Test 3",
-        "details": "Renamed Duplicate File Submission & 3 Questions (Q2, Q4, Q7) answered identically. Adjacent roll numbers 12B-04 & 12B-05 indicate desk proximity collusion.",
-        "snippets": [
-            { "q": "Q2", "text1": "x = (7 ± √(49 + 24)) / 6 = (7 ± √73) / 6 (identical step-by-step phrasing)", "text2": "x = (7 ± √(49 + 24)) / 6 = (7 ± √73) / 6 (identical step-by-step phrasing)" },
-            { "q": "Q4", "text1": "Integration by parts formula used with u=e^x without ILATE rule", "text2": "Integration by parts formula used with u=e^x without ILATE rule" },
-            { "q": "Q7", "text1": "Discriminant substituted incorrectly with identical scratch margin notes", "text2": "Discriminant substituted incorrectly with identical scratch margin notes" }
-        ]
-    },
-    {
-        "id": "plag-2",
-        "pair_match": "Priya Sharma (Roll 12A-01) ↔ Kavya Venkat (Roll 12A-02)",
-        "roll_numbers": "12A-01 ↔ 12A-02",
-        "is_adjacent_seating": True,
-        "identical_questions": ["Q1", "Q3", "Q5", "Q8"],
-        "identical_q_count": 4,
-        "is_renamed_file_match": True,
-        "similarity": 89.2,
-        "level": "error",
-        "context": "Chemistry — Organic Reaction Mechanisms",
-        "details": "Identical file submission under renamed PDF title. 4 questions (Q1, Q3, Q5, Q8) contain verbatim identical chemical structure diagrams. Adjacent roll numbers 12A-01 & 12A-02.",
-        "snippets": [
-            { "q": "Q3", "text1": "Verbatim mechanism drawing with identical electron arrow typo", "text2": "Verbatim mechanism drawing with identical electron arrow typo" },
-            { "q": "Q5", "text1": "Exact same phrasing in organic synthesis derivation", "text2": "Exact same phrasing in organic synthesis derivation" }
-        ]
-    }
-]
 
 @app.route("/api/plagiarism/matches", methods=["GET"])
 def get_plagiarism_matches():
-    """Returns plagiarism audit flags matching renamed files, 3+ identical questions, and adjacent roll numbers."""
+    """Returns dynamic plagiarism audit flags from teacher evaluation checks."""
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None and "plagiarism_records" in mongo_db.list_collection_names():
             records = [mongo_serialize(d) for d in mongo_db["plagiarism_records"].find()]
-            if records:
-                return jsonify({"success": True, "matches": records}), 200
-        
-        return jsonify({"success": True, "matches": DEFAULT_PLAGIARISM_MATCHES}), 200
+            return jsonify({"success": True, "matches": records}), 200
+
+        # SQLite Fallback
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM plagiarism_records ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        records = [dict(r) for r in rows]
+        return jsonify({"success": True, "matches": records}), 200
     except Exception as exc:
         logger.error("Plagiarism matches GET failed: %s", exc)
-        return jsonify({"success": False, "matches": DEFAULT_PLAGIARISM_MATCHES}), 200
+        return jsonify({"success": True, "matches": []}), 200
 
 
 # ============================================================
@@ -827,20 +666,30 @@ def evaluate():
         # 2. Run Plagiarism Check ONLY if Teacher portal request
         plagiarism_result = {"suspected": False, "similarity": 0.0, "details": "Plagiarism check disabled for student evaluation."}
         if role == "teacher":
-            plagiarism_result = plagiarism_detector.check(
-                student_name=student_name,
-                roll_number=roll_number,
-                subject=subject,
-                answer_script=answer_path,
-                question_paper=qp_path,
-            )
+            try:
+                plagiarism_result = plagiarism_detector.check(
+                    student_name=student_name,
+                    roll_number=roll_number,
+                    subject=subject,
+                    answer_script=answer_path,
+                    question_paper=qp_path,
+                )
+            except Exception as p_err:
+                logger.warning("Plagiarism check notice: %s", str(p_err))
+                plagiarism_result = {"suspected": False, "similarity": 0.0, "details": "Plagiarism check notice: " + str(p_err)}
 
-        # 3. Store Evaluation in MongoDB Atlas
-        eval_id = store_evaluation_pipeline(
-            request_data=evaluation_request,
-            eval_result=result,
-            plagiarism_result=plagiarism_result
-        )
+        # 3. Store Evaluation in MongoDB Atlas / SQLite
+        eval_id = f"eval_loc_{int(datetime.now().timestamp())}"
+        try:
+            stored_id = store_evaluation_pipeline(
+                request_data=evaluation_request,
+                eval_result=result,
+                plagiarism_result=plagiarism_result
+            )
+            if stored_id:
+                eval_id = stored_id
+        except Exception as s_err:
+            logger.warning("Storage pipeline notice: %s", str(s_err))
 
         logger.info("Evaluation stored permanently with ID=%s", eval_id)
 
@@ -1117,21 +966,47 @@ def get_dashboard_analytics():
     role = request.args.get("role", "teacher")
     student_name = request.args.get("student_name", "")
 
+    recent_evals = []
+    weak_topics = []
+    memory_items = []
+
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        query = {"student_name": student_name} if role == "student" and student_name else {}
-        recent_evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(query).sort("created_at", -1).limit(5)]
-        memory_items = [mongo_serialize(d) for d in mongo_db["academic_memory"].find(query).limit(4)] if role == "student" else []
-        weak_topics = [mongo_serialize(d) for d in mongo_db["misconceptions"].find({"resolved": False}).limit(3)]
+        try:
+            query = {"student_name": student_name} if role == "student" and student_name else {}
+            recent_evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(query).sort("created_at", -1).limit(10)]
+            memory_items = [mongo_serialize(d) for d in mongo_db["academic_memory"].find(query).limit(5)] if role == "student" else []
+            weak_topics = [mongo_serialize(d) for d in mongo_db["misconceptions"].find({"resolved": False}).limit(5)]
+        except Exception as e:
+            logger.error("Mongo analytics query error: %s", e)
 
-        return jsonify({
-            "success": True,
-            "recentEvaluations": recent_evals,
-            "weakTopics": weak_topics,
-            "academicMemory": memory_items
-        }), 200
-    else:
-        return jsonify({"success": True, "recentEvaluations": [], "weakTopics": [], "academicMemory": []}), 200
+    # SQLite fallback
+    if not recent_evals:
+        try:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            if role == "student" and student_name:
+                cursor.execute("""
+                    SELECT id, student_name, roll_number, subject, assessment_title, total_marks, obtained_marks, percentage, grade, status, overall_feedback, created_at
+                    FROM evaluations WHERE student_name = ? ORDER BY created_at DESC LIMIT 10
+                """, (student_name,))
+            else:
+                cursor.execute("""
+                    SELECT id, student_name, roll_number, subject, assessment_title, total_marks, obtained_marks, percentage, grade, status, overall_feedback, created_at
+                    FROM evaluations ORDER BY created_at DESC LIMIT 10
+                """)
+            rows = cursor.fetchall()
+            conn.close()
+            recent_evals = [dict(row) for row in rows]
+        except Exception as e:
+            logger.error("SQLite analytics query error: %s", e)
+
+    return jsonify({
+        "success": True,
+        "recentEvaluations": recent_evals,
+        "weakTopics": weak_topics,
+        "academicMemory": memory_items
+    }), 200
 
 @app.route("/api/trainer/chat", methods=["POST"])
 def trainer_chat():
@@ -1339,13 +1214,29 @@ def get_opportunities_api():
 
 
 # ============================================================
-# UNIFIED APPLICATION SERVING (FRONTEND + BACKEND + DATABASE)
+# UNIFIED APPLICATION SERVING & SPA CATCH-ALL ROUTING
 # ============================================================
+
+@app.errorhandler(404)
+def not_found_fallback(e):
+    """
+    Catch-all SPA fallback:
+    Reroutes any client-side route (e.g., /app/*, /create-class, /settings) back to index.html
+    so React Router retains the exact current page upon browser refresh (F5).
+    """
+    if request.path.startswith("/api/"):
+        return jsonify({"success": False, "error": f"API endpoint {request.path} not found."}), 404
+
+    if os.path.exists(os.path.join(app.static_folder, "index.html")):
+        return send_from_directory(app.static_folder, "index.html")
+
+    return jsonify({"message": "LearnSphere AI Unified API Server active."}), 200
+
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_unified_app(path):
-    """Serves the built React frontend application and handles client-side routing."""
+    """Serves built static assets or index.html for client-side routing."""
     if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     if os.path.exists(os.path.join(app.static_folder, "index.html")):

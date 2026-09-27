@@ -59,8 +59,8 @@ export default function SyllabusModal({ isOpen, onClose }) {
               <BookOpen size={20} />
             </div>
             <div>
-              <h3 className="font-bold text-base">Upload & Analyze Course Syllabus</h3>
-              <p className="text-xs text-[var(--text-soft)]">Extract subjects, topics & practice scenarios via Gemini AI</p>
+              <h3 className="font-bold text-base">Upload & Analyze Curriculum & Syllabus</h3>
+              <p className="text-xs text-[var(--text-soft)]">Extract subjects, units, learning outcomes & evaluation guidelines via Gemini AI</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-[var(--text-soft)] hover:text-[var(--text)] rounded-lg">
@@ -77,11 +77,11 @@ export default function SyllabusModal({ isOpen, onClose }) {
         {!result ? (
           <form onSubmit={handleUploadAndAnalyze} className="mt-5 space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[var(--text-soft)] mb-2">Option A: Upload Syllabus Document (PDF / Image)</label>
+              <label className="block text-xs font-semibold text-[var(--text-soft)] mb-2">Option A: Upload Curriculum / Syllabus Document (PDF / Image)</label>
               <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--border-strong)] rounded-xl bg-[var(--surface-alt)] hover:border-[var(--accent)] transition-colors cursor-pointer text-center">
                 <UploadCloud size={28} className="text-[var(--accent)] mb-2" />
                 <span className="text-xs font-bold text-[var(--text)]">{file ? file.name : 'Click to select PDF, PNG or JPG'}</span>
-                <span className="text-[11px] text-[var(--text-faint)] mt-1">Official course syllabus or exam blueprint</span>
+                <span className="text-[11px] text-[var(--text-faint)] mt-1">Official curriculum regulation or course syllabus blueprint</span>
                 <input 
                   type="file" 
                   accept=".pdf,.png,.jpg,.jpeg" 
@@ -92,10 +92,10 @@ export default function SyllabusModal({ isOpen, onClose }) {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1.5">Option B: Paste Syllabus Text / Topics</label>
+              <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1.5">Option B: Paste Curriculum / Syllabus Text & Topics</label>
               <textarea
                 rows={3}
-                placeholder="Paste course subjects, units, or topic guidelines here..."
+                placeholder="Paste course subjects, units, learning outcomes, or curriculum guidelines here..."
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
                 className="w-full p-3 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-xs focus:outline-none focus:border-[var(--accent)] resize-none"

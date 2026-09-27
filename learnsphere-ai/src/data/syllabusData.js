@@ -929,26 +929,44 @@ export const SCHOOL_LANGUAGES_DATA = {
 
 // ─── Dynamic Helper Functions ───────────────────────────────────────────────
 export function getDynamicSubjects(profile, syllabusData) {
-  // If user uploaded a custom syllabus PDF, return extracted subjects
+  // 1. If user uploaded a custom syllabus document or text, return extracted subjects
   if (syllabusData && Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
     return syllabusData.extracted_subjects
   }
 
-  // If college student
-  if (profile?.level === 'college') {
-    const sem = parseInt(profile?.semester || 5)
-    const domain = profile?.domain || "Computer Science & AI"
-    const domainData = COLLEGE_SEMESTER_DATA[domain] || COLLEGE_SEMESTER_DATA["Computer Science & AI"]
-    const semSubjects = domainData[sem] || domainData[5] || domainData[3] || domainData[1]
-    return Object.keys(semSubjects)
-  }
-
-  // School student
+  // 2. If student profile has custom subjects array set during onboarding/registration
   if (profile?.subjects && Array.isArray(profile.subjects) && profile.subjects.length > 0) {
     return profile.subjects
   }
 
-  return ['Physics', 'Chemistry', 'Mathematics', 'Biology']
+  // 3. If college student with semester and domain credentials
+  if (profile?.level === 'college') {
+    const sem = parseInt(profile?.semester || 5)
+    const domain = profile?.domain || profile?.stream || "Computer Science & AI"
+    
+    // Find matching domain from COLLEGE_SEMESTER_DATA
+    const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
+      k.toLowerCase() === domain.toLowerCase() || 
+      k.toLowerCase().includes(domain.toLowerCase()) || 
+      domain.toLowerCase().includes(k.toLowerCase())
+    ) || "Computer Science & AI"
+    
+    const domainData = COLLEGE_SEMESTER_DATA[domainKey]
+    if (domainData) {
+      const semSubjects = domainData[sem] || domainData[5] || domainData[3] || domainData[1]
+      if (semSubjects) {
+        return Object.keys(semSubjects)
+      }
+    }
+  }
+
+  // 4. If school student with stream credentials
+  if (profile?.level === 'school' && profile?.stream && STREAMS[profile.stream]) {
+    return STREAMS[profile.stream]
+  }
+
+  // 5. If no syllabus uploaded and no profile credentials set, return empty array
+  return []
 }
 
 export function getDynamicChapters(subject, profile, syllabusData) {

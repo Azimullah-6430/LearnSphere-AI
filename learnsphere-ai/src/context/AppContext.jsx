@@ -201,26 +201,37 @@ export function AppProvider({ children }) {
     return () => clearInterval(timer)
   }, [authenticated])
 
-  // Calculate & Update Daily Streak
-  const checkAndUpdateStreak = () => {
+  // Calculate & Update Daily Streak per User Account
+  const checkAndUpdateStreak = (userEmail = null) => {
     const todayStr = getTodayStr()
     const yesterdayStr = getYesterdayStr()
-    const savedLastDate = localStorage.getItem('ls-last-active-date') || lastActiveDate
+    const targetEmail = userEmail || currentUser?.email || 'default'
+    const keyStreak = `ls-streak-${targetEmail}`
+    const keyLastDate = `ls-last-active-date-${targetEmail}`
 
-    let currentStreak = streakDays
-    if (savedLastDate !== todayStr) {
+    const savedLastDate = localStorage.getItem(keyLastDate) || ''
+    const savedStreakRaw = localStorage.getItem(keyStreak)
+    let currentStreak = savedStreakRaw ? parseInt(savedStreakRaw, 10) : 1
+
+    if (!savedLastDate) {
+      // First time logging in/creating account today
+      currentStreak = 1
+      localStorage.setItem(keyStreak, '1')
+      localStorage.setItem(keyLastDate, todayStr)
+    } else if (savedLastDate !== todayStr) {
       if (savedLastDate === yesterdayStr) {
+        // Logged in on consecutive day -> Increment streak by 1
         currentStreak += 1
       } else {
+        // Missed a whole day -> Streak breaks, reset to 1
         currentStreak = 1
       }
-      setStreakDays(currentStreak)
-      setLastActiveDate(todayStr)
-      try {
-        localStorage.setItem('ls-streak', currentStreak.toString())
-        localStorage.setItem('ls-last-active-date', todayStr)
-      } catch {}
+      localStorage.setItem(keyStreak, currentStreak.toString())
+      localStorage.setItem(keyLastDate, todayStr)
     }
+
+    setStreakDays(currentStreak)
+    setLastActiveDate(todayStr)
     return currentStreak
   }
 
@@ -266,18 +277,16 @@ export function AppProvider({ children }) {
   }
 
   const login = async (chosenRole, customUserData = null) => {
-    setRole(chosenRole)
-    let loggedInUser = null
-    if (customUserData) {
-      loggedInUser = customUserData
-    } else {
-      const res = await api.login({ role: chosenRole })
-      if (res && res.success && res.user) {
-        loggedInUser = { ...res.user, initials: res.user.name ? res.user.name.split(' ').map(n=>n[0]).join('') : 'US' }
-      } else {
-        loggedInUser = DEFAULT_USERS[chosenRole]
-      }
+    if (!customUserData) {
+      throw new Error("Account does not exist. Please create an account first to log in.")
     }
+    
+    setRole(chosenRole)
+    const loggedInUser = {
+      ...customUserData,
+      initials: customUserData.initials || (customUserData.name ? customUserData.name.split(' ').map(n=>n[0]).join('').slice(0, 2).toUpperCase() : 'US')
+    }
+
     if (loggedInUser.teacherLevel || loggedInUser.level) {
       setInstitutionMode(loggedInUser.teacherLevel || loggedInUser.level)
     }
@@ -285,8 +294,8 @@ export function AppProvider({ children }) {
     setCurrentUser(loggedInUser)
     setAuthenticated(true)
 
-    // Start fresh login study session & update streak
-    checkAndUpdateStreak()
+    // Calculate user-specific daily streak
+    checkAndUpdateStreak(loggedInUser.email)
     const nowStr = formatClockTime()
     const todayStr = getTodayStr()
     const newSessId = `sess_${Date.now()}`

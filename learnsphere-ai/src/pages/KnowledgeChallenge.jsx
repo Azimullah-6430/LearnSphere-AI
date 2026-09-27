@@ -2,12 +2,11 @@ import { useState } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getDynamicSubjects, getDynamicTransferQuestions, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
+import SyllabusModal from '../components/SyllabusModal.jsx'
 import {
   ChevronRight, CheckCircle2, XCircle, Lightbulb, Target, Brain, Star,
-  RotateCcw, BookOpen, Zap, Layers
+  RotateCcw, BookOpen, Zap, Layers, UploadCloud
 } from 'lucide-react'
-
-const DEFAULT_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics', 'Biology']
 
 function ScoreRing({ score, size = 80 }) {
   const r = (size - 8) / 2
@@ -28,11 +27,13 @@ function ScoreRing({ score, size = 80 }) {
 export default function KnowledgeChallenge() {
   const { user, profile, syllabusData, recordActivity } = useApp()
   const activeProfile = { ...user, ...profile }
-  const dynamicSubs = getDynamicSubjects(activeProfile, syllabusData)
-  const subjects = dynamicSubs.length ? dynamicSubs : DEFAULT_SUBJECTS
+
+  const subjects = getDynamicSubjects(activeProfile, syllabusData)
+  const hasExtractedSubjects = subjects.length > 0
+  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
   const [phase, setPhase] = useState('intro') // 'intro' | 'question' | 'feedback' | 'done'
-  const [activeSubject, setActiveSubject] = useState(subjects[0] || 'Physics')
+  const [activeSubject, setActiveSubject] = useState(subjects[0] || '')
   const [activeDifficulty, setActiveDifficulty] = useState('All')
   const [activeModule, setActiveModule] = useState('All')
   const [rounds, setRounds] = useState([])
@@ -96,7 +97,28 @@ export default function KnowledgeChallenge() {
         subtitle="Can your knowledge survive an unfamiliar real-world problem? 20 Questions per Module."
       />
 
-      {/* Subject Tabs */}
+      {!hasExtractedSubjects ? (
+        <div className="p-8 max-w-[600px] mx-auto text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mx-auto text-2xl">
+            <BookOpen size={32} />
+          </div>
+          <h2 className="text-xl font-extrabold text-[var(--text)]">Syllabus & Curriculum Required</h2>
+          <p className="text-sm text-[var(--text-soft)]">
+            Knowledge Challenges require your course syllabus to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and generate real-world transfer questions. Upload your syllabus document to unlock Knowledge Challenges!
+          </p>
+          <div className="pt-2">
+            <button
+              onClick={() => setIsSyllabusModalOpen(true)}
+              className="px-5 py-2.5 bg-[var(--accent)] text-white text-xs font-bold rounded-xl hover:bg-[var(--accent-dim)] inline-flex items-center gap-2 shadow-md"
+            >
+              <UploadCloud size={16} /> Upload Syllabus Document
+            </button>
+          </div>
+          <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
+        </div>
+      ) : (
+        <>
+          {/* Subject Tabs */}
       {phase !== 'done' && (
         <div className="flex gap-1.5 flex-wrap mb-4">
           {subjects.map((sub) => (
@@ -346,6 +368,9 @@ export default function KnowledgeChallenge() {
           </Card>
         )}
       </div>
+      </>
+      )}
+      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>
   )
 }

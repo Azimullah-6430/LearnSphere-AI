@@ -5,7 +5,8 @@ import { studyTechniques } from '../data/mockData.js'
 import { getDynamicSubjects, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
-import { ChevronRight, ChevronDown, ArrowLeft, Send, BookOpen, Target, Sparkles, Zap, Flame, Award, Loader2 } from 'lucide-react'
+import SyllabusModal from '../components/SyllabusModal.jsx'
+import { ChevronRight, ChevronDown, ArrowLeft, Send, BookOpen, Target, Sparkles, Zap, Flame, Award, Loader2, UploadCloud } from 'lucide-react'
 
 // Custom Study Methods for Exam High-Score & Deep Understanding
 const STUDY_METHODS = [
@@ -83,10 +84,14 @@ export default function Trainer() {
   const location = useLocation()
   const activeProfile = { ...user, ...profile }
 
-  const subjects = getDynamicSubjects(activeProfile, syllabusData)
-  const [selectedSubject, setSelectedSubject] = useState(subjects[0] || 'Physics')
+  const rawSubjects = getDynamicSubjects(activeProfile, syllabusData)
+  const hasExtractedSyllabus = rawSubjects.length > 0
+  const subjects = hasExtractedSyllabus ? rawSubjects : ['General Academic Guidance']
+  
+  const [selectedSubject, setSelectedSubject] = useState(subjects[0])
   const [expandedChapter, setExpandedChapter] = useState(null)
   const [selectedConcept, setSelectedConcept] = useState(null)
+  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
   
   const [selectedMethod, setSelectedMethod] = useState(STUDY_METHODS[0])
   const [selectedTechnique, setSelectedTechnique] = useState(studyTechniques[0])
@@ -257,8 +262,24 @@ export default function Trainer() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {phase === 'setup' && (
             <div className="flex-1 flex items-center justify-center p-8">
-              <div className="text-center max-w-[360px]">
-                <div className="text-4xl mb-4">📖</div>
+              <div className="text-center max-w-[420px]">
+                {!hasExtractedSyllabus && (
+                  <div className="mb-6 p-4 bg-[var(--accent-soft)] border border-[var(--accent)]/30 rounded-2xl text-left">
+                    <div className="flex items-center gap-2 text-sm font-bold text-[var(--accent)] mb-1">
+                      <BookOpen size={16} /> Upload Your Syllabus & Curriculum
+                    </div>
+                    <p className="text-xs text-[var(--text-soft)] mb-3">
+                      Upload your course syllabus PDF/image or paste topics to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and unlock custom Personal Trainer modules!
+                    </p>
+                    <button
+                      onClick={() => setIsSyllabusModalOpen(true)}
+                      className="px-3.5 py-1.5 bg-[var(--accent)] text-white text-xs font-bold rounded-lg hover:bg-[var(--accent-dim)] flex items-center gap-1.5"
+                    >
+                      <UploadCloud size={14} /> Upload Syllabus Document
+                    </button>
+                  </div>
+                )}
+                <div className="text-4xl mb-3">📖</div>
                 <div className="text-[16px] font-extrabold mb-2">Select a topic from your syllabus</div>
                 <div className="text-sm text-[var(--text-soft)] mb-5">
                   Choose a classified subject and chapter on the left, then select your exam study strategy to begin.
@@ -380,6 +401,7 @@ export default function Trainer() {
           )}
         </div>
       </div>
+      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>
   )
 }

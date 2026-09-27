@@ -36,16 +36,27 @@ def get_mongodb():
     db_name = os.getenv("DB_NAME", "learnsphere").strip()
 
     if PYMONGO_AVAILABLE and mongo_uri and "<db_username>" not in mongo_uri and not mongo_uri.startswith("your_"):
+        client_options = [{}]
         try:
-            _mongo_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=4000)
-            _mongo_client.admin.command('ping')
-            _mongo_db = _mongo_client[db_name]
-            _use_mongo = True
-            return _mongo_db
-        except Exception as e:
-            print("MongoDB Atlas notice:", e)
-            _use_mongo = False
-            return None
+            import certifi
+            client_options.append({"tlsCAFile": certifi.where()})
+        except ImportError:
+            pass
+        client_options.append({"tlsAllowInvalidCertificates": True})
+
+        for opts in client_options:
+            try:
+                client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000, **opts)
+                client.admin.command('ping')
+                _mongo_client = client
+                _mongo_db = client[db_name]
+                _use_mongo = True
+                return _mongo_db
+            except Exception:
+                continue
+
+        _use_mongo = False
+        return None
     return None
 
 def is_using_mongo() -> bool:

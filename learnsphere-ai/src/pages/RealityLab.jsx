@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getDynamicSubjects, getDynamicScenarios, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
-import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers } from 'lucide-react'
+import SyllabusModal from '../components/SyllabusModal.jsx'
+import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers, UploadCloud } from 'lucide-react'
 
 const difficultyTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
-const DEFAULT_SUBJECTS = ['Physics', 'Chemistry', 'Mathematics', 'Biology']
 
 function analyseAnswer(answer, concepts) {
   const lower = answer.toLowerCase()
@@ -37,10 +37,11 @@ export default function RealityLab() {
   const activeProfile = { ...user, ...profile }
   const isCollege = activeProfile?.level === 'college'
 
-  const dynamicSubs = getDynamicSubjects(activeProfile, syllabusData)
-  const subjects = dynamicSubs.length ? dynamicSubs : DEFAULT_SUBJECTS
+  const subjects = getDynamicSubjects(activeProfile, syllabusData)
+  const hasExtractedSubjects = subjects.length > 0
+  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
-  const [activeSubject, setActiveSubject] = useState(subjects[0] || 'Physics')
+  const [activeSubject, setActiveSubject] = useState(subjects[0] || '')
   const [activeDifficulty, setActiveDifficulty] = useState('All')
   const [activeModule, setActiveModule] = useState('All')
   const [scenarioIdx, setScenarioIdx] = useState(0)
@@ -103,6 +104,27 @@ export default function RealityLab() {
     resetState()
   }
 
+  if (!hasExtractedSubjects) return (
+    <div className="p-8 max-w-[600px] mx-auto text-center space-y-4">
+      <div className="w-16 h-16 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mx-auto text-2xl">
+        <BookOpen size={32} />
+      </div>
+      <h2 className="text-xl font-extrabold text-[var(--text)]">Syllabus & Curriculum Required</h2>
+      <p className="text-sm text-[var(--text-soft)]">
+        Reality Labs require your course syllabus to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and generate real-world problem scenarios tailored to your curriculum.
+      </p>
+      <div className="pt-2">
+        <button
+          onClick={() => setIsSyllabusModalOpen(true)}
+          className="px-5 py-2.5 bg-[var(--accent)] text-white text-xs font-bold rounded-xl hover:bg-[var(--accent-dim)] inline-flex items-center gap-2 shadow-md"
+        >
+          <UploadCloud size={16} /> Upload Syllabus Document
+        </button>
+      </div>
+      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
+    </div>
+  )
+
   if (!scenario) return (
     <div className="p-8">
       <div className="flex gap-1.5 flex-wrap mb-5">
@@ -111,6 +133,7 @@ export default function RealityLab() {
         ))}
       </div>
       <div className="p-6 border border-[var(--border)] rounded-xl text-center text-[var(--text-soft)]">No scenarios found for this filter. <button onClick={() => { setActiveDifficulty('All'); setActiveModule('All'); }} className="text-[var(--accent)] underline font-bold ml-1">Reset Filters</button></div>
+      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </div>
   )
 
@@ -308,6 +331,7 @@ export default function RealityLab() {
           </>
         )}
       </div>
+      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>
   )
 }

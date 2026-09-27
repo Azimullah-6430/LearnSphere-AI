@@ -94,7 +94,7 @@ export default function Evaluate() {
 
   // Details
   const [studentName, setStudentName] = useState(user?.name || 'Student')
-  const [subject, setSubject] = useState(user?.subjects?.[0] || 'Physics')
+  const [subject, setSubject] = useState(user?.subjects?.[0] || (user?.level === 'college' ? 'Software Engineering' : 'Science'))
   const [rollNumber, setRollNumber] = useState(user?.roll_number || '12A-01')
   const [assessmentTitle, setAssessmentTitle] = useState('Unit Assessment')
   
@@ -200,8 +200,27 @@ export default function Evaluate() {
 
   const handleQpUpload = (e) => {
     if (e.target.files[0]) {
-      setQpRawFile(e.target.files[0])
-      setQpFile(e.target.files[0].name)
+      const file = e.target.files[0]
+      setQpRawFile(file)
+      setQpFile(file.name)
+
+      // Auto-detect subject from filename if present
+      const fname = file.name.toLowerCase()
+      if (fname.includes('software') || fname.includes('se_') || fname.includes('cse') || fname.includes('computer') || fname.includes('coding')) {
+        setSubject('Software Engineering')
+      } else if (fname.includes('math') || fname.includes('calc') || fname.includes('algebra')) {
+        setSubject('Mathematics')
+      } else if (fname.includes('chem')) {
+        setSubject('Chemistry')
+      } else if (fname.includes('phy')) {
+        setSubject('Physics')
+      } else if (fname.includes('tamil')) {
+        setSubject('Tamil')
+      } else if (fname.includes('hindi')) {
+        setSubject('Hindi')
+      } else if (fname.includes('eng')) {
+        setSubject('English')
+      }
     }
   }
 
@@ -282,7 +301,7 @@ export default function Evaluate() {
     } catch (err) {
       clearInterval(timerRef.current)
       setProcessing(false)
-      setErrorMsg('Network error connecting to evaluation server.')
+      setErrorMsg(err?.message || 'Network error connecting to evaluation server.')
     }
   }
 

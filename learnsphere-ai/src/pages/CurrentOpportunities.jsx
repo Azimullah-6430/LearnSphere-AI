@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 
 export default function CurrentOpportunities() {
+  const { user, profile, recordActivity } = useApp()
   const activeProfile = { ...user, ...profile }
   // HARD SEPARATION: If role is school_student or level is school, isCollege MUST be false
   const isSchool = activeProfile?.role === 'school_student' || activeProfile?.level === 'school'

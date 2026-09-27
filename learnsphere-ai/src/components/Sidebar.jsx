@@ -33,16 +33,16 @@ function NavLabel({ children }) {
   return <div className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] px-3 pt-[14px] pb-1.5">{children}</div>
 }
 
-function Item({ to, icon: Icon, children }) {
+function Item({ to, icon: Icon, children, onClick }) {
   return (
-    <NavLink to={to} className={navItemClass}>
+    <NavLink to={to} className={navItemClass} onClick={onClick}>
       <Icon size={17} strokeWidth={1.7} className="shrink-0 opacity-90" />
       {children}
     </NavLink>
   )
 }
 
-export default function Sidebar({ open, onOpenSyllabusModal }) {
+export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
   const { role, user } = useApp()
 
   return (
@@ -63,7 +63,7 @@ export default function Sidebar({ open, onOpenSyllabusModal }) {
         </div>
       </div>
 
-      <nav className="px-3 py-[14px] flex-1">
+      <nav className="px-3 py-[14px] flex-1" onClick={() => onClose && onClose()}>
         <NavLabel>Overview</NavLabel>
         <Item to="/app/dashboard" icon={LayoutDashboard}>
           Dashboard

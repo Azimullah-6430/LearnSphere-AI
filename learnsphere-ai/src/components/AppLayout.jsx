@@ -88,8 +88,8 @@ export default function AppLayout() {
 
   return (
     <div className="flex min-h-screen">
-      {menuOpen && <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setMenuOpen(false)} />}
-      <Sidebar open={menuOpen} onOpenSyllabusModal={() => setSyllabusModalOpen(true)} />
+      {menuOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden backdrop-blur-sm" onClick={() => setMenuOpen(false)} />}
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} onOpenSyllabusModal={() => setSyllabusModalOpen(true)} />
       <div className="flex-1 min-w-0 flex flex-col md:ml-[264px]">
         <Topbar
           title={title}
@@ -98,7 +98,7 @@ export default function AppLayout() {
           onOpenSyllabusModal={() => setSyllabusModalOpen(true)}
           onOpenClassModal={() => setClassModalOpen(true)}
         />
-        <main className="px-[18px] md:px-[34px] pt-[30px] pb-[60px] max-w-content">
+        <main className="px-3.5 sm:px-6 md:px-[34px] pt-5 sm:pt-[30px] pb-12 sm:pb-[60px] w-full max-w-content mx-auto">
           <Outlet />
         </main>
       </div>
