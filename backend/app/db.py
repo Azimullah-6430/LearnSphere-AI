@@ -37,23 +37,31 @@ def get_mongodb():
     """Returns MongoDB database instance or None if not configured/available."""
     global _mongo_client, _mongo_db, _use_mongo
     if _mongo_db is not None:
-        return _mongo_db
+        try:
+            _mongo_client.admin.command('ping')
+            return _mongo_db
+        except Exception:
+            _mongo_db = None
+            _mongo_client = None
 
     mongo_uri = os.getenv("MONGODB_URI", "").strip()
     db_name = os.getenv("DB_NAME", "learnsphere").strip()
 
     if PYMONGO_AVAILABLE and mongo_uri and "<db_username>" not in mongo_uri and not mongo_uri.startswith("your_"):
-        client_options = [{}]
+        client_options = [
+            {"serverSelectionTimeoutMS": 4000},
+            {"serverSelectionTimeoutMS": 4000, "tlsAllowInvalidCertificates": True},
+            {"serverSelectionTimeoutMS": 4000, "tlsInsecure": True}
+        ]
         try:
             import certifi
-            client_options.append({"tlsCAFile": certifi.where()})
+            client_options.insert(1, {"serverSelectionTimeoutMS": 4000, "tlsCAFile": certifi.where()})
         except ImportError:
             pass
-        client_options.append({"tlsAllowInvalidCertificates": True})
 
         for opts in client_options:
             try:
-                client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000, **opts)
+                client = MongoClient(mongo_uri, **opts)
                 client.admin.command('ping')
                 _mongo_client = client
                 _mongo_db = client[db_name]

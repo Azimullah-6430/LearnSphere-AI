@@ -3,12 +3,16 @@
  * Connects frontend views seamlessly to the Flask backend with automatic error resilience.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '5000' ? 'http://localhost:5000' : '')
+const isLocalhost = typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
 
-async function request(endpoint, options = {}) {
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
+  (isLocalhost && window.location.port !== '5000' ? 'http://localhost:5000' : '')
+
+async function request(endpoint, options = {}, customBaseUrl = null) {
   try {
-    const url = `${API_BASE_URL}${endpoint}`
+    const baseUrl = customBaseUrl !== null ? customBaseUrl : API_BASE_URL
+    const url = `${baseUrl}${endpoint}`
     const headers = options.headers || {}
     
     let body = options.body
@@ -23,12 +27,22 @@ async function request(endpoint, options = {}) {
     try {
       data = text ? JSON.parse(text) : {}
     } catch {
-      let friendlyError = `Server returned status ${res.status}.`
-      if (res.status === 413) friendlyError = 'Uploaded files exceed server size limit. Please upload smaller files or compressed PDFs.'
-      else if (res.status === 504 || res.status === 502) friendlyError = 'Server evaluation request timed out. Please try again.'
-      else if (text && text.length > 0 && text.length < 250 && !text.includes('<html')) friendlyError = text
-      data = { success: false, error: friendlyError }
+      // Response text was not JSON
     }
+
+    if (!res.ok) {
+      if (!data.error) {
+        let friendlyError = `Server error (${res.status}).`
+        if (res.status === 413) friendlyError = 'Uploaded files exceed server size limit. Please upload smaller files or compressed PDFs.'
+        else if (res.status === 520 || res.status === 502 || res.status === 504) {
+          friendlyError = `Backend server gateway error (${res.status}). The evaluation service took too long to respond or returned an empty response.`
+        } else if (text && text.length > 0 && text.length < 250 && !text.includes('<html')) {
+          friendlyError = text
+        }
+        data = { success: false, error: friendlyError, status: res.status }
+      }
+    }
+
     return data
   } catch (err) {
     console.warn(`[LearnSphere API Notice] Endpoint ${endpoint}:`, err.message)
@@ -134,6 +148,7 @@ export const api = {
       method: 'POST',
       body: formData,
     })
+
     if (res && res.success && res.result) {
       return res
     }

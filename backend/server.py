@@ -72,7 +72,7 @@ UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
 
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "webp", "txt", "doc", "docx"}
 
 evaluation_agent = EvaluationAgent()
 plagiarism_detector = PlagiarismDetector()
@@ -1289,4 +1289,4 @@ def serve_unified_app(path):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info("Starting LearnSphere AI Unified Application on http://localhost:%d...", port)
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)

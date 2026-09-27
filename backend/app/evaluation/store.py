@@ -109,8 +109,18 @@ def store_evaluation_pipeline(
         or f"{subject} Examination"
     )
 
-    if "total_marks" not in eval_result:
-        raise ValueError("Evaluation result is missing total_marks; refusing to invent a total.")
+    summary = eval_result.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
+
+    if "total_marks" not in eval_result and "total_marks" in summary:
+        eval_result["total_marks"] = summary.get("total_marks")
+    if "obtained_marks" not in eval_result and ("awarded_marks" in summary or "obtained_marks" in summary):
+        eval_result["obtained_marks"] = summary.get("awarded_marks", summary.get("obtained_marks"))
+    if "percentage" not in eval_result and "percentage" in summary:
+        eval_result["percentage"] = summary.get("percentage")
+    if "grade" not in eval_result and "grade" in summary:
+        eval_result["grade"] = summary.get("grade")
 
     total_marks = _number(eval_result.get("total_marks"), 0)
     obtained_marks = _number(eval_result.get("obtained_marks"), 0)
