@@ -828,7 +828,7 @@ be between 0 and that maximum. Never create a new maximum.
             for attempt in range(self.max_retries):
                 try:
                     response = requests.post(
-                        url, headers=headers, json=payload, timeout=self.timeout
+                        url, headers=headers, json=payload, timeout=min(self.timeout, 12)
                     )
                     if response.status_code != 200:
                         try:
