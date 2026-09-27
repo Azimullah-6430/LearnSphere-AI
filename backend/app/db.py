@@ -31,31 +31,27 @@ DB_PATH = Path(__file__).resolve().parent.parent / "learnsphere.db"
 
 _mongo_client = None
 _mongo_db = None
-_use_mongo = False
+_mongo_failed = False
 
 def get_mongodb():
     """Returns MongoDB database instance or None if not configured/available."""
-    global _mongo_client, _mongo_db, _use_mongo
+    global _mongo_client, _mongo_db, _mongo_failed
     if _mongo_db is not None:
-        try:
-            _mongo_client.admin.command('ping')
-            return _mongo_db
-        except Exception:
-            _mongo_db = None
-            _mongo_client = None
+        return _mongo_db
+    if _mongo_failed:
+        return None
 
     mongo_uri = os.getenv("MONGODB_URI", "").strip()
     db_name = os.getenv("DB_NAME", "learnsphere").strip()
 
     if PYMONGO_AVAILABLE and mongo_uri and "<db_username>" not in mongo_uri and not mongo_uri.startswith("your_"):
         client_options = [
-            {"serverSelectionTimeoutMS": 4000},
-            {"serverSelectionTimeoutMS": 4000, "tlsAllowInvalidCertificates": True},
-            {"serverSelectionTimeoutMS": 4000, "tlsInsecure": True}
+            {"serverSelectionTimeoutMS": 1500, "connectTimeoutMS": 1500},
+            {"serverSelectionTimeoutMS": 1500, "connectTimeoutMS": 1500, "tlsAllowInvalidCertificates": True}
         ]
         try:
             import certifi
-            client_options.insert(1, {"serverSelectionTimeoutMS": 4000, "tlsCAFile": certifi.where()})
+            client_options.insert(0, {"serverSelectionTimeoutMS": 1500, "connectTimeoutMS": 1500, "tlsCAFile": certifi.where()})
         except ImportError:
             pass
 
@@ -65,13 +61,11 @@ def get_mongodb():
                 client.admin.command('ping')
                 _mongo_client = client
                 _mongo_db = client[db_name]
-                _use_mongo = True
                 return _mongo_db
             except Exception:
                 continue
 
-        _use_mongo = False
-        return None
+    _mongo_failed = True
     return None
 
 def is_using_mongo() -> bool:
