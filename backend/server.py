@@ -795,12 +795,27 @@ def get_evaluation_detail(eval_id: str):
     mongo_db = get_mongodb()
     if mongo_db is not None:
         from bson import ObjectId
-        try: doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
-        except: doc = mongo_db["evaluations"].find_one({"id": eval_id})
+        doc = None
+        try:
+            doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+        except Exception:
+            pass
+        if not doc:
+            doc = mongo_db["evaluations"].find_one({"id": str(eval_id)})
+        if not doc:
+            try:
+                doc = mongo_db["evaluations"].find_one({"_id": str(eval_id)})
+            except Exception:
+                pass
         
         if not doc:
             return jsonify({"success": False, "error": "Evaluation not found."}), 404
-        return jsonify({"success": True, "evaluation": mongo_serialize(doc)}), 200
+
+        serialized = mongo_serialize(doc)
+        qs = serialized.get("questions") or serialized.get("evaluations") or []
+        serialized["questions"] = qs
+        serialized["evaluations"] = qs
+        return jsonify({"success": True, "evaluation": serialized}), 200
     else:
         conn = get_sqlite_db()
         cursor = conn.cursor()
@@ -810,7 +825,43 @@ def get_evaluation_detail(eval_id: str):
             conn.close()
             return jsonify({"success": False, "error": "Evaluation not found."}), 404
         ev = dict(eval_row)
+        
+        cursor.execute("SELECT * FROM evaluation_questions WHERE evaluation_id = ?", (eval_id,))
+        q_rows = cursor.fetchall()
+        questions = []
+        for qr in q_rows:
+            qd = dict(qr)
+            wb_raw = qd.get("what_was_done_well") or ""
+            mp_raw = qd.get("missing_points") or ""
+            
+            def parse_list_str(s):
+                if not s:
+                    return []
+                try:
+                    res = json.loads(s)
+                    if isinstance(res, list):
+                        return res
+                    return [str(res)]
+                except Exception:
+                    return [s]
+
+            questions.append({
+                "question_number": qd.get("question_number", "Q1"),
+                "question_type": qd.get("question_type", "short_answer"),
+                "maximum_marks": float(qd.get("maximum_marks", 5)),
+                "awarded_marks": float(qd.get("awarded_marks", 0)),
+                "answer_present": bool(qd.get("answer_present", 1)),
+                "answer_summary": qd.get("answer_summary", ""),
+                "feedback": {
+                    "what_was_done_well": parse_list_str(wb_raw),
+                    "missing_points": parse_list_str(mp_raw),
+                    "expected_answer": qd.get("expected_answer", ""),
+                    "improvement": qd.get("improvement_advice", "")
+                }
+            })
         conn.close()
+        ev["questions"] = questions
+        ev["evaluations"] = questions
         return jsonify({"success": True, "evaluation": ev}), 200
 
 

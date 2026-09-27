@@ -252,6 +252,7 @@ def _store_mongodb(
         "answer_script_path": ans_path,
         "rubrics_path": rubric_path,
         "questions": evaluations,
+        "evaluations": evaluations,
         "plagiarism": plagiarism_result,
         "created_at": now,
     }
