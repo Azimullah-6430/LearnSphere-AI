@@ -67,8 +67,12 @@ app = Flask(
 )
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-UPLOAD_FOLDER = BASE_DIR / "uploads"
-UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+try:
+    UPLOAD_FOLDER = BASE_DIR / "uploads"
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+except Exception:
+    UPLOAD_FOLDER = Path("/tmp/uploads")
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
