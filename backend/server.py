@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 import requests  # type: ignore
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_from_directory, send_file
+from flask import Flask, jsonify, render_template, request, send_from_directory, send_file, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -83,6 +83,7 @@ except Exception:
 
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
+app.secret_key = os.getenv("SECRET_KEY", "learnsphere-ai-secret-key-production-2026")
 
 ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "webp", "txt", "doc", "docx"}
 
