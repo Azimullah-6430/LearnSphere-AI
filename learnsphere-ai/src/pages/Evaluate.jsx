@@ -93,14 +93,14 @@ export default function Evaluate() {
   const [syllabusRawFile, setSyllabusRawFile] = useState(null)
 
   // Details
-  const [studentName, setStudentName] = useState(user?.name || 'Student')
-  const [subject, setSubject] = useState(user?.subjects?.[0] || (user?.level === 'college' ? 'Software Engineering' : 'Science'))
-  const [rollNumber, setRollNumber] = useState(user?.roll_number || '12A-01')
-  const [assessmentTitle, setAssessmentTitle] = useState('Unit Assessment')
+  const [studentName, setStudentName] = useState(user?.name || '')
+  const [subject, setSubject] = useState(user?.subjects?.[0] || '')
+  const [rollNumber, setRollNumber] = useState(user?.roll_number || '')
+  const [assessmentTitle, setAssessmentTitle] = useState('')
   
-  const [level, setLevel] = useState(user?.level || 'school')
-  const [board, setBoard] = useState(user?.board || 'CBSE')
-  const [stream, setStream] = useState(user?.stream || 'Science')
+  const [level, setLevel] = useState(user?.level || '')
+  const [board, setBoard] = useState(user?.board || '')
+  const [stream, setStream] = useState(user?.stream || '')
   const [semester, setSemester] = useState(user?.semester || '')
 
   // Evaluation response

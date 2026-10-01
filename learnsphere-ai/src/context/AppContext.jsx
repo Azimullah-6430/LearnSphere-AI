@@ -3,11 +3,6 @@ import { api } from '../services/api.js'
 
 const AppContext = createContext(null)
 
-const DEFAULT_USERS = {
-  teacher: { name: 'Dr. Meera Nair', role: 'Teacher', initials: 'MN', email: 'dr.nair@learnsphere.edu', level: 'school' },
-  student: { name: 'Aditi Rao', role: 'Student', initials: 'AR', email: 'aditi.rao@learnsphere.edu', level: 'school' },
-}
-
 const DEFAULT_TEACHER_CLASSES = []
 
 function formatDuration(totalSeconds) {

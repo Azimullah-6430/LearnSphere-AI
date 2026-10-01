@@ -180,9 +180,46 @@ def auth_login():
         # Sanitize sensitive fields from response
         user.pop("password", None)
         user.pop("password_hash", None)
+        session["user_id"] = user.get("id") or user.get("_id")
+        session["role"] = user.get("role")
         return jsonify({"success": True, "user": user}), 200
 
     return jsonify({"success": False, "error": "Account does not exist. Please create an account first to log in."}), 401
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    user_id = session.get("user_id") or request.headers.get("X-User-ID")
+    if not user_id:
+        return jsonify({"success": False, "authenticated": False, "error": "Not authenticated"}), 401
+    
+    mongo_db = get_mongodb()
+    user = None
+    if mongo_db is not None:
+        user = mongo_db["users"].find_one({"id": user_id}) or mongo_db["users"].find_one({"_id": user_id})
+        if user:
+            user = mongo_serialize(user)
+    else:
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            user = dict(row)
+
+    if not user:
+        return jsonify({"success": False, "authenticated": False, "error": "User not found"}), 404
+
+    user.pop("password", None)
+    user.pop("password_hash", None)
+    return jsonify({"success": True, "authenticated": True, "user": user})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.clear()
+    return jsonify({"success": True, "message": "Logged out successfully."})
 
 
 @app.route("/api/auth/register", methods=["POST"])
