@@ -1,6 +1,6 @@
 /**
- * LearnSphere AI - API Service Client
- * Connects frontend views seamlessly to the Flask backend with automatic error resilience.
+ * LearnSphere AI - Production API Service Client
+ * Connects React Frontend to Flask/Render Backend.
  */
 
 const isLocalhost = typeof window !== 'undefined' && 
@@ -35,7 +35,7 @@ async function request(endpoint, options = {}, customBaseUrl = null) {
         let friendlyError = `Server error (${res.status}).`
         if (res.status === 413) friendlyError = 'Uploaded files exceed server size limit. Please upload smaller files or compressed PDFs.'
         else if (res.status === 520 || res.status === 502 || res.status === 504) {
-          friendlyError = `Backend server gateway error (${res.status}). The evaluation service took too long to respond or returned an empty response.`
+          friendlyError = `Backend server gateway error (${res.status}). The evaluation service took too long to respond.`
         } else if (text && text.length > 0 && text.length < 250 && !text.includes('<html')) {
           friendlyError = text
         }
@@ -50,96 +50,20 @@ async function request(endpoint, options = {}, customBaseUrl = null) {
   }
 }
 
-function generateLocalEvaluationFallback(formData) {
-  throw new Error('Evaluation server is unreachable. Please verify backend service.')
-}
-
 export const api = {
   // Auth & Permanent User Profile
   login: async (credentials) => {
-    const res = await request('/api/auth/login', {
+    return request('/api/auth/login', {
       method: 'POST',
       body: credentials,
     })
-    
-    if (res && res.success && res.user) {
-      return res
-    }
-
-    // Offline / Local Storage fallback authentication against created accounts
-    try {
-      const savedUsers = JSON.parse(localStorage.getItem('learnsphere_registered_users') || '[]')
-      const targetEmail = (credentials.email || '').trim().toLowerCase()
-      const targetPassword = credentials.password || ''
-      
-      const foundUser = savedUsers.find(
-        (u) => u.email.trim().toLowerCase() === targetEmail
-      )
-
-      if (!foundUser) {
-        return {
-          success: false,
-          error: 'Account does not exist. Please create an account first to log in.'
-        }
-      }
-
-      if (foundUser.password !== targetPassword) {
-        return {
-          success: false,
-          error: 'Incorrect password. Please verify your password.'
-        }
-      }
-
-      return {
-        success: true,
-        user: foundUser
-      }
-    } catch {}
-
-    return {
-      success: false,
-      error: res.error || 'Account does not exist. Please create an account first to log in.'
-    }
   },
 
   register: async (formDataOrObj) => {
-    const res = await request('/api/auth/register', {
+    return request('/api/auth/register', {
       method: 'POST',
       body: formDataOrObj,
     })
-
-    let registeredUser = null
-    if (res && res.success && res.user) {
-      registeredUser = res.user
-    } else {
-      const name = formDataOrObj.name || formDataOrObj.email?.split('@')[0] || 'User'
-      const role = formDataOrObj.role || 'teacher'
-      const initials = name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
-      registeredUser = {
-        id: `usr_${Date.now()}`,
-        name,
-        email: (formDataOrObj.email || '').trim().toLowerCase(),
-        password: formDataOrObj.password,
-        role,
-        teacherLevel: formDataOrObj.teacherLevel || formDataOrObj.level || 'school',
-        initials,
-        ...formDataOrObj
-      }
-    }
-
-    // Persist registered user locally as well
-    try {
-      const savedUsers = JSON.parse(localStorage.getItem('learnsphere_registered_users') || '[]')
-      const existingIdx = savedUsers.findIndex((u) => u.email.toLowerCase() === registeredUser.email.toLowerCase())
-      if (existingIdx >= 0) {
-        savedUsers[existingIdx] = registeredUser
-      } else {
-        savedUsers.push(registeredUser)
-      }
-      localStorage.setItem('learnsphere_registered_users', JSON.stringify(savedUsers))
-    } catch {}
-
-    return { success: true, user: registeredUser }
   },
 
   // Evaluation Pipeline
@@ -159,30 +83,8 @@ export const api = {
   },
 
   getEvaluations: async (params = {}) => {
-    let remoteEvals = []
-    try {
-      const query = new URLSearchParams(params).toString()
-      const res = await request(`/api/evaluations${query ? '?' + query : ''}`)
-      if (res && res.success && Array.isArray(res.evaluations)) {
-        remoteEvals = res.evaluations
-      }
-    } catch (err) {
-      console.warn('[LearnSphere API] Remote evaluations query offline, loading stored local evaluations.')
-    }
-
-    let localEvals = []
-    try {
-      localEvals = JSON.parse(localStorage.getItem('learnsphere_local_evaluations') || '[]')
-    } catch {}
-
-    const combined = [...remoteEvals]
-    for (const loc of localEvals) {
-      if (!combined.some(r => (r.id && r.id === loc.id) || (r._id && r._id === loc.id))) {
-        combined.push(loc)
-      }
-    }
-
-    return { success: true, evaluations: combined }
+    const query = new URLSearchParams(params).toString()
+    return request(`/api/evaluations${query ? '?' + query : ''}`)
   },
 
   getEvaluationDetail: async (id) => {
@@ -259,14 +161,44 @@ export const api = {
   },
 
   // Knowledge Challenge
-  getChallengeQuiz: async (subject = 'Physics') => {
-    return request(`/api/challenge/quiz?subject=${encodeURIComponent(subject)}`)
+  getChallengeQuiz: async (subject = 'Physics', module = 'All', difficulty = 'Medium') => {
+    return request(`/api/challenge/quiz?subject=${encodeURIComponent(subject)}&module=${encodeURIComponent(module)}&difficulty=${encodeURIComponent(difficulty)}`)
   },
 
   submitChallenge: async (payload) => {
     return request('/api/challenge/submit', {
       method: 'POST',
       body: payload,
+    })
+  },
+
+  // Self Evaluation API
+  generateSelfEval: async (subject, topic, difficulty, syllabusContext) => {
+    return request('/api/self-evaluation/generate', {
+      method: 'POST',
+      body: { subject, topic, difficulty, syllabus_context: syllabusContext }
+    })
+  },
+
+  evaluateSelfEval: async (questionText, expectedConcept, studentResponse, subject) => {
+    return request('/api/self-evaluation/evaluate', {
+      method: 'POST',
+      body: { question_text: questionText, expected_concept: expectedConcept, student_response: studentResponse, subject }
+    })
+  },
+
+  // Reality Lab API
+  generateRealityLab: async (subject, module, difficulty, syllabusContext) => {
+    return request('/api/reality-lab/generate', {
+      method: 'POST',
+      body: { subject, module, difficulty, syllabus_context: syllabusContext }
+    })
+  },
+
+  evaluateRealityLab: async (title, task, studentResponse, subject) => {
+    return request('/api/reality-lab/evaluate', {
+      method: 'POST',
+      body: { title, task, student_response: studentResponse, subject }
     })
   },
 

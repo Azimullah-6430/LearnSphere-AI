@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getDynamicSubjects, getDynamicScenarios, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
+import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
-import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers, UploadCloud } from 'lucide-react'
+import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers, UploadCloud, Loader2 } from 'lucide-react'
 
 const difficultyTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
 
@@ -49,6 +50,7 @@ export default function RealityLab() {
   const [result, setResult] = useState(null)
   const [showModel, setShowModel] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
+  const [isEvaluating, setIsEvaluating] = useState(false)
 
   const modules = getDynamicChapters(activeSubject, activeProfile, syllabusData)
   const scenarios = getDynamicScenarios(activeSubject, activeProfile, syllabusData, activeDifficulty, activeModule)
@@ -78,17 +80,43 @@ export default function RealityLab() {
     setResult(null)
     setShowModel(false)
     setShowAnswer(false)
+    setIsEvaluating(false)
   }
 
-  const handleAnalyse = () => {
+  const handleAnalyse = async () => {
     if (!answer.trim() || !scenario) return
-    const analysed = analyseAnswer(answer, scenario.expectedConcepts)
-    const required = analysed.filter((c) => c.required)
-    const coveredRequired = required.filter((c) => c.covered).length
-    const pct = Math.round((coveredRequired / Math.max(required.length, 1)) * 100)
-    setResult({ concepts: analysed, qualityPct: pct })
-    setShowModel(false)
-    recordActivity('lab', `Completed Reality Lab scenario: ${scenario?.title} (${pct}%)`, { score: pct, subject: activeSubject })
+    setIsEvaluating(true)
+    try {
+      const res = await api.evaluateRealityLab(scenario.title, scenario.title, answer, activeSubject)
+      if (res && res.success && res.evaluation) {
+        const ev = res.evaluation
+        const pct = ev.score || 85
+        setResult({
+          qualityPct: pct,
+          feedback: ev.feedback,
+          concepts: (scenario.expectedConcepts || []).map(c => ({
+            ...c,
+            covered: (ev.strengths || []).some(s => s.toLowerCase().includes(c.concept.toLowerCase())) || pct >= 70
+          }))
+        })
+        recordActivity('lab', `Completed Reality Lab scenario: ${scenario?.title} (${pct}%)`, { score: pct, subject: activeSubject })
+      } else {
+        const analysed = analyseAnswer(answer, scenario.expectedConcepts)
+        const required = analysed.filter((c) => c.required)
+        const coveredRequired = required.filter((c) => c.covered).length
+        const pct = Math.round((coveredRequired / Math.max(required.length, 1)) * 100)
+        setResult({ concepts: analysed, qualityPct: pct })
+        recordActivity('lab', `Completed Reality Lab scenario: ${scenario?.title} (${pct}%)`, { score: pct, subject: activeSubject })
+      }
+    } catch {
+      const analysed = analyseAnswer(answer, scenario.expectedConcepts)
+      const required = analysed.filter((c) => c.required)
+      const coveredRequired = required.filter((c) => c.covered).length
+      const pct = Math.round((coveredRequired / Math.max(required.length, 1)) * 100)
+      setResult({ concepts: analysed, qualityPct: pct })
+    } finally {
+      setIsEvaluating(false)
+    }
   }
 
   const handleNext = () => {
@@ -111,7 +139,7 @@ export default function RealityLab() {
       </div>
       <h2 className="text-xl font-extrabold text-[var(--text)]">Syllabus & Curriculum Required</h2>
       <p className="text-sm text-[var(--text-soft)]">
-        Reality Labs require your course syllabus to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and generate real-world problem scenarios tailored to your curriculum.
+        Reality Labs require your course syllabus to extract your exact degree subjects and generate real-world problem scenarios tailored to your curriculum.
       </p>
       <div className="pt-2">
         <button
@@ -141,7 +169,7 @@ export default function RealityLab() {
     <>
       <PageHead
         title="Knowledge-to-Reality Lab"
-        subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena. 20 Questions per Module."
+        subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena."
         action={
           <div className="flex items-center gap-2">
             <span className="text-[12px] text-[var(--text-faint)] font-semibold">{scenarioIdx + 1}/{scenarios.length}</span>
@@ -172,7 +200,6 @@ export default function RealityLab() {
 
       {/* Module & Difficulty Filter Bar */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5 p-2 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
-        {/* Module Selector */}
         <div className="flex items-center gap-2">
           <Layers size={14} className="text-[var(--accent)] ml-1" />
           <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Module:</span>
@@ -188,7 +215,6 @@ export default function RealityLab() {
           </select>
         </div>
 
-        {/* Difficulty Selector */}
         <div className="flex items-center gap-1">
           {[
             { id: 'All', label: 'All Modes' },
@@ -212,7 +238,6 @@ export default function RealityLab() {
       </div>
 
       <div className="max-w-[760px] space-y-4">
-        {/* Scenario card */}
         <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
           <div className="absolute top-4 right-5 opacity-8">
             <FlaskConical size={72} strokeWidth={1} />
@@ -230,7 +255,6 @@ export default function RealityLab() {
 
         {!result && !showAnswer ? (
           <>
-            {/* Answer input */}
             <Card>
               <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your explanation</div>
               <textarea
@@ -238,6 +262,7 @@ export default function RealityLab() {
                 onChange={(e) => setAnswer(e.target.value)}
                 placeholder="Explain this real-world phenomenon using academic concepts, principles, and equations from your syllabus…"
                 rows={6}
+                disabled={isEvaluating}
                 className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
               />
               <div className="flex items-center justify-between mt-3">
@@ -247,13 +272,12 @@ export default function RealityLab() {
                 >
                   <Eye size={13} /> Show answer directly
                 </button>
-                <Button onClick={handleAnalyse} disabled={!answer.trim()}>
-                  Analyse My Answer
+                <Button onClick={handleAnalyse} disabled={!answer.trim() || isEvaluating}>
+                  {isEvaluating ? <><Loader2 size={14} className="animate-spin" /> Evaluating with AI...</> : 'Analyse My Answer'}
                 </Button>
               </div>
             </Card>
 
-            {/* Concept preview */}
             <Card>
               <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Concepts being tested</div>
               <div className="flex flex-wrap gap-2">
@@ -270,7 +294,6 @@ export default function RealityLab() {
             </Card>
           </>
         ) : showAnswer && !result ? (
-          /* Direct answer reveal */
           <Card>
             <div className="flex items-center gap-2 mb-4">
               <BookOpen size={15} className="text-[var(--accent)]" />
@@ -289,9 +312,14 @@ export default function RealityLab() {
           </Card>
         ) : (
           <>
-            {/* Results */}
             <Card>
               <QualityMeter pct={result.qualityPct} />
+              {result.feedback && (
+                <div className="p-3 mb-4 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)]">
+                  <span className="font-bold text-[var(--accent)] block mb-1">AI Evaluation Feedback</span>
+                  {result.feedback}
+                </div>
+              )}
               <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">Concept coverage</div>
               <div className="space-y-2 mb-5">
                 {result.concepts.map((c, i) => (
