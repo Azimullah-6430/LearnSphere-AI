@@ -31,11 +31,11 @@ export default function Onboarding() {
 
   const [step, setStep] = useState(0)
   const [level, setLevel] = useState(user?.level || null) // 'school' | 'college'
-  const [board, setBoard] = useState(user?.board || 'CBSE')
-  const [classLevel, setClassLevel] = useState(user?.grade_level || 12)
-  const [stream, setStream] = useState(user?.stream || 'Science')
-  const [subjects, setSubjects] = useState(user?.subjects || ['Physics', 'Chemistry', 'Mathematics', 'Biology'])
-  const [semester, setSemester] = useState(user?.semester || 3)
+  const [board, setBoard] = useState(user?.board || null)
+  const [classLevel, setClassLevel] = useState(user?.grade_level || user?.classLevel || null)
+  const [stream, setStream] = useState(user?.stream || null)
+  const [subjects, setSubjects] = useState(user?.subjects || [])
+  const [semester, setSemester] = useState(user?.semester || null)
   const [syllabusFile, setSyllabusFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [analysing, setAnalysing] = useState(false)

@@ -13,16 +13,16 @@ export default function SelectClass() {
 
   // School Form State
   const [schoolClassName, setSchoolClassName] = useState('')
-  const [board, setBoard] = useState('CBSE')
-  const [gradeLevel, setGradeLevel] = useState('12')
-  const [section, setSection] = useState('A')
-  const [schoolSubjects, setSchoolSubjects] = useState('Physics, Chemistry, Mathematics, Biology')
+  const [board, setBoard] = useState(user?.board || 'CBSE')
+  const [gradeLevel, setGradeLevel] = useState(user?.grade_level || '')
+  const [section, setSection] = useState(user?.section || '')
+  const [schoolSubjects, setSchoolSubjects] = useState('')
 
   // College Form State
-  const [collegeDept, setCollegeDept] = useState('Computer Science & AI')
-  const [semester, setSemester] = useState('5')
-  const [collegeSection, setCollegeSection] = useState('CSE-5A')
-  const [collegeSubjects, setCollegeSubjects] = useState('Artificial Intelligence, Web Technologies, Theory of Computation, Compiler Design')
+  const [collegeDept, setCollegeDept] = useState(user?.department || user?.domain || '')
+  const [semester, setSemester] = useState(user?.semester || '')
+  const [collegeSection, setCollegeSection] = useState(user?.section || '')
+  const [collegeSubjects, setCollegeSubjects] = useState('')
 
   // Optional Initial Roster Paste
   const [rosterText, setRosterText] = useState('')
@@ -295,7 +295,7 @@ export default function SelectClass() {
                     required
                     value={schoolClassName}
                     onChange={(e) => setSchoolClassName(e.target.value)}
-                    placeholder="e.g. Class 12-B (Physics & Math)"
+                    placeholder="e.g. Grade 10 - Mathematics"
                     className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none focus:border-[var(--accent)]"
                   />
                 </div>
@@ -322,7 +322,7 @@ export default function SelectClass() {
                     type="text"
                     value={gradeLevel}
                     onChange={(e) => setGradeLevel(e.target.value)}
-                    placeholder="e.g. 12"
+                    placeholder="e.g. 10, 11, or 12"
                     className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none"
                   />
                 </div>
@@ -333,7 +333,7 @@ export default function SelectClass() {
                     type="text"
                     value={section}
                     onChange={(e) => setSection(e.target.value)}
-                    placeholder="e.g. B"
+                    placeholder="e.g. A, B, or C"
                     className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none"
                   />
                 </div>
@@ -345,7 +345,7 @@ export default function SelectClass() {
                   type="text"
                   value={schoolSubjects}
                   onChange={(e) => setSchoolSubjects(e.target.value)}
-                  placeholder="Physics, Chemistry, Mathematics, Computer Science"
+                  placeholder="e.g. Physics, Chemistry, Mathematics"
                   className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none"
                 />
               </div>

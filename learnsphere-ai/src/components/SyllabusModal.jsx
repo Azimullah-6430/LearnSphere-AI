@@ -28,11 +28,11 @@ export default function SyllabusModal({ isOpen, onClose }) {
       if (file) formData.append('syllabus_file', file)
       if (pastedText) formData.append('text', pastedText)
       
-      formData.append('level', activeProfile.level || 'college')
-      formData.append('semester', activeProfile.semester || '5')
-      formData.append('classLevel', activeProfile.grade_level || activeProfile.classLevel || '12')
+      formData.append('level', activeProfile.level || '')
+      formData.append('semester', activeProfile.semester || '')
+      formData.append('classLevel', activeProfile.grade_level || activeProfile.classLevel || '')
       formData.append('stream', activeProfile.stream || '')
-      formData.append('domain', activeProfile.domain || '')
+      formData.append('domain', activeProfile.domain || activeProfile.department || '')
 
       const res = await api.analyzeSyllabus(formData)
       if (res && res.success && res.analysis) {

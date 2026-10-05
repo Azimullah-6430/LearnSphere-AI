@@ -20,16 +20,16 @@ export default function ClassManagerModal({ isOpen, onClose }) {
   
   // School Form Fields
   const [schoolClassName, setSchoolClassName] = useState('')
-  const [board, setBoard] = useState('CBSE')
-  const [gradeLevel, setGradeLevel] = useState('12')
-  const [section, setSection] = useState('A')
-  const [schoolSubjects, setSchoolSubjects] = useState('Physics, Chemistry, Mathematics, Biology')
+  const [board, setBoard] = useState(user?.board || 'CBSE')
+  const [gradeLevel, setGradeLevel] = useState(user?.grade_level || '')
+  const [section, setSection] = useState(user?.section || '')
+  const [schoolSubjects, setSchoolSubjects] = useState('')
 
   // College Form Fields
-  const [collegeDept, setCollegeDept] = useState('Computer Science & AI')
-  const [semester, setSemester] = useState('5')
-  const [collegeSection, setCollegeSection] = useState('CSE-5A')
-  const [collegeSubjects, setCollegeSubjects] = useState('Artificial Intelligence, Web Technologies, Theory of Computation, Compiler Design')
+  const [collegeDept, setCollegeDept] = useState(user?.department || user?.domain || '')
+  const [semester, setSemester] = useState(user?.semester || '')
+  const [collegeSection, setCollegeSection] = useState(user?.section || '')
+  const [collegeSubjects, setCollegeSubjects] = useState('')
 
   const [activeTab, setActiveTab] = useState('list') // 'list' | 'roster' | 'create'
   const [selectedClassForRoster, setSelectedClassForRoster] = useState(null)
@@ -414,7 +414,7 @@ export default function ClassManagerModal({ isOpen, onClose }) {
                     rows={2}
                     value={pastedText}
                     onChange={(e) => setPastedText(e.target.value)}
-                    placeholder={`12A-01, Aarav R. Sharma\n12A-02, B. Vignesh\n12A-03, K. Rahul`}
+                    placeholder={`ROLL-01, Student Name\nROLL-02, Student Name\nROLL-03, Student Name`}
                     className="flex-1 p-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-mono text-[var(--text)] outline-none"
                   />
                   <button
@@ -642,7 +642,7 @@ export default function ClassManagerModal({ isOpen, onClose }) {
                       required
                       value={schoolClassName}
                       onChange={(e) => setSchoolClassName(e.target.value)}
-                      placeholder="e.g. Class 12-A (Science)"
+                      placeholder="e.g. Grade 10 - Mathematics"
                       className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none"
                     />
                   </div>

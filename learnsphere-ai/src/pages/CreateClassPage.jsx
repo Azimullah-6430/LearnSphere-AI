@@ -24,16 +24,16 @@ export default function CreateClassPage() {
 
   // School Form Fields
   const [schoolClassName, setSchoolClassName] = useState('')
-  const [board, setBoard] = useState('CBSE')
-  const [gradeLevel, setGradeLevel] = useState('12')
-  const [section, setSection] = useState('A')
-  const [schoolSubjects, setSchoolSubjects] = useState('Physics, Chemistry, Mathematics, Biology')
+  const [board, setBoard] = useState(user?.board || 'CBSE')
+  const [gradeLevel, setGradeLevel] = useState(user?.grade_level || '')
+  const [section, setSection] = useState(user?.section || '')
+  const [schoolSubjects, setSchoolSubjects] = useState('')
 
   // College Form Fields
-  const [collegeDept, setCollegeDept] = useState('')
-  const [semester, setSemester] = useState('5')
-  const [collegeSection, setCollegeSection] = useState('CSE-5A')
-  const [collegeSubjects, setCollegeSubjects] = useState('Artificial Intelligence, Web Technologies, Theory of Computation, Compiler Design')
+  const [collegeDept, setCollegeDept] = useState(user?.department || user?.domain || '')
+  const [semester, setSemester] = useState(user?.semester || '')
+  const [collegeSection, setCollegeSection] = useState(user?.section || '')
+  const [collegeSubjects, setCollegeSubjects] = useState('')
 
   // Roster Text / File State
   const [rosterText, setRosterText] = useState('')
@@ -255,7 +255,7 @@ export default function CreateClassPage() {
                       required
                       value={schoolClassName}
                       onChange={(e) => setSchoolClassName(e.target.value)}
-                      placeholder="e.g. Class 12-A (Science)"
+                      placeholder="e.g. Grade 10 - Mathematics"
                       className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-medium text-[var(--text)] outline-none focus:border-[var(--accent)]"
                     />
                   </div>
@@ -391,8 +391,8 @@ export default function CreateClassPage() {
                 onChange={(e) => setRosterText(e.target.value)}
                 placeholder={
                   isSchool
-                    ? "12A-01, Aarav R. Sharma\n12A-02, Vignesh B."
-                    : "RRN21004901, Devadiga A.\nRRN21004902, Harish C."
+                    ? "ROLL-01, Student Name\nROLL-02, Student Name"
+                    : "REG-101, Student Name\nREG-102, Student Name"
                 }
                 className="w-full p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-mono text-[var(--text)] outline-none"
               />
@@ -476,8 +476,8 @@ export default function CreateClassPage() {
 
                       <p className="text-xs text-[var(--text-soft)] font-medium mb-3">
                         {cls.level === 'school'
-                          ? `Board: ${cls.board || 'CBSE'} • Grade ${cls.gradeLevel || '12'} • Section ${cls.section || 'A'}`
-                          : `Dept: ${cls.department || 'CSE'} • Semester ${cls.semester || '5'} • Batch ${cls.section || 'A'}`}
+                          ? [cls.board ? `Board: ${cls.board}` : null, cls.gradeLevel ? `Grade ${cls.gradeLevel}` : null, cls.section ? `Section ${cls.section}` : null].filter(Boolean).join(' • ') || 'Configured Class'
+                          : [cls.department ? `Dept: ${cls.department}` : null, cls.semester ? `Semester ${cls.semester}` : null, cls.section ? `Batch ${cls.section}` : null].filter(Boolean).join(' • ') || 'Configured Department'}
                       </p>
 
                       <div className="flex flex-wrap gap-1.5 text-[11.5px]">
