@@ -197,6 +197,10 @@ class EvaluationAgent:
         result["question_paper"] = qp
         return result
 
+    def verify_and_finalize_evaluation(self, qp: Dict[str, Any], ai_eval: Dict[str, Any], eval_id: Optional[str] = None) -> Dict[str, Any]:
+        """Validate, clamp bounds, map questions, and finalize evaluation without external API calls."""
+        return self.calculate_final_result(qp, ai_eval, eval_id=eval_id)
+
     def calculate_final_result(self, qp: Dict[str, Any], ai_eval: Dict[str, Any], eval_id: Optional[str] = None) -> Dict[str, Any]:
         eval_items = ai_eval.get("evaluations", [])
         if not isinstance(eval_items, list):
