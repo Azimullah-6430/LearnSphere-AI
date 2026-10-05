@@ -164,6 +164,7 @@ def store_evaluation_pipeline(
     if mongo_db is not None:
         return _store_mongodb(
             mongo_db,
+            request_data,
             student_name,
             roll_number,
             subject,
@@ -211,6 +212,7 @@ def store_evaluation_pipeline(
 
 def _store_mongodb(
     db: Any,
+    request_data: Dict[str, Any],
     student_name: str,
     roll_number: str,
     subject: str,
@@ -232,8 +234,16 @@ def _store_mongodb(
     unreadable_reason: str,
 ) -> str:
     now = datetime.utcnow()
+    submitted_by = request_data.get("submitted_by")
+    submitter_role = request_data.get("submitter_role")
+    student_id = request_data.get("student_id") or (submitted_by if submitter_role == "student" else None)
+    teacher_id = request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
 
     eval_doc = {
+        "submitted_by": submitted_by,
+        "submitter_role": submitter_role,
+        "student_id": student_id,
+        "teacher_id": teacher_id,
         "student_name": student_name,
         "roll_number": roll_number,
         "subject": subject,
@@ -263,6 +273,8 @@ def _store_mongodb(
     if is_unreadable or assigned_to_teacher:
         db["action_items"].insert_one({
             "id": f"act_teacher_review_{eval_id}",
+            "teacher_id": teacher_id,
+            "student_id": student_id,
             "student_name": student_name,
             "roll_number": roll_number,
             "academic_status": "Assigned to Teacher",
@@ -297,6 +309,8 @@ def _store_mongodb(
         ratio = awarded / max_marks if max_marks > 0 else 0
 
         db["misconceptions"].insert_one({
+            "student_id": student_id,
+            "teacher_id": teacher_id,
             "student_name": student_name,
             "subject": subject,
             "topic": f"{subject} — Question {q_num}",
@@ -319,6 +333,7 @@ def _store_mongodb(
         })
 
     db["academic_memory"].insert_one({
+        "student_id": student_id,
         "student_name": student_name,
         "subject": subject,
         "topic": f"{subject} — {assessment_title} Review",
@@ -345,6 +360,7 @@ def _store_mongodb(
     db["notifications"].insert_many([
         {
             "target_role": "teacher",
+            "target_id": teacher_id,
             "target_name": None,
             "title": teacher_title,
             "message": teacher_message,
@@ -354,6 +370,7 @@ def _store_mongodb(
         },
         {
             "target_role": "student",
+            "target_id": student_id,
             "target_name": student_name,
             "title": student_title,
             "message": student_message,

@@ -720,27 +720,33 @@ def get_evaluations():
     user_id      = _current_user_id()
     session_role = _current_role()
     subject      = request.args.get("subject")
+    user         = _lookup_user_by_id(user_id)
+    user_email   = user.get("email", "") if user else ""
+    student_name = user.get("name", "") if user else ""
 
     mongo_db = get_mongodb()
     if mongo_db is not None:
         if session_role == "student":
-            # Students see only their own evaluations (matched by submitted_by, student_id, or name)
-            user = _lookup_user_by_id(user_id)
-            student_name = user.get("name", "") if user else ""
+            # Students see ONLY their own evaluations (by user_id, email, or student_name)
             query: dict = {
                 "$or": [
                     {"submitted_by": user_id},
                     {"student_id": user_id},
-                    {"student_name": student_name},
+                    {"submitted_by": user_email},
+                    {"student_id": user_email},
                 ]
             }
+            if student_name:
+                query["$or"].append({"student_name": student_name})
         else:
-            # Teachers see evaluations they submitted
-            query = {"submitted_by": user_id}
-            # Fallback: if no submitted_by index exists yet, return all
-            count = mongo_db["evaluations"].count_documents({"submitted_by": user_id})
-            if count == 0:
-                query = {}
+            # Teachers see evaluations they submitted or are assigned to
+            query = {
+                "$or": [
+                    {"submitted_by": user_id},
+                    {"teacher_id": user_id},
+                    {"submitted_by": user_email},
+                ]
+            }
 
         if subject:
             query["subject"] = subject
@@ -753,13 +759,11 @@ def get_evaluations():
     conn   = get_sqlite_db()
     cursor = conn.cursor()
     if session_role == "student":
-        user = _lookup_user_by_id(user_id)
-        student_name = user.get("name", "") if user else ""
         q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR student_id = ? OR student_name = ?)"
         params: list = [user_id, user_id, student_name]
     else:
-        q = "SELECT * FROM evaluations WHERE 1=1"
-        params = []
+        q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR teacher_id = ?)"
+        params = [user_id, user_id]
 
     if subject:
         q += " AND subject = ?"
@@ -776,6 +780,9 @@ def get_evaluations():
 def get_evaluation_detail(eval_id: str):
     user_id      = _current_user_id()
     session_role = _current_role()
+    user         = _lookup_user_by_id(user_id)
+    user_email   = (user or {}).get("email", "")
+    user_name    = (user or {}).get("name", "")
 
     mongo_db = get_mongodb()
     if mongo_db is not None:
@@ -792,8 +799,23 @@ def get_evaluation_detail(eval_id: str):
 
         # Ownership check
         if session_role == "student":
-            user = _lookup_user_by_id(user_id)
-            if doc.get("student_name") != (user or {}).get("name"):
+            is_owner = (
+                str(doc.get("submitted_by", "")) == user_id
+                or str(doc.get("student_id", "")) == user_id
+                or str(doc.get("submitted_by", "")) == user_email
+                or (user_name and doc.get("student_name") == user_name)
+            )
+            if not is_owner:
+                return jsonify({"success": False, "error": "Access denied."}), 403
+        else:
+            # Teacher: ensure teacher has rights to view
+            is_teacher_owner = (
+                str(doc.get("submitted_by", "")) == user_id
+                or str(doc.get("teacher_id", "")) == user_id
+                or str(doc.get("submitted_by", "")) == user_email
+                or doc.get("assigned_to_teacher")
+            )
+            if not is_teacher_owner:
                 return jsonify({"success": False, "error": "Access denied."}), 403
 
         serialized = mongo_serialize(doc)
@@ -813,8 +835,12 @@ def get_evaluation_detail(eval_id: str):
     ev = dict(row)
 
     if session_role == "student":
-        user = _lookup_user_by_id(user_id)
-        if ev.get("student_name") != (user or {}).get("name"):
+        is_owner = (
+            str(ev.get("submitted_by", "")) == user_id
+            or str(ev.get("student_id", "")) == user_id
+            or (user_name and ev.get("student_name") == user_name)
+        )
+        if not is_owner:
             conn.close()
             return jsonify({"success": False, "error": "Access denied."}), 403
 
@@ -835,13 +861,13 @@ def delete_evaluation(eval_id: str):
         if mongo_db is not None:
             if ObjectId:
                 try:
-                    mongo_db["evaluations"].delete_one({"_id": ObjectId(eval_id)})
+                    mongo_db["evaluations"].delete_one({"_id": ObjectId(eval_id), "submitted_by": user_id})
                 except Exception:
                     pass
-            mongo_db["evaluations"].delete_one({"id": str(eval_id)})
+            mongo_db["evaluations"].delete_one({"id": str(eval_id), "submitted_by": user_id})
         conn = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM evaluations WHERE id = ?", (str(eval_id),))
+        cursor.execute("DELETE FROM evaluations WHERE id = ? AND submitted_by = ?", (str(eval_id), user_id))
         conn.commit()
         conn.close()
         return jsonify({"success": True}), 200
@@ -1157,18 +1183,18 @@ def get_action_center_items():
         mongo_db = get_mongodb()
         if mongo_db is not None:
             # Teacher sees action items from evaluations they submitted
-            items_cursor = mongo_db["action_items"].find({"teacher_id": teacher_id})
+            items_cursor = mongo_db["action_items"].find({
+                "$or": [{"teacher_id": teacher_id}, {"teacher_id": None}]
+            })
             items = [mongo_serialize(d) for d in items_cursor]
-            if not items:
-                # Fallback: items without teacher_id scoping (backward compat)
-                items = [mongo_serialize(d) for d in mongo_db["action_items"].find()]
             return jsonify({"success": True, "items": items}), 200
 
-        # SQLite: derive from evaluations where marks_lost > 20
+        # SQLite: derive from evaluations where marks_lost > 20 and submitted_by = teacher_id
         conn   = get_sqlite_db()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM evaluations WHERE (total_marks - obtained_marks) > 20 ORDER BY created_at DESC"
+            "SELECT * FROM evaluations WHERE (total_marks - obtained_marks) > 20 AND submitted_by = ? ORDER BY created_at DESC",
+            (teacher_id,)
         )
         rows = cursor.fetchall()
         conn.close()
@@ -1225,23 +1251,37 @@ def get_misconceptions():
     user_id      = _current_user_id()
     session_role = _current_role()
     try:
+        user = _lookup_user_by_id(user_id)
+        user_name = user.get("name", "") if user else ""
+        user_email = user.get("email", "") if user else ""
+
         mongo_db = get_mongodb()
         if mongo_db is not None:
             if session_role == "student":
-                user = _lookup_user_by_id(user_id)
-                query = {"student_name": user.get("name")} if user else {}
+                query = {
+                    "$or": [
+                        {"student_id": user_id},
+                        {"student_id": user_email},
+                    ]
+                }
+                if user_name:
+                    query["$or"].append({"student_name": user_name})
             else:
-                query = {}
+                query = {
+                    "$or": [
+                        {"teacher_id": user_id},
+                        {"teacher_id": user_email},
+                        {"teacher_id": None},
+                    ]
+                }
             docs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find(query)]
             return jsonify({"success": True, "misconceptions": docs}), 200
 
         conn   = get_sqlite_db()
         cursor = conn.cursor()
         if session_role == "student":
-            user = _lookup_user_by_id(user_id)
-            name = user.get("name") if user else ""
             cursor.execute(
-                "SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (name,)
+                "SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (user_name,)
             )
         else:
             cursor.execute("SELECT * FROM misconceptions ORDER BY created_at DESC")
@@ -1600,18 +1640,23 @@ def get_memory_cards():
         user_id = _current_user_id()
         user    = _lookup_user_by_id(user_id)
         name    = (user or {}).get("name", "")
+        email   = (user or {}).get("email", "")
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            query = {"student_name": name} if name else {}
+            query = {
+                "$or": [
+                    {"student_id": user_id},
+                    {"student_id": email},
+                ]
+            }
+            if name:
+                query["$or"].append({"student_name": name})
             cards = [mongo_serialize(d) for d in
                      mongo_db["academic_memory"].find(query).sort("next_review", 1)]
             return jsonify({"success": True, "cards": cards}), 200
         conn   = get_sqlite_db()
         cursor = conn.cursor()
-        if name:
-            cursor.execute("SELECT * FROM academic_memory WHERE student_name=? ORDER BY next_review ASC", (name,))
-        else:
-            cursor.execute("SELECT * FROM academic_memory ORDER BY next_review ASC")
+        cursor.execute("SELECT * FROM academic_memory WHERE student_name=? ORDER BY next_review ASC", (name,))
         rows = cursor.fetchall()
         conn.close()
         return jsonify({"success": True, "cards": [dict(r) for r in rows]}), 200
@@ -1662,25 +1707,34 @@ def get_notifications():
         user_id      = _current_user_id()
         session_role = _current_role()
         user         = _lookup_user_by_id(user_id)
-        student_name = (user or {}).get("name", "") if session_role == "student" else ""
+        student_name = (user or {}).get("name", "")
+        email        = (user or {}).get("email", "")
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
             query: dict = {}
             if session_role == "student":
                 query["$or"] = [
-                    {"target_role": "student", "target_name": student_name},
+                    {"target_id": user_id},
+                    {"target_id": email},
                     {"target_role": "all"},
                 ]
+                if student_name:
+                    query["$or"].append({"target_role": "student", "target_name": student_name})
             else:
-                query["$or"] = [{"target_role": "teacher"}, {"target_role": "all"}]
+                query["$or"] = [
+                    {"target_id": user_id},
+                    {"target_id": email},
+                    {"target_role": "teacher"},
+                    {"target_role": "all"},
+                ]
             docs = [mongo_serialize(d) for d in
                     mongo_db["notifications"].find(query).sort("created_at", -1)]
             return jsonify({"success": True, "notifications": docs}), 200
 
         conn   = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM notifications ORDER BY created_at DESC")
+        cursor.execute("SELECT * FROM notifications WHERE target_name = ? OR target_role = 'all' OR target_role = ? ORDER BY created_at DESC", (student_name, session_role))
         rows = cursor.fetchall()
         conn.close()
         return jsonify({"success": True, "notifications": [dict(r) for r in rows]}), 200
