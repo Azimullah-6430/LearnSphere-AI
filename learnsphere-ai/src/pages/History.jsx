@@ -428,7 +428,11 @@ export default function History() {
                           <span className="font-extrabold text-[var(--text)] text-[13px]">
                             Question {q.question_number || idx + 1}
                           </span>
-                          {q.answer_classification && (
+                          {q.is_skipped_due_to_choice ? (
+                            <Badge tone="neutral">SKIPPED (ELECTIVE OR OPTION)</Badge>
+                          ) : q.is_extra_choice ? (
+                            <Badge tone="neutral">EXTRA ATTEMPT (HIGHER COUNTED)</Badge>
+                          ) : q.answer_classification ? (
                             <Badge tone={
                               q.answer_classification === 'correct_answer' ? 'success' :
                               q.answer_classification.includes('calculation_error') ? 'warning' :
@@ -436,10 +440,10 @@ export default function History() {
                             }>
                               {q.answer_classification.replace(/_/g, ' ').toUpperCase()}
                             </Badge>
-                          )}
+                          ) : null}
                         </div>
-                        <Badge tone={isFull ? 'success' : isPartial ? 'warning' : 'error'}>
-                          {awdM} / {maxM} marks
+                        <Badge tone={q.is_skipped_due_to_choice ? 'neutral' : isFull ? 'success' : isPartial ? 'warning' : 'error'}>
+                          {awdM} / {maxM} marks {q.is_skipped_due_to_choice || q.is_extra_choice ? '(Not counted in total)' : ''}
                         </Badge>
                       </div>
 

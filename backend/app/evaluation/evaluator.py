@@ -333,25 +333,84 @@ class EvaluationAgent:
             else:
                 processed_questions.append(q_record)
 
-        # Handle elective / choice groups
+        # Handle elective / choice groups with strict accuracy
         counted_obtained = sum(q["awarded_marks"] for q in processed_questions)
         all_final_questions = list(processed_questions)
+        choice_group_max_counted = 0.0
 
         for c_group, q_list in choice_groups.items():
-            q_list_sorted = sorted(q_list, key=lambda x: x["awarded_marks"], reverse=True)
-            req_count = q_list_sorted[0].get("required_choice_count") or 1
-            try:
-                req_count = int(req_count)
-            except Exception:
-                req_count = 1
+            req_count = 1
+            for q in q_list:
+                if q.get("required_choice_count"):
+                    try:
+                        req_count = int(q["required_choice_count"])
+                        break
+                    except Exception:
+                        pass
 
-            for idx, q_rec in enumerate(q_list_sorted):
-                if idx < req_count:
+            # Partition into attempted vs unattempted
+            attempted_list = [q for q in q_list if q.get("attempted")]
+            unattempted_list = [q for q in q_list if not q.get("attempted")]
+
+            # Sort attempted options by awarded_marks descending (highest score first)
+            attempted_sorted = sorted(attempted_list, key=lambda x: x["awarded_marks"], reverse=True)
+
+            counted_in_group = 0
+            for q_rec in attempted_sorted:
+                if counted_in_group < req_count:
                     q_rec["counted_in_total"] = True
+                    q_rec["is_extra_choice"] = False
+                    q_rec["is_skipped_due_to_choice"] = False
                     counted_obtained += q_rec["awarded_marks"]
+                    choice_group_max_counted += q_rec["maximum_marks"]
+                    counted_in_group += 1
                 else:
+                    # Extra elective attempt beyond required choice count
                     q_rec["counted_in_total"] = False
-                    q_rec["evaluation_reason"] += " (Extra elective attempt - highest scoring choice was counted towards final total)"
+                    q_rec["is_extra_choice"] = True
+                    q_rec["is_skipped_due_to_choice"] = False
+                    q_rec["marks_lost"] = 0.0
+                    q_rec["evaluation_reason"] += f" (Extra elective choice evaluated: Awarded {q_rec['awarded_marks']}/{q_rec['maximum_marks']}. Top scoring choice counted towards total)"
+                    q_rec["teacher_feedback"] = "Extra elective attempt evaluated for feedback (Highest scoring option was counted towards final total)."
+                all_final_questions.append(q_rec)
+
+            remaining_needed = req_count - counted_in_group
+            for q_rec in unattempted_list:
+                if remaining_needed > 0:
+                    # Student skipped without attempting even the required number of choices
+                    q_rec["counted_in_total"] = True
+                    q_rec["is_skipped_due_to_choice"] = False
+                    q_rec["is_extra_choice"] = False
+                    q_rec["marks_lost"] = q_rec["maximum_marks"]
+                    q_rec["answer_classification"] = "unanswered_question"
+                    q_rec["evaluation_reason"] = "Mandatory elective choice question was omitted. 0 marks awarded."
+                    q_rec["teacher_feedback"] = "Question was skipped. Attempt this question for credit."
+                    choice_group_max_counted += q_rec["maximum_marks"]
+                    remaining_needed -= 1
+                else:
+                    # Student skipped this alternative because they already attempted their required choice(s)!
+                    q_rec["counted_in_total"] = False
+                    q_rec["is_skipped_due_to_choice"] = True
+                    q_rec["is_extra_choice"] = False
+                    q_rec["marks_lost"] = 0.0
+                    q_rec["awarded_marks"] = 0.0
+                    q_rec["percentage_of_question"] = 0.0
+                    q_rec["answer_classification"] = "skipped_choice_option"
+                    q_rec["student_answer"] = "Skipped in accordance with elective choice (Alternative option attempted)."
+                    q_rec["evidence_reference"] = "Omitted per choice rule"
+                    q_rec["evaluation_reason"] = "This question was omitted in accordance with the internal elective choice / (OR) option on the paper."
+                    q_rec["teacher_feedback"] = "Skipped in accordance with elective choice (Alternative OR option attempted)."
+                    q_rec["what_is_missing"] = []
+                    q_rec["missing_points"] = []
+                    q_rec["what_is_incorrect"] = []
+                    q_rec["errors"] = []
+                    q_rec["what_was_done_correctly"] = []
+                    q_rec["strengths"] = []
+                    q_rec["how_to_improve"] = "Alternative choice option was successfully attempted."
+                    q_rec["conceptual_mistake"] = ""
+                    q_rec["step_or_calculation_mistake"] = ""
+                    q_rec["misconception_detected"] = False
+                    q_rec["misconception"] = ""
                 all_final_questions.append(q_rec)
 
         if total_max_marks <= 0:
@@ -365,23 +424,23 @@ class EvaluationAgent:
 
         strengths_list = ai_eval.get("strongest_areas") or ai_eval.get("strengths") or []
         if not isinstance(strengths_list, list) or not strengths_list:
-            strengths_list = [s for q in all_final_questions for s in q.get("strengths", []) if s][:5]
+            strengths_list = [s for q in all_final_questions if q.get("counted_in_total") for s in q.get("strengths", []) if s][:5]
 
         weaknesses_list = ai_eval.get("weakest_areas") or ai_eval.get("weaknesses") or []
         if not isinstance(weaknesses_list, list) or not weaknesses_list:
-            weaknesses_list = [m for q in all_final_questions for m in q.get("missing_points", []) if m][:5]
+            weaknesses_list = [m for q in all_final_questions if q.get("counted_in_total") for m in q.get("missing_points", []) if m][:5]
 
         major_misc = ai_eval.get("most_important_misconceptions") or ai_eval.get("major_conceptual_errors") or []
         if not isinstance(major_misc, list) or not major_misc:
-            major_misc = [q["misconception"] for q in all_final_questions if q.get("misconception_detected") and q.get("misconception")]
+            major_misc = [q["misconception"] for q in all_final_questions if q.get("counted_in_total") and q.get("misconception_detected") and q.get("misconception")]
 
         priority_topics = ai_eval.get("priority_topics_to_revise") or []
         if not isinstance(priority_topics, list) or not priority_topics:
-            priority_topics = [c for q in all_final_questions if q.get("marks_lost", 0) > 0 for c in q.get("concepts_tested", []) if c][:4]
+            priority_topics = [c for q in all_final_questions if q.get("counted_in_total") and q.get("marks_lost", 0) > 0 for c in q.get("concepts_tested", []) if c][:4]
 
         recs = ai_eval.get("practical_improvement_advice") or ai_eval.get("improvement_recommendations") or []
         if not isinstance(recs, list) or not recs:
-            recs = [q["how_to_improve"] for q in all_final_questions if q.get("marks_lost", 0) > 0 and q.get("how_to_improve")][:4]
+            recs = [q["how_to_improve"] for q in all_final_questions if q.get("counted_in_total") and q.get("marks_lost", 0) > 0 and q.get("how_to_improve")][:4]
 
         return {
             "obtained_marks": total_obtained,
@@ -533,21 +592,62 @@ class EvaluationAgent:
             if not isinstance(q, dict): continue
             qno = str(q.get("question_number") or q.get("question_id") or f"Q{idx+1}").strip()
             max_m = float(q.get("maximum_marks") or 0.0)
+            c_grp = q.get("choice_group")
+            req_c = q.get("required_choice_count")
+            q_text = str(q.get("question_text") or "").strip()
+
+            # Automatic fallback detection of (OR) choice groups if not explicitly populated by model
+            if not c_grp:
+                # Check for "(OR)" or "[OR]" or " OR " markers in question text or question number
+                if "(or)" in qno.lower() or "[or]" in qno.lower():
+                    base_no = re.sub(r"[\(\[\{]\s*or\s*[\)\]\}]", "", qno, flags=re.I).strip()
+                    c_grp = f"choice_{base_no}"
+                    req_c = 1
+                elif "(or)" in q_text[:30].lower() or "[or]" in q_text[:30].lower() or q_text.strip().upper().startswith("OR "):
+                    c_grp = f"choice_{re.sub(r'[^a-zA-Z0-9]', '_', qno)}"
+                    req_c = 1
+
             questions.append({
                 "question_id": str(q.get("question_id") or f"q_{idx+1}"),
                 "question_number": qno,
-                "question_text": str(q.get("question_text") or "").strip(),
+                "question_text": q_text,
                 "maximum_marks": max_m,
                 "section": str(q.get("section") or ""),
                 "question_type": str(q.get("question_type") or "descriptive"),
                 "options": q.get("options") if isinstance(q.get("options"), list) else [],
-                "choice_group": q.get("choice_group"),
-                "required_choice_count": q.get("required_choice_count"),
+                "choice_group": c_grp,
+                "required_choice_count": req_c or (1 if c_grp else None),
                 "expected_components": q.get("expected_components") if isinstance(q.get("expected_components"), list) else []
             })
 
+        # Calculate accurate total marks accounting for elective choice groups
         if total <= 0:
-            total = sum(q["maximum_marks"] for q in questions if q.get("maximum_marks", 0) > 0)
+            choice_groups_marks: Dict[str, List[float]] = {}
+            mandatory_marks_sum = 0.0
+            choice_req_counts: Dict[str, int] = {}
+
+            for q in questions:
+                cg = q.get("choice_group")
+                m = float(q.get("maximum_marks") or 0.0)
+                if cg:
+                    if cg not in choice_groups_marks:
+                        choice_groups_marks[cg] = []
+                    choice_groups_marks[cg].append(m)
+                    if cg not in choice_req_counts:
+                        try:
+                            choice_req_counts[cg] = int(q.get("required_choice_count") or 1)
+                        except Exception:
+                            choice_req_counts[cg] = 1
+                else:
+                    mandatory_marks_sum += m
+
+            calculated_total = mandatory_marks_sum
+            for cg, marks_list in choice_groups_marks.items():
+                req = choice_req_counts.get(cg, 1)
+                sorted_marks = sorted(marks_list, reverse=True)
+                calculated_total += sum(sorted_marks[:req])
+
+            total = calculated_total if calculated_total > 0 else sum(q["maximum_marks"] for q in questions if q.get("maximum_marks", 0) > 0)
 
         return {
             "subject": str(data.get("subject") or "").strip(),

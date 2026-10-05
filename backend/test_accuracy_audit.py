@@ -487,7 +487,69 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         """29. Two evaluations run with unique evaluation IDs without state bleed."""
         eval_id_1 = f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
         eval_id_2 = f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
-        self.assertNotEqual(eval_id_1, eval_id_2)
+    def test_30_choice_option_attempted_one_skipped_other(self):
+        """30. Internal (OR) choice: student attempts 1(a) and leaves 1(b). 1(b) is marked skipped due to choice, not counted against student."""
+        qp_struct = {
+            "subject": "Physics",
+            "total_marks": 5.0,
+            "questions": [
+                {"question_id": "q1_a", "question_number": "1(a)", "question_text": "Option A: State Lenz's Law", "maximum_marks": 5.0, "choice_group": "choice_q1", "required_choice_count": 1},
+                {"question_id": "q1_b", "question_number": "1(b)", "question_text": "Option B (OR): State Faraday's Law", "maximum_marks": 5.0, "choice_group": "choice_q1", "required_choice_count": 1}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {"question_id": "q1_a", "question_number": "1(a)", "attempted": True, "maximum_marks": 5.0, "awarded_marks": 4.5, "teacher_feedback": "Accurate statement of induced EMF direction."}
+                # 1(b) was not attempted in script
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 5.0, "Total marks for paper with 1 of 2 choice must be 5.0, not 10.0")
+        self.assertEqual(result["obtained_marks"], 4.5)
+        self.assertEqual(result["percentage"], 90.0)
+
+        q1_a = next(q for q in result["evaluations"] if q["question_number"] == "1(a)")
+        q1_b = next(q for q in result["evaluations"] if q["question_number"] == "1(b)")
+
+        self.assertTrue(q1_a["counted_in_total"])
+        self.assertEqual(q1_a["awarded_marks"], 4.5)
+
+        self.assertFalse(q1_b["counted_in_total"])
+        self.assertTrue(q1_b.get("is_skipped_due_to_choice"))
+        self.assertEqual(q1_b["marks_lost"], 0.0)
+        self.assertEqual(q1_b["answer_classification"], "skipped_choice_option")
+        self.assertIn("elective choice", q1_b["teacher_feedback"].lower())
+
+    def test_31_choice_option_attempted_both_highest_counted(self):
+        """31. Internal (OR) choice: student attempts BOTH options. Higher score is counted, other is marked extra choice."""
+        qp_struct = {
+            "subject": "Mathematics",
+            "total_marks": 5.0,
+            "questions": [
+                {"question_id": "q1_a", "question_number": "1(a)", "question_text": "Option A: Prove trigonometric identity", "maximum_marks": 5.0, "choice_group": "choice_q1", "required_choice_count": 1},
+                {"question_id": "q1_b", "question_number": "1(b)", "question_text": "Option B (OR): Evaluate definite integral", "maximum_marks": 5.0, "choice_group": "choice_q1", "required_choice_count": 1}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {"question_id": "q1_a", "question_number": "1(a)", "attempted": True, "maximum_marks": 5.0, "awarded_marks": 3.0, "teacher_feedback": "Partial proof."},
+                {"question_id": "q1_b", "question_number": "1(b)", "attempted": True, "maximum_marks": 5.0, "awarded_marks": 5.0, "teacher_feedback": "Flawless integration."}
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 5.0)
+        self.assertEqual(result["obtained_marks"], 5.0, "Should count 5.0 from the higher scoring choice")
+        self.assertEqual(result["percentage"], 100.0)
+
+        q1_a = next(q for q in result["evaluations"] if q["question_number"] == "1(a)")
+        q1_b = next(q for q in result["evaluations"] if q["question_number"] == "1(b)")
+
+        self.assertTrue(q1_b["counted_in_total"])
+        self.assertEqual(q1_b["awarded_marks"], 5.0)
+
+        self.assertFalse(q1_a["counted_in_total"])
+        self.assertTrue(q1_a.get("is_extra_choice"))
+        self.assertEqual(q1_a["marks_lost"], 0.0)
 
 
 if __name__ == "__main__":

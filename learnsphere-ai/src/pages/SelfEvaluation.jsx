@@ -449,8 +449,12 @@ export default function SelfEvaluation() {
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
-                            {q.answer_classification && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {q.is_skipped_due_to_choice ? (
+                              <Badge tone="neutral">SKIPPED (ELECTIVE OR OPTION)</Badge>
+                            ) : q.is_extra_choice ? (
+                              <Badge tone="neutral">EXTRA ATTEMPT (HIGHER COUNTED)</Badge>
+                            ) : q.answer_classification ? (
                               <Badge tone={
                                 q.answer_classification === 'correct_answer' ? 'success' :
                                 q.answer_classification.includes('calculation_error') ? 'warning' :
@@ -458,9 +462,9 @@ export default function SelfEvaluation() {
                               }>
                                 {q.answer_classification.replace(/_/g, ' ').toUpperCase()}
                               </Badge>
-                            )}
-                            <Badge tone={isFull ? 'success' : isPartial ? 'warning' : 'error'}>
-                              {awardedMarks} / {maxMarks} Marks
+                            ) : null}
+                            <Badge tone={q.is_skipped_due_to_choice ? 'neutral' : isFull ? 'success' : isPartial ? 'warning' : 'error'}>
+                              {awardedMarks} / {maxMarks} Marks {q.is_skipped_due_to_choice || q.is_extra_choice ? '(Not counted in total)' : ''}
                             </Badge>
                           </div>
                         </div>

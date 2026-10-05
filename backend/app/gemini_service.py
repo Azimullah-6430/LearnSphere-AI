@@ -219,15 +219,17 @@ Context Hints (use only as background guidance; paper header is authoritative):
 - Semester: {semester}
 
 EXTRACTION MANDATES:
-1. Extract the EXACT printed Subject Name, Exam Title, and Total Maximum Marks from the header/instructions.
+1. Extract the EXACT printed Subject Name, Exam Title, and Total Maximum Marks from the paper header/instructions.
+   - For Total Maximum Marks: Note the authoritative paper maximum marks (e.g. 50, 70, 75, 80, 100). Do NOT naively sum all elective choice questions together.
 2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1(a), 1(b), 2, 3(i), 3(ii), Part A Q1).
-3. For EVERY question:
+3. CRITICAL: (OR) / ELECTIVE CHOICE DETECTION:
+   - If questions or subparts are separated by '(OR)', '[OR]', 'OR', or instructions state 'Answer either ... OR ...' or 'Answer any X of Y', assign the EXACT same 'choice_group' identifier to all alternative options in that set (e.g., "choice_q1" for Q1(a) and Q1(b), or "choice_q3" for Q3 Option A and Q3 Option B).
+   - Set 'required_choice_count' to the exact number of options the student is required to answer from that group (usually 1).
+4. For EVERY question:
    - Extract the complete verbatim 'question_text' including all parameters, numerical values, equations, constraints, and instructions.
    - For Multiple Choice Questions (MCQs), extract the full text of all printed options under 'options'.
    - Extract the exact printed 'maximum_marks' for each question or subpart. Do NOT guess or default marks.
-   - If marks are printed as a section total or subparts share marks, divide them logically and set 'is_marks_inferred': true/false.
    - Identify 'question_type' as one of: 'mcq', 'short_answer', 'long_answer', 'numerical', 'derivation', 'diagram', 'proof', 'code', 'case_study'.
-   - If questions belong to an elective/choice group (e.g., "Answer either Q1 OR Q2", "Answer any 3 of 5", "Answer 1(a) OR 1(b)"), assign a unique 'choice_group' and the exact 'required_choice_count' (e.g. 1 or 3).
    - Extract 'expected_components' (e.g. ["Formula", "Substitution", "SI Unit", "Circuit Diagram"]).
 
 Return ONLY a valid JSON object matching this schema:
@@ -246,9 +248,21 @@ Return ONLY a valid JSON object matching this schema:
       "section": "Section A",
       "question_type": "numerical",
       "options": [],
-      "choice_group": "group_q1_or_q2",
+      "choice_group": "choice_q1",
       "required_choice_count": 1,
       "expected_components": ["Formula selection", "Step-by-step substitution", "Final answer with units"]
+    }},
+    {{
+      "question_id": "q1_b",
+      "question_number": "1(b)",
+      "question_text": "Alternative OR question verbatim text",
+      "maximum_marks": 5.0,
+      "section": "Section A",
+      "question_type": "descriptive",
+      "options": [],
+      "choice_group": "choice_q1",
+      "required_choice_count": 1,
+      "expected_components": ["Key principles", "Diagram", "Explanation"]
     }}
   ]
 }}
