@@ -41,7 +41,12 @@ except Exception:
     ObjectId = None  # type: ignore
 
 try:
-    import fitz  # type: ignore
+    import pymupdf as fitz  # type: ignore
+except ImportError:
+    try:
+        import fitz  # type: ignore
+    except Exception:
+        fitz = None
 except Exception:
     fitz = None
 

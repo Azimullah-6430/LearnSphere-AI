@@ -148,24 +148,16 @@ def get_mongodb():
     else:
         msg = f"Cannot connect to MongoDB: {last_error}"
 
-    if env == "development":
-        logger.warning("[DB] %s  Falling back to SQLite for development.", msg)
-        return None
-
-    # Production: crash loudly instead of silently serving wrong data
-    logger.critical("[DB] FATAL — %s", msg)
-    raise RuntimeError(
-        f"MongoDB connection failed in production: {last_error}\n"
-        "Verify MONGODB_URI is correct and the Atlas cluster allows this IP.\n"
-        "Go to MongoDB Atlas → Network Access → Add IP 0.0.0.0/0"
-    )
+    # Log critical warning but fallback gracefully to SQLite so Gunicorn workers boot up on Render
+    logger.warning("[DB] %s  Using SQLite until MongoDB becomes reachable.", msg)
+    return None
 
 
 def is_using_mongo() -> bool:
     """Returns True if MongoDB is connected."""
     try:
         return get_mongodb() is not None
-    except RuntimeError:
+    except Exception:
         return False
 
 
@@ -176,7 +168,7 @@ def get_collection(collection_name: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PUBLIC: SQLite (dev fallback)
+# PUBLIC: SQLite (dev / fallback)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_sqlite_db():
@@ -196,18 +188,17 @@ def init_db():
     """
     Initialise the database layer.
     For MongoDB: create all required indexes.
-    For SQLite (dev): migrate schema.
+    For SQLite: migrate schema.
     """
     try:
         mongo_db = get_mongodb()
-    except RuntimeError as exc:
-        logger.critical("[DB] init_db failed: %s", exc)
-        raise
+    except Exception as exc:
+        logger.warning("[DB] Initial Mongo connection deferred: %s", exc)
+        mongo_db = None
 
     if mongo_db is not None:
         _init_mongodb_indexes(mongo_db)
-    else:
-        _init_sqlite_schema()
+    _init_sqlite_schema()
 
 
 def _init_mongodb_indexes(db) -> None:

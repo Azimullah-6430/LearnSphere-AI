@@ -69,7 +69,10 @@ class GeminiService:
                 logger.warning(f"Could not encode image {p}: {e}")
         elif ext == ".pdf":
             try:
-                import fitz
+                try:
+                    import pymupdf as fitz
+                except ImportError:
+                    import fitz
                 doc = fitz.open(str(p))
                 # Process ALL pages without silent truncation
                 total_pages = len(doc)
