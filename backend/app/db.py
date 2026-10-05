@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import logging
 import sqlite3
 from pathlib import Path
@@ -45,6 +46,8 @@ DB_PATH = _backend_dir / "learnsphere.db"
 # ── Singleton state ────────────────────────────────────────────────────────────
 _mongo_client: "MongoClient | None" = None
 _mongo_db     = None
+_last_mongo_attempt_time: float = 0.0
+_MONGO_RETRY_INTERVAL: float = 30.0  # Retry Atlas connection at most once every 30 seconds
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -54,64 +57,51 @@ _mongo_db     = None
 def get_mongodb():
     """
     Return the MongoDB database instance.
-
-    • Production  (ENV != 'development'): raises RuntimeError if unavailable.
-    • Development (ENV == 'development'): logs a warning and returns None so
-      the caller can fall back to SQLite.
+    If MongoDB Atlas is temporarily unreachable, logs a warning and returns None
+    so the app can smoothly fall back to SQLite without blocking Gunicorn workers.
     """
-    global _mongo_client, _mongo_db
+    global _mongo_client, _mongo_db, _last_mongo_attempt_time
 
     if _mongo_db is not None:
         return _mongo_db
+
+    # Prevent blocking worker on every request if Atlas is currently unreachable
+    now = time.time()
+    if (now - _last_mongo_attempt_time) < _MONGO_RETRY_INTERVAL:
+        return None
+
+    _last_mongo_attempt_time = now
 
     mongo_uri = os.getenv("MONGODB_URI", "").strip()
     db_name   = os.getenv("MONGODB_DB_NAME", os.getenv("DB_NAME", "learnsphere")).strip()
     env       = os.getenv("ENV", "production").strip().lower()
 
     if not PYMONGO_AVAILABLE:
-        msg = "pymongo is not installed. Add 'pymongo[srv]' to requirements.txt."
-        if env == "development":
-            logger.warning("[DB] %s  Falling back to SQLite.", msg)
-            return None
-        raise RuntimeError(msg)
+        logger.warning("[DB] pymongo is not installed. Using SQLite.")
+        return None
 
     if not mongo_uri or "<db_username>" in mongo_uri or mongo_uri.startswith("your_"):
-        msg = "MONGODB_URI is not set or contains a placeholder value."
-        if env == "development":
-            logger.warning("[DB] %s  Falling back to SQLite.", msg)
-            return None
-        raise RuntimeError(
-            f"{msg}  "
-            "Set MONGODB_URI in your environment (Render dashboard → Environment)."
-        )
+        logger.warning("[DB] MONGODB_URI not configured. Using SQLite.")
+        return None
 
-    # Try connection with TLS certificate, then without (for Atlas free-tier quirks)
+    # Fast connection attempts with TLS certificate
     tls_options: list[dict] = []
     try:
-        import certifi                                          # type: ignore
+        import certifi  # type: ignore
         tls_options.append({
-            "serverSelectionTimeoutMS": 8000,
-            "connectTimeoutMS": 8000,
+            "serverSelectionTimeoutMS": 2500,
+            "connectTimeoutMS": 2500,
+            "socketTimeoutMS": 4000,
             "tlsCAFile": certifi.where(),
         })
     except ImportError:
         pass
 
     tls_options.append({
-        "serverSelectionTimeoutMS": 8000,
-        "connectTimeoutMS": 8000,
-    })
-    tls_options.append({
-        "serverSelectionTimeoutMS": 8000,
-        "connectTimeoutMS": 8000,
+        "serverSelectionTimeoutMS": 2500,
+        "connectTimeoutMS": 2500,
+        "socketTimeoutMS": 4000,
         "tlsAllowInvalidCertificates": True,
-    })
-    # Final fallback: disable TLS hostname checking too (for Atlas IP-whitelist TLS errors)
-    tls_options.append({
-        "serverSelectionTimeoutMS": 8000,
-        "connectTimeoutMS": 8000,
-        "tlsAllowInvalidCertificates": True,
-        "tlsAllowInvalidHostnames": True,
     })
 
     last_error: str = ""
@@ -122,7 +112,7 @@ def get_mongodb():
             client.admin.command("ping")          # lightweight health check
             _mongo_client = client
             _mongo_db     = client[db_name]
-            logger.info("[DB] MongoDB connected → database '%s'", db_name)
+            logger.info("[DB] MongoDB connected successfully → database '%s'", db_name)
             return _mongo_db
         except Exception as exc:
             err_str = str(exc)
@@ -148,8 +138,8 @@ def get_mongodb():
     else:
         msg = f"Cannot connect to MongoDB: {last_error}"
 
-    # Log critical warning but fallback gracefully to SQLite so Gunicorn workers boot up on Render
-    logger.warning("[DB] %s  Using SQLite until MongoDB becomes reachable.", msg)
+    # Fallback gracefully to SQLite so user requests (registration, login, dashboard) never hang or timeout
+    logger.warning("[DB] %s  Serving traffic via SQLite until MongoDB becomes reachable.", msg)
     return None
 
 
