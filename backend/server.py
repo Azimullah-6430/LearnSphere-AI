@@ -1462,6 +1462,215 @@ def get_dashboard_analytics():
     }), 200
 
 
+@app.route("/api/analytics/student", methods=["GET"])
+@require_auth
+def get_student_analytics():
+    user_id = _current_user_id()
+    session_role = _current_role()
+    target_student_id = request.args.get("student_id") or user_id
+
+    # If role is student, they can ONLY view their own analytics
+    if session_role == "student":
+        target_student_id = user_id
+
+    user = _lookup_user_by_id(target_student_id)
+    user_email = (user or {}).get("email", "")
+    user_name = (user or {}).get("name", "")
+
+    mongo_db = get_mongodb()
+    evals = []
+    misconceptions = []
+    try:
+        if mongo_db is not None:
+            eval_query = {
+                "$or": [
+                    {"submitted_by": target_student_id},
+                    {"student_id": target_student_id},
+                    {"submitted_by": user_email},
+                    {"student_id": user_email},
+                ]
+            }
+            if user_name:
+                eval_query["$or"].append({"student_name": user_name})
+            evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(eval_query).sort("created_at", 1)]
+
+            misc_query = {
+                "$or": [
+                    {"student_id": target_student_id},
+                    {"student_id": user_email},
+                ]
+            }
+            if user_name:
+                misc_query["$or"].append({"student_name": user_name})
+            misconceptions = [mongo_serialize(d) for d in mongo_db["misconceptions"].find(misc_query).sort("created_at", -1)]
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR student_name=?) ORDER BY created_at ASC",
+                (target_student_id, target_student_id, user_name),
+            )
+            evals = [dict(r) for r in cursor.fetchall()]
+            for ev in evals:
+                cursor.execute("SELECT * FROM evaluation_questions WHERE evaluation_id = ?", (ev.get("id"),))
+                ev["questions"] = [dict(r) for r in cursor.fetchall()]
+            cursor.execute("SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (user_name,))
+            misconceptions = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        total_evals = len(evals)
+        if total_evals == 0:
+            return jsonify({
+                "success": True,
+                "has_data": False,
+                "total_evaluations": 0,
+                "average_marks": 0,
+                "average_percentage": 0,
+                "improvement_trend": {"delta_percentage": 0, "direction": "neutral"},
+                "score_history": [],
+                "subject_wise_performance": {},
+                "question_wise_performance": {},
+                "frequently_weak_concepts": [],
+                "frequently_strong_concepts": [],
+                "recurring_misconceptions": [],
+                "evaluation_history": [],
+            }), 200
+
+        total_obtained = sum(float(e.get("obtained_marks") or 0) for e in evals)
+        avg_percentage = round(sum(float(e.get("percentage") or 0) for e in evals) / total_evals, 2)
+        avg_marks = round(total_obtained / total_evals, 2)
+
+        # Improvement Trend
+        if total_evals >= 2:
+            early_pct = float(evals[0].get("percentage") or 0)
+            latest_pct = float(evals[-1].get("percentage") or 0)
+            delta = round(latest_pct - early_pct, 2)
+            direction = "improving" if delta > 1.0 else ("declining" if delta < -1.0 else "stable")
+        else:
+            delta = 0.0
+            direction = "stable"
+
+        # Score History
+        score_history = []
+        for e in evals:
+            score_history.append({
+                "evaluation_id": str(e.get("id") or e.get("_id") or e.get("evaluation_id")),
+                "date": str(e.get("created_at") or "")[:10],
+                "subject": e.get("subject") or "General",
+                "assessment_title": e.get("assessment_title") or f"{e.get('subject', 'General')} Evaluation",
+                "obtained_marks": float(e.get("obtained_marks") or 0),
+                "total_marks": float(e.get("total_marks") or 0),
+                "percentage": float(e.get("percentage") or 0),
+                "grade": e.get("grade") or "N/A",
+                "status": e.get("status") or "COMPLETED",
+            })
+
+        # Subject-wise performance
+        subject_map = {}
+        for e in evals:
+            sub = e.get("subject") or "General"
+            if sub not in subject_map:
+                subject_map[sub] = {"subject": sub, "count": 0, "total_pct": 0, "total_obtained": 0, "total_max": 0, "highest": 0, "lowest": 100}
+            pct = float(e.get("percentage") or 0)
+            obt = float(e.get("obtained_marks") or 0)
+            mx = float(e.get("total_marks") or 0)
+            subject_map[sub]["count"] += 1
+            subject_map[sub]["total_pct"] += pct
+            subject_map[sub]["total_obtained"] += obt
+            subject_map[sub]["total_max"] += mx
+            if pct > subject_map[sub]["highest"]:
+                subject_map[sub]["highest"] = pct
+            if pct < subject_map[sub]["lowest"]:
+                subject_map[sub]["lowest"] = pct
+
+        subject_wise = {}
+        for sub, data in subject_map.items():
+            subject_wise[sub] = {
+                "subject": sub,
+                "count": data["count"],
+                "average_percentage": round(data["total_pct"] / data["count"], 2),
+                "average_marks": round(data["total_obtained"] / data["count"], 2),
+                "highest_percentage": data["highest"],
+                "lowest_percentage": data["lowest"],
+            }
+
+        # Question-wise performance & concepts analysis
+        q_perf = {}
+        concept_weak_counts = {}
+        concept_strong_counts = {}
+
+        for e in evals:
+            qs = e.get("questions") or e.get("evaluations") or []
+            for q in qs:
+                if not isinstance(q, dict):
+                    continue
+                q_num = str(q.get("question_number") or "Unknown")
+                max_m = float(q.get("maximum_marks") or 0)
+                awd_m = float(q.get("awarded_marks") or 0)
+                if q_num not in q_perf:
+                    q_perf[q_num] = {"question_number": q_num, "attempts": 0, "total_awarded": 0, "total_max": 0}
+                q_perf[q_num]["attempts"] += 1
+                q_perf[q_num]["total_awarded"] += awd_m
+                q_perf[q_num]["total_max"] += max_m
+
+                # Concept tracking
+                concepts = q.get("concepts_tested") or []
+                if isinstance(concepts, str):
+                    concepts = [concepts]
+                for c in concepts:
+                    c_name = str(c).strip()
+                    if not c_name:
+                        continue
+                    if max_m > 0 and awd_m >= max_m:
+                        concept_strong_counts[c_name] = concept_strong_counts.get(c_name, 0) + 1
+                    elif max_m > 0 and (awd_m / max_m) < 0.6:
+                        concept_weak_counts[c_name] = concept_weak_counts.get(c_name, 0) + 1
+
+        question_wise = {}
+        for q_num, data in q_perf.items():
+            pct = round((data["total_awarded"] / data["total_max"]) * 100, 2) if data["total_max"] > 0 else 0
+            question_wise[q_num] = {
+                "question_number": q_num,
+                "attempts": data["attempts"],
+                "average_awarded": round(data["total_awarded"] / data["attempts"], 2),
+                "average_maximum": round(data["total_max"] / data["attempts"], 2),
+                "accuracy_percentage": pct,
+            }
+
+        frequently_weak = sorted(
+            [{"concept": c, "frequency": count} for c, count in concept_weak_counts.items()],
+            key=lambda x: x["frequency"],
+            reverse=True,
+        )[:6]
+
+        frequently_strong = sorted(
+            [{"concept": c, "frequency": count} for c, count in concept_strong_counts.items()],
+            key=lambda x: x["frequency"],
+            reverse=True,
+        )[:6]
+
+        evaluation_history = list(reversed(score_history))
+
+        return jsonify({
+            "success": True,
+            "has_data": True,
+            "total_evaluations": total_evals,
+            "average_marks": avg_marks,
+            "average_percentage": avg_percentage,
+            "improvement_trend": {"delta_percentage": delta, "direction": direction},
+            "score_history": score_history,
+            "subject_wise_performance": subject_wise,
+            "question_wise_performance": question_wise,
+            "frequently_weak_concepts": frequently_weak,
+            "frequently_strong_concepts": frequently_strong,
+            "recurring_misconceptions": misconceptions[:8],
+            "evaluation_history": evaluation_history,
+        }), 200
+    except Exception as exc:
+        logger.error("Student analytics error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # AI TRAINER
 # ══════════════════════════════════════════════════════════════════════════════

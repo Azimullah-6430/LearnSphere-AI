@@ -173,6 +173,9 @@ export const api = {
   getDashboardAnalytics: (role = 'teacher', studentName = '') =>
     request(`/api/analytics/dashboard?role=${role}&student_name=${encodeURIComponent(studentName)}`),
 
+  getStudentAnalytics: (studentId = '') =>
+    request(`/api/analytics/student${studentId ? `?student_id=${encodeURIComponent(studentId)}` : ''}`),
+
   // ── AI Trainer ────────────────────────────────────────────────────────────
 
   trainerChat: (payload) => request('/api/trainer/chat', { method: 'POST', body: payload }),

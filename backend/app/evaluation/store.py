@@ -179,6 +179,7 @@ def store_evaluation_pipeline(
         return _store_mongodb(
             mongo_db,
             request_data,
+            eval_result,
             student_name,
             roll_number,
             subject,
@@ -202,6 +203,7 @@ def store_evaluation_pipeline(
 
     return _store_sqlite(
         request_data,
+        eval_result,
         student_name,
         roll_number,
         subject,
@@ -227,6 +229,7 @@ def store_evaluation_pipeline(
 def _store_mongodb(
     db: Any,
     request_data: Dict[str, Any],
+    eval_result: Dict[str, Any],
     student_name: str,
     roll_number: str,
     subject: str,
@@ -252,6 +255,7 @@ def _store_mongodb(
     submitter_role = request_data.get("submitter_role")
     student_id = request_data.get("student_id") or (submitted_by if submitter_role == "student" else None)
     teacher_id = request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
+    summary = eval_result.get("summary") or {}
 
     eval_doc = {
         "submitted_by": submitted_by,
@@ -579,6 +583,7 @@ def _store_mongodb(
 
 def _store_sqlite(
     request_data: Dict[str, Any],
+    eval_result: Dict[str, Any],
     student_name: str,
     roll_number: str,
     subject: str,
