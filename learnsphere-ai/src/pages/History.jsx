@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react'
 import { Card, PageHead, SearchBox, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
-import { X, CheckCircle2, AlertTriangle, Download, Trash2, Eye, Check } from 'lucide-react'
+import {
+  X, CheckCircle2, AlertTriangle, Download, Trash2, Eye, Check,
+  Sparkles, BookOpen, AlertCircle, Zap, ShieldAlert, ArrowRight,
+  TrendingDown, CheckSquare, Edit3
+} from 'lucide-react'
 
 export default function History() {
   const { role, user, activeClass } = useApp()
@@ -31,15 +35,22 @@ export default function History() {
   }, [role, user])
 
   const handleViewDetail = async (id) => {
+    if (!id) return
     setDetailLoading(true)
-    const res = await api.getEvaluationDetail(id)
-    if (res && res.success && res.evaluation) {
-      setSelectedEval(res.evaluation)
-    } else {
-      const match = evaluations.find(e => e.id === id || e._id === id)
+    try {
+      const res = await api.getEvaluationDetail(id)
+      if (res && res.success && res.evaluation) {
+        setSelectedEval(res.evaluation)
+      } else {
+        const match = evaluations.find(e => String(e.id || e._id) === String(id))
+        setSelectedEval(match || null)
+      }
+    } catch {
+      const match = evaluations.find(e => String(e.id || e._id) === String(id))
       setSelectedEval(match || null)
+    } finally {
+      setDetailLoading(false)
     }
-    setDetailLoading(false)
   }
 
   // Delete evaluation record
@@ -71,19 +82,14 @@ export default function History() {
     }))
   }
 
-  // Filter by search and activeClass if set (teachers only)
+  // Filter by search
   const filtered = evaluations.filter(e => {
-    if (role === 'teacher' && activeClass && activeClass.subjects && activeClass.subjects.length > 0) {
-      if (e.subject && !activeClass.subjects.some(s => s.toLowerCase() === e.subject.toLowerCase())) {
-        // Allow fallback if list is small
-      }
-    }
-
     const term = search.toLowerCase()
     return (
       (e.student_name && e.student_name.toLowerCase().includes(term)) ||
       (e.subject && e.subject.toLowerCase().includes(term)) ||
-      (e.assessment_title && e.assessment_title.toLowerCase().includes(term))
+      (e.assessment_title && e.assessment_title.toLowerCase().includes(term)) ||
+      (String(e.id || e._id || '').toLowerCase().includes(term))
     )
   })
 
@@ -151,22 +157,22 @@ export default function History() {
   return (
     <>
       <PageHead
-        title={role === 'teacher' ? 'Evaluation History & Records' : 'My Evaluations'}
-        subtitle="Searchable database of stored evaluation records with full delete, completed audit controls, and teacher mark allotment."
+        title={role === 'teacher' ? 'Teacher Evaluation History & Traceability' : 'My Evaluation History'}
+        subtitle="Searchable repository of stored evaluation records. Opening any record displays question-level mark reasoning, script evidence, feedback, misconceptions, and Action Center relevance without recalculating."
       />
 
       {activeClass && role === 'teacher' && (
-        <div className="mb-4 p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-bold text-[var(--accent)] flex items-center justify-between">
+        <div className="mb-4 p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-bold text-[var(--accent)] flex items-center justify-between shadow-sm">
           <span>🏫 Active Class Filter: <strong>{activeClass.name}</strong></span>
           <Badge tone="accent">{activeClass.type}</Badge>
         </div>
       )}
 
-      <Card>
+      <Card className="shadow-sm">
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-          <SearchBox placeholder="Search by student, subject or test..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="flex gap-2 text-xs text-[var(--text-faint)]">
-            <span>Total Records: <strong>{filtered.length}</strong></span>
+          <SearchBox placeholder="Search by student, subject, assessment title, ID..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="flex gap-2 text-xs text-[var(--text-faint)] font-bold">
+            <span>Total Evaluated Records: <strong>{filtered.length}</strong></span>
           </div>
         </div>
 
@@ -174,17 +180,24 @@ export default function History() {
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr>
-                {['Student', 'Subject', 'Assessment', 'Score', 'Review Status', 'Date', 'Actions'].map((h) => (
-                  <th key={h} className="text-left text-[11.5px] text-[var(--text-faint)] font-bold uppercase tracking-wide pb-2.5 px-3 border-b border-[var(--border)]">
+                {['Student', 'Subject', 'Exam / Assessment', 'Marks (Obtained / Max)', 'Percentage', 'Status', 'Date', 'Actions'].map((h) => (
+                  <th key={h} className="text-left text-[11px] text-[var(--text-faint)] font-bold uppercase tracking-wider pb-2.5 px-3 border-b border-[var(--border)] bg-[var(--surface-alt)]">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-[var(--text-soft)]">
+                  <td colSpan={8} className="text-center py-10 text-[var(--text-soft)]">
+                    <div className="animate-spin text-xl text-[var(--accent)] mb-2">⏳</div>
+                    <span>Loading evaluation history...</span>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="text-center py-10 text-[var(--text-soft)]">
                     No evaluation records found matching your query.
                   </td>
                 </tr>
@@ -193,64 +206,83 @@ export default function History() {
                   const evalId = r.id || r._id || `eval_${i}`
                   const isCompleted = r.review_status === 'Completed'
                   const isUnreadable = r.is_unreadable || r.assigned_to_teacher
+                  const marksLost = (r.total_marks || 0) - (r.obtained_marks || 0)
 
                   return (
                     <tr key={evalId} className="hover:bg-[var(--surface-alt)] transition-colors border-b border-[var(--border)] last:border-0">
                       <td className="py-3 px-3 font-semibold text-[var(--text)]">
-                        <div className="flex items-center gap-1.5">
-                          <span>{r.student_name || 'Student Script'}</span>
-                          {isUnreadable && <Badge tone="warning">⚠️ Assigned to Teacher</Badge>}
+                        <div className="flex flex-col">
+                          <span className="font-extrabold text-[13.5px]">{r.student_name || 'Student'}</span>
+                          <span className="text-[11px] text-[var(--text-faint)] font-mono">
+                            ID: {r.student_id || r.roll_number || 'N/A'}
+                          </span>
                         </div>
                       </td>
-                      <td className="py-3 px-3 text-[var(--text-soft)]">
-                        {r.subject || 'Academic Paper'}
+
+                      <td className="py-3 px-3 font-bold text-[var(--accent)]">
+                        {r.subject || 'General'}
                       </td>
-                      <td className="py-3 px-3 text-[var(--text-soft)]">
-                        {r.assessment_title || 'Evaluation'}
+
+                      <td className="py-3 px-3 text-[var(--text-soft)] font-medium">
+                        <div className="flex flex-col">
+                          <span>{r.assessment_title || `${r.subject || 'Exam'} Evaluation`}</span>
+                          {marksLost > 20 && (
+                            <span className="text-[10.5px] text-[var(--error)] font-bold">
+                              &minus;{marksLost} marks lost (&gt;20 Alert)
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-3 px-3 font-bold">
-                        {r.evaluation_status === 'NEEDS_TEACHER_REVIEW' || r.is_unreadable ? (
-                          <span className="text-[var(--warning)] text-xs font-bold">Needs Review</span>
-                        ) : (r.percentage !== null && r.percentage !== undefined) ? (
-                          <span className={r.percentage >= 75 ? 'text-[var(--success)]' : r.percentage >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'}>
-                            {r.percentage}% ({r.obtained_marks}/{r.total_marks})
+
+                      <td className="py-3 px-3 font-extrabold text-[var(--text)]">
+                        {r.obtained_marks !== undefined ? `${r.obtained_marks} / ${r.total_marks} marks` : '—'}
+                      </td>
+
+                      <td className="py-3 px-3 font-black">
+                        {(r.percentage !== null && r.percentage !== undefined) ? (
+                          <span className={r.percentage >= 75 ? 'text-emerald-500' : r.percentage >= 50 ? 'text-amber-500' : 'text-[var(--error)]'}>
+                            {r.percentage}% {r.grade ? `(${r.grade})` : ''}
                           </span>
                         ) : (
-                          <span className="text-[var(--text-faint)] text-xs">No score</span>
+                          <span className="text-[var(--text-faint)] text-xs">Unrated</span>
                         )}
                       </td>
+
                       <td className="py-3 px-3">
-                        <button
-                          onClick={(e) => handleToggleCompleted(evalId, e)}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border transition-all flex items-center gap-1 ${
-                            isCompleted
-                              ? 'bg-[var(--success-soft)] text-[var(--success)] border-[var(--success)]'
-                              : 'bg-[var(--surface-alt)] text-[var(--text-faint)] border-[var(--border-strong)] hover:text-[var(--text)]'
-                          }`}
-                        >
-                          <Check size={12} />
-                          <span>{isCompleted ? 'Completed' : 'Mark Completed'}</span>
-                        </button>
+                        {isUnreadable ? (
+                          <Badge tone="warning">⚠️ Needs Review</Badge>
+                        ) : (
+                          <Badge tone={r.percentage >= 75 ? 'success' : r.percentage >= 50 ? 'warning' : 'error'}>
+                            {r.status || r.evaluation_status || 'Evaluated'}
+                          </Badge>
+                        )}
                       </td>
-                      <td className="py-3 px-3 text-xs text-[var(--text-faint)]">
-                        {r.created_at ? r.created_at.split(' ')[0] : 'Recent'}
+
+                      <td className="py-3 px-3 text-xs text-[var(--text-faint)] whitespace-nowrap">
+                        {r.created_at ? String(r.created_at).split('T')[0].split(' ')[0] : 'Recent'}
                       </td>
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => { setSelectedEval(r); setIsEditingMarks(false); setCustomObtainedMarks(r.obtained_marks || r.total_marks || '') }}
-                            className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-soft)] hover:text-[var(--accent)] hover:bg-[var(--surface)] transition-colors"
-                            title="View / Edit Evaluation Marks"
+
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleViewDetail(evalId)}
+                            className="flex items-center gap-1 text-[11.5px] px-2.5 py-1"
                           >
-                            <Eye size={15} />
-                          </button>
-                          <button
-                            onClick={(e) => handleDelete(evalId, e)}
-                            className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
-                            title="Delete Record"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                            <Eye size={13} />
+                            <span>View</span>
+                          </Button>
+
+                          {role === 'teacher' && (
+                            <button
+                              onClick={(e) => handleDelete(evalId, e)}
+                              className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                              title="Delete Record"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -262,19 +294,25 @@ export default function History() {
         </div>
       </Card>
 
-      {/* EVALUATION DETAIL MODAL WITH MARK OVERRIDE */}
+      {/* EVALUATION DETAIL & TRACEABILITY MODAL */}
       {selectedEval && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <Card className="max-w-[680px] w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8">
+          <Card className="max-w-3xl w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8 max-h-[92vh] overflow-y-auto p-6">
+            {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
               <div>
-                <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
-                  <span>{selectedEval.student_name || 'Evaluation Detail'}</span>
+                <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2 flex-wrap">
+                  <span>{selectedEval.student_name || 'Student Evaluation'}</span>
                   <Badge tone="accent">{selectedEval.subject}</Badge>
-                  {(selectedEval.is_unreadable || selectedEval.assigned_to_teacher) && <Badge tone="warning">⚠️ Assigned to Teacher</Badge>}
+                  <span className="text-xs text-[var(--text-faint)] font-mono">
+                    ID: {selectedEval.student_id || selectedEval.roll_number || 'N/A'}
+                  </span>
+                  {(selectedEval.is_unreadable || selectedEval.assigned_to_teacher) && (
+                    <Badge tone="warning">⚠️ Assigned to Teacher</Badge>
+                  )}
                 </div>
-                <div className="text-[12.5px] text-[var(--text-soft)]">
-                  {selectedEval.assessment_title || 'Answer Script Report'}
+                <div className="text-[12.5px] text-[var(--text-soft)] font-medium mt-0.5">
+                  Exam: <strong>{selectedEval.assessment_title || `${selectedEval.subject} Assessment`}</strong> &bull; Evaluation ID: <span className="font-mono">{selectedEval.id || selectedEval._id || 'Stored'}</span>
                 </div>
               </div>
               <button
@@ -285,79 +323,212 @@ export default function History() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-[13px] bg-[var(--surface-alt)] p-3 rounded-xl border border-[var(--border)]">
+            {/* Score & Metadata Strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs bg-[var(--surface-alt)] p-3 rounded-xl border border-[var(--border)] text-center">
               <div>
-                <strong>Score:</strong>{' '}
-                {(selectedEval.percentage !== null && selectedEval.percentage !== undefined)
-                  ? `${selectedEval.percentage}% (${selectedEval.obtained_marks}/${selectedEval.total_marks})`
-                  : (selectedEval.is_unreadable ? 'Needs teacher review' : 'Not yet scored')}
+                <span className="text-[var(--text-faint)] block text-[10.5px] uppercase font-bold">Marks Scored</span>
+                <strong className="text-[15px] font-black text-[var(--accent)]">
+                  {selectedEval.obtained_marks} / {selectedEval.total_marks}
+                </strong>
               </div>
-              <div><strong>Evaluated On:</strong> {selectedEval.created_at || 'Today'}</div>
-              <div><strong>Grader:</strong> {selectedEval.is_teacher_overridden ? 'Teacher Allotted Marks' : 'AI Evaluation'}</div>
-              <div><strong>Status:</strong> {selectedEval.evaluation_status || selectedEval.review_status || 'Evaluated'}</div>
+              <div>
+                <span className="text-[var(--text-faint)] block text-[10.5px] uppercase font-bold">Percentage</span>
+                <strong className="text-[15px] font-black text-emerald-500">
+                  {selectedEval.percentage}%
+                </strong>
+              </div>
+              <div>
+                <span className="text-[var(--text-faint)] block text-[10.5px] uppercase font-bold">Assigned Grade</span>
+                <strong className="text-[15px] font-black text-[var(--text)]">
+                  {selectedEval.grade || 'N/A'}
+                </strong>
+              </div>
+              <div>
+                <span className="text-[var(--text-faint)] block text-[10.5px] uppercase font-bold">Evaluated Date</span>
+                <strong className="text-xs font-semibold text-[var(--text-soft)]">
+                  {selectedEval.created_at ? String(selectedEval.created_at).split('T')[0] : 'Recent'}
+                </strong>
+              </div>
             </div>
+
+            {/* Action Center Relevance Alert */}
+            {((selectedEval.total_marks || 0) - (selectedEval.obtained_marks || 0)) > 20 && (
+              <div className="p-3 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-xs flex items-start gap-2">
+                <AlertTriangle size={16} className="text-[var(--error)] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-[var(--error)] block text-[11.5px] uppercase tracking-wider">Action Center Relevance: High Risk (&gt;20 Marks Lost)</strong>
+                  <span className="text-[var(--text-soft)]">
+                    This student lost {round2((selectedEval.total_marks || 0) - (selectedEval.obtained_marks || 0))} marks in this assessment, triggering an automatic Action Center remedial item.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Teacher Executive Summary */}
+            {(selectedEval.overall_teacher_comment || selectedEval.overall_feedback) && (
+              <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs space-y-1">
+                <strong className="text-[var(--accent)] block text-[11px] uppercase tracking-wider">Teacher Executive Assessment:</strong>
+                <p className="text-[var(--text)] leading-relaxed">{selectedEval.overall_teacher_comment || selectedEval.overall_feedback}</p>
+              </div>
+            )}
 
             {/* Teacher Mark Override Controls */}
             {role === 'teacher' && (
-              <div className="p-3.5 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)]">
-                <div className="flex items-center justify-between mb-2">
-                  <strong className="text-[var(--accent)] text-[13.5px]">✏️ Teacher Mark Allotment / Override:</strong>
+              <div className="p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-[var(--accent)]">Teacher Mark Allotment / Override:</span>
                   {!isEditingMarks ? (
-                    <Button size="sm" variant="outline" onClick={() => setIsEditingMarks(true)}>Edit Marks</Button>
+                    <Button size="sm" variant="outline" onClick={() => { setIsEditingMarks(true); setCustomObtainedMarks(selectedEval.obtained_marks || ''); }}>
+                      <Edit3 size={12} /> Edit Marks
+                    </Button>
                   ) : (
                     <Button size="sm" variant="secondary" onClick={() => setIsEditingMarks(false)}>Cancel</Button>
                   )}
                 </div>
 
-                {isEditingMarks ? (
-                  <div className="space-y-3 mt-2">
-                    <div className="flex items-center gap-3">
-                      <label className="text-xs font-bold">New Obtained Marks:</label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="0"
-                        max={selectedEval.total_marks || selectedEval.max_marks || 100}
-                        value={customObtainedMarks}
-                        onChange={(e) => setCustomObtainedMarks(e.target.value)}
-                        className="w-24 px-3 py-1.5 border border-[var(--border-strong)] rounded text-sm font-extrabold bg-[var(--surface)] text-[var(--text)] text-center"
-                      />
-                      <span className="text-xs text-[var(--text-faint)]">/ {selectedEval.total_marks || selectedEval.max_marks || 100} Total Marks</span>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={handleSaveModalOverride} disabled={savingOverride}>
-                        {savingOverride ? 'Saving...' : 'Save Allotted Marks'}
-                      </Button>
-                    </div>
+                {isEditingMarks && (
+                  <div className="flex items-center gap-2 pt-2 mt-2 border-t border-[var(--accent)]">
+                    <label className="font-bold text-[var(--text)]">New Obtained Marks:</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max={selectedEval.total_marks || 100}
+                      value={customObtainedMarks}
+                      onChange={(e) => setCustomObtainedMarks(e.target.value)}
+                      className="w-20 px-2 py-1 border border-[var(--border-strong)] rounded text-xs font-bold bg-[var(--surface)] text-[var(--text)] text-center"
+                    />
+                    <span className="text-[var(--text-faint)]">/ {selectedEval.total_marks} max</span>
+                    <Button size="sm" onClick={handleSaveModalOverride} disabled={savingOverride} className="ml-auto">
+                      {savingOverride ? 'Saving...' : 'Save Override'}
+                    </Button>
                   </div>
-                ) : (
-                  <p className="text-[12px] text-[var(--text-soft)]">
-                    If you are not satisfied with AI evaluation, click <strong>"Edit Marks"</strong> to manually assign custom marks.
-                  </p>
                 )}
               </div>
             )}
 
-            {selectedEval.feedback && (
-              <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-[13px]">
-                <strong className="text-[var(--text)] block mb-1">Evaluator Feedback:</strong>
-                <p className="text-[var(--text-soft)] leading-relaxed">{typeof selectedEval.feedback === 'string' ? selectedEval.feedback : (selectedEval.overall_feedback || 'Evaluation details reviewed.')}</p>
-              </div>
-            )}
+            {/* Question-By-Question Detailed Traceability */}
+            <div className="space-y-3 pt-2">
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--text-faint)]">
+                Question-by-Question Evaluation Audit Trail
+              </h4>
 
-            <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
-              <button
-                onClick={(e) => handleDelete(selectedEval.id || selectedEval._id, e)}
-                className="px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-1.5"
-              >
-                <Trash2 size={14} />
-                <span>Delete Record</span>
-              </button>
-              <Button variant="secondary" onClick={() => setSelectedEval(null)}>Close</Button>
+              {(selectedEval.evaluations || selectedEval.questions || []).length > 0 ? (
+                (selectedEval.evaluations || selectedEval.questions).map((q, idx) => {
+                  const maxM = q.maximum_marks ?? q.max_marks ?? '?'
+                  const awdM = q.awarded_marks ?? 0
+                  const isFull = maxM > 0 && awdM >= maxM
+                  const isPartial = awdM > 0 && awdM < maxM
+
+                  return (
+                    <div key={idx} className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5 text-xs">
+                      {/* Question Header */}
+                      <div className="flex items-center justify-between border-b border-[var(--border)] pb-2 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-[var(--text)] text-[13px]">
+                            Question {q.question_number || idx + 1}
+                          </span>
+                          {q.answer_classification && (
+                            <Badge tone={
+                              q.answer_classification === 'correct_answer' ? 'success' :
+                              q.answer_classification.includes('calculation_error') ? 'warning' :
+                              q.answer_classification.includes('concept') ? 'error' : 'neutral'
+                            }>
+                              {q.answer_classification.replace(/_/g, ' ').toUpperCase()}
+                            </Badge>
+                          )}
+                        </div>
+                        <Badge tone={isFull ? 'success' : isPartial ? 'warning' : 'error'}>
+                          {awdM} / {maxM} marks
+                        </Badge>
+                      </div>
+
+                      {/* Official Question Text */}
+                      {q.question_text && (
+                        <div className="p-2 bg-[var(--surface)] rounded-lg border border-[var(--border)] font-semibold text-[var(--text)]">
+                          <span className="text-[10px] uppercase font-bold text-[var(--text-faint)] block mb-0.5">Question Paper Prompt:</span>
+                          {q.question_text}
+                        </div>
+                      )}
+
+                      {/* Student's Actual Answer */}
+                      {(q.student_answer || q.answer_summary) && (
+                        <div className="space-y-0.5">
+                          <span className="text-[11px] font-bold text-[var(--text-faint)] block">Student's Written Answer on Script:</span>
+                          <p className="font-mono italic text-[11.5px] bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)] text-[var(--text)]">
+                            &ldquo;{q.student_answer || q.answer_summary}&rdquo;
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Reason & Feedback: Why marks were awarded */}
+                      {(q.teacher_feedback || q.evaluation_reason) && (
+                        <div className="p-2.5 rounded-lg bg-[var(--accent-soft)] border border-[var(--accent)] space-y-0.5">
+                          <strong className="text-[var(--accent)] text-[11px] uppercase block">Reason & Mark Allocation Feedback:</strong>
+                          <p className="text-[var(--text)] leading-relaxed">{q.teacher_feedback || q.evaluation_reason}</p>
+                        </div>
+                      )}
+
+                      {/* Mistakes / Missing points */}
+                      {(q.what_is_incorrect?.length > 0 || q.step_or_calculation_mistake) && (
+                        <div className="p-2 rounded-lg bg-[var(--error-soft)] border border-[var(--error)] space-y-0.5">
+                          <strong className="text-[var(--error)] text-[10.5px] uppercase block">Identified Mistakes:</strong>
+                          <p className="text-[var(--text)]">{q.step_or_calculation_mistake || (Array.isArray(q.what_is_incorrect) ? q.what_is_incorrect.join(', ') : q.what_is_incorrect)}</p>
+                        </div>
+                      )}
+
+                      {/* Conceptual Misconception */}
+                      {(q.conceptual_mistake || (q.misconception_detected && q.misconception)) && (
+                        <div className="p-2.5 rounded-lg bg-[var(--gold-soft)] border border-[var(--gold)] space-y-0.5">
+                          <strong className="text-[var(--gold)] text-[10.5px] uppercase block flex items-center gap-1">
+                            <AlertTriangle size={12} />
+                            <span>Diagnosed Conceptual Misconception:</span>
+                          </strong>
+                          <p className="text-[var(--text)] font-semibold">{q.conceptual_mistake || q.misconception}</p>
+                        </div>
+                      )}
+
+                      {/* What Student Should Have Written */}
+                      {(q.what_student_should_have_written || q.correct_answer_or_expected_points || q.feedback?.expected_answer) && (
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-0.5">
+                          <strong className="text-emerald-500 text-[10.5px] uppercase block">Expected Academic Solution:</strong>
+                          <p className="text-[var(--text)] font-mono whitespace-pre-line text-[11px]">
+                            {q.what_student_should_have_written || q.correct_answer_or_expected_points || q.feedback?.expected_answer}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="text-center p-6 text-xs text-[var(--text-soft)] bg-[var(--surface-alt)] rounded-xl">
+                  No question-by-question breakdown attached to this record.
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
+              {role === 'teacher' && (
+                <button
+                  onClick={(e) => handleDelete(selectedEval.id || selectedEval._id, e)}
+                  className="px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete Record</span>
+                </button>
+              )}
+              <Button variant="secondary" onClick={() => setSelectedEval(null)} className="ml-auto">
+                Close
+              </Button>
             </div>
           </Card>
         </div>
       )}
     </>
   )
+}
+
+function round2(num) {
+  return Math.round(Number(num) * 100) / 100
 }
