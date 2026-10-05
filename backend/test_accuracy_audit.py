@@ -816,6 +816,38 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertFalse(evals_by_qno["7(b)"]["counted_in_total"])
         self.assertTrue(evals_by_qno["7(b)"]["is_skipped_due_to_choice"])
 
+    def test_37_resilient_json_repair_engine(self):
+        """37. Verify that parse_json_response repairs LaTeX backslashes, trailing commas,
+        raw newlines, and truncated JSON blocks with 100% success.
+        """
+        parser = self.agent.gemini_service.parse_json_response
+
+        # Case 1: Unescaped LaTeX backslashes
+        latex_json = r'{"question_id": "q1", "feedback": "Formula: \theta = \frac{\lambda}{d} and R = 50\Omega, \Delta x = 2"}'
+        res1 = parser(latex_json)
+        self.assertIn("Formula:", res1["feedback"])
+        self.assertEqual(res1["question_id"], "q1")
+
+        # Case 2: Trailing commas and markdown code fences
+        trailing_comma_json = """```json
+        {
+          "is_unreadable": false,
+          "evaluations": [
+            {"question_id": "q1", "awarded_marks": 5.0,},
+          ],
+        }
+        ```"""
+        res2 = parser(trailing_comma_json)
+        self.assertFalse(res2["is_unreadable"])
+        self.assertEqual(len(res2["evaluations"]), 1)
+        self.assertEqual(res2["evaluations"][0]["awarded_marks"], 5.0)
+
+        # Case 3: Truncated JSON recovery
+        truncated_json = '{"is_unreadable": false, "evaluations": [{"question_id": "q1", "maximum_marks": 10.0, "awarded_marks": 8.5, "student_answer": "Student explained waterfall"'
+        res3 = parser(truncated_json)
+        self.assertTrue(len(res3["evaluations"]) >= 1)
+        self.assertEqual(res3["evaluations"][0]["question_id"], "q1")
+
 
 if __name__ == "__main__":
     unittest.main()

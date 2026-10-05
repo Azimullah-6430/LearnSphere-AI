@@ -232,7 +232,7 @@ def _lookup_user_by_id(user_id: str):
 
     conn = get_sqlite_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE id = ? OR user_id = ?", (user_id, str(user_id)))
+    cursor.execute("SELECT * FROM users WHERE id = ?", (str(user_id),))
     row = cursor.fetchone()
     conn.close()
     if row:

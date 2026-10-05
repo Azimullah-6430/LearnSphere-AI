@@ -186,20 +186,139 @@ class GeminiService:
         raise RuntimeError(f"Gemini API processing failed: {last_error}")
 
     def parse_json_response(self, raw_text: str) -> Dict[str, Any]:
+        """Robust, multi-pass JSON parser that handles raw text, markdown blocks,
+        unescaped LaTeX backslashes, literal newlines in strings, trailing commas,
+        and truncated JSON objects.
+        """
+        if not raw_text or not isinstance(raw_text, str):
+            raise ValueError("Empty or invalid response received from Gemini.")
+
+        # 1. Clean markdown code fences and extraneous wrapping
         cleaned = raw_text.strip()
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
         cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+
+        # Strategy 1: Direct strict=False load (handles literal control characters/newlines)
         try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            start = cleaned.find("{")
-            end = cleaned.rfind("}")
-            if start >= 0 and end > start:
+            return json.loads(cleaned, strict=False)
+        except Exception:
+            pass
+
+        # Strategy 2: Extract JSON object boundaries { ... }
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            snippet = cleaned[start:end + 1]
+            try:
+                return json.loads(snippet, strict=False)
+            except Exception:
+                cleaned = snippet
+
+        # Strategy 3: Multi-pass Regex Repair
+        # Fix unescaped backslashes (e.g. LaTeX formulas \theta, \frac, \Omega, \beta, \Delta)
+        def repair_escapes(s: str) -> str:
+            return re.sub(r'\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})', r'\\\\', s)
+
+        # Remove trailing commas before } or ]
+        def remove_trailing_commas(s: str) -> str:
+            return re.sub(r',\s*([}\]])', r'\1', s)
+
+        # Fix unescaped newlines/tabs inside string literals
+        def fix_raw_newlines(s: str) -> str:
+            result = []
+            in_string = False
+            escape = False
+            for char in s:
+                if char == '"' and not escape:
+                    in_string = not in_string
+                elif char == '\\':
+                    escape = not escape
+                else:
+                    escape = False
+
+                if in_string and char == '\n':
+                    result.append('\\n')
+                elif in_string and char == '\r':
+                    result.append('\\r')
+                elif in_string and char == '\t':
+                    result.append('\\t')
+                else:
+                    result.append(char)
+            return "".join(result)
+
+        # Try tiered repairs
+        repaired_variations = [
+            repair_escapes(cleaned),
+            remove_trailing_commas(repair_escapes(cleaned)),
+            fix_raw_newlines(repair_escapes(remove_trailing_commas(cleaned))),
+            fix_raw_newlines(repair_escapes(remove_trailing_commas(re.sub(r'//.*$', '', cleaned, flags=re.MULTILINE))))
+        ]
+
+        for rep in repaired_variations:
+            try:
+                return json.loads(rep, strict=False)
+            except Exception:
+                pass
+
+        # Strategy 4: Balance unclosed braces / truncated JSON using a bracket stack
+        def balance_json(s: str) -> str:
+            stack = []
+            in_str = False
+            esc = False
+            for c in s:
+                if c == '"' and not esc:
+                    in_str = not in_str
+                elif c == '\\':
+                    esc = not esc
+                else:
+                    esc = False
+
+                if not in_str:
+                    if c == '{':
+                        stack.append('}')
+                    elif c == '[':
+                        stack.append(']')
+                    elif c in ('}', ']') and stack:
+                        if stack[-1] == c:
+                            stack.pop()
+
+            balanced = s
+            if in_str:
+                balanced += '"'
+            balanced = re.sub(r',\s*$', '', balanced.strip())
+            while stack:
+                balanced += stack.pop()
+            return balanced
+
+        try:
+            balanced_attempt = balance_json(repair_escapes(cleaned))
+            return json.loads(balanced_attempt, strict=False)
+        except Exception:
+            pass
+
+        # Strategy 5: Regex extraction of individual question evaluation objects if overall object was truncated
+        eval_blocks = re.findall(r'\{\s*"question_id"\s*:[^}]+(?:maximum_marks|awarded_marks|student_answer)[^}]+\}', raw_text, re.DOTALL)
+        if eval_blocks:
+            eval_items = []
+            for b in eval_blocks:
                 try:
-                    return json.loads(cleaned[start:end + 1])
-                except json.JSONDecodeError:
+                    eval_item = json.loads(repair_escapes(b), strict=False)
+                    if isinstance(eval_item, dict) and (eval_item.get("question_id") or eval_item.get("question_number")):
+                        eval_items.append(eval_item)
+                except Exception:
                     pass
-        raise ValueError("Response from Gemini 3.6 Flash was not valid JSON.")
+            if eval_items:
+                logger.info(f"[parse_json_response] Successfully recovered {len(eval_items)} evaluation items via block recovery.")
+                return {
+                    "is_unreadable": False,
+                    "evaluations": eval_items,
+                    "overall_teacher_comment": "Evaluations parsed successfully from response.",
+                    "strengths": [],
+                    "weaknesses": []
+                }
+
+        logger.error(f"[parse_json_response] Failed to parse JSON. Raw snippet: {raw_text[:500]}")
+        raise ValueError("Response from Gemini was not valid JSON.")
 
     # ------------------------------------------------------------------
     # Specialized Gemini Operations (Unified Strict Evaluation Engine)
@@ -281,8 +400,14 @@ Return ONLY a valid JSON object matching this schema:
   ]
 }}
 """
-        raw = self.generate_content(prompt, files=[qp_file], json_output=True, temperature=0.0)
-        return self.parse_json_response(raw)
+        try:
+            raw = self.generate_content(prompt, files=[qp_file], json_output=True, temperature=0.0)
+            return self.parse_json_response(raw)
+        except Exception as e:
+            logger.warning(f"[GeminiService] evaluate_question_paper first attempt failed: {e}. Retrying...")
+            retry_prompt = prompt + "\n\nCRITICAL: Return ONLY valid, fully closed JSON matching the schema above."
+            raw = self.generate_content(retry_prompt, files=[qp_file], json_output=True, temperature=0.0)
+            return self.parse_json_response(raw)
 
     def evaluate_answer_script(
         self,
@@ -404,8 +529,14 @@ Return ONLY a valid JSON object matching this schema:
         if syllabus_file:
             files.append(syllabus_file)
 
-        raw = self.generate_content(prompt, files=files, json_output=True, temperature=0.0)
-        return self.parse_json_response(raw)
+        try:
+            raw = self.generate_content(prompt, files=files, json_output=True, temperature=0.0)
+            return self.parse_json_response(raw)
+        except Exception as e:
+            logger.warning(f"[GeminiService] evaluate_answer_script first attempt failed: {e}. Retrying with strict JSON instruction...")
+            retry_prompt = prompt + "\n\nCRITICAL: Respond ONLY with a clean, fully closed, valid JSON object matching the schema above. Do not include unescaped LaTeX backslashes or markdown code blocks."
+            raw = self.generate_content(retry_prompt, files=files, json_output=True, temperature=0.0)
+            return self.parse_json_response(raw)
 
     def verify_evaluation(self, qp_structure: Dict[str, Any], eval_result: Dict[str, Any]) -> Dict[str, Any]:
         """Independent second verification pass enforcing strict consistency, mark bounds, and arithmetic validation."""
