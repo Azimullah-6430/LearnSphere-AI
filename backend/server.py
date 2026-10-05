@@ -183,15 +183,31 @@ def save_uploaded_file(uploaded_file, prefix: str) -> str:
     return str(destination)
 
 
-def mongo_serialize(doc: dict) -> dict:
+def mongo_serialize(doc: Any) -> Any:
     if not doc:
-        return {}
+        return {} if isinstance(doc, dict) else doc
+    if isinstance(doc, list):
+        return [mongo_serialize(x) for x in doc]
+    if ObjectId and isinstance(doc, ObjectId):
+        return str(doc)
+    if isinstance(doc, datetime):
+        return doc.strftime("%Y-%m-%d %H:%M:%S")
+    if not isinstance(doc, dict):
+        return doc
+
     d = dict(doc)
     if "_id" in d:
         d["id"] = str(d.pop("_id"))
-    for k, v in d.items():
+    for k, v in list(d.items()):
         if isinstance(v, datetime):
             d[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+        elif ObjectId and isinstance(v, ObjectId):
+            d[k] = str(v)
+        elif isinstance(v, dict):
+            d[k] = mongo_serialize(v)
+        elif isinstance(v, list):
+            d[k] = [mongo_serialize(x) for x in v]
+
     # Never send password data
     d.pop("password", None)
     d.pop("password_hash", None)
@@ -412,13 +428,8 @@ def auth_register():
         session["user_id"] = stored_id
         session["role"]    = role
 
-        response_user = {k: v for k, v in user_doc.items()
-                         if k not in ("password_hash", "password")}
+        response_user = mongo_serialize(user_doc)
         response_user["id"] = stored_id
-        if isinstance(response_user.get("created_at"), datetime):
-            response_user["created_at"] = response_user["created_at"].strftime("%Y-%m-%d %H:%M:%S")
-        if isinstance(response_user.get("updated_at"), datetime):
-            response_user["updated_at"] = response_user["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
 
         return jsonify({"success": True, "user": response_user}), 201
 
@@ -1124,11 +1135,7 @@ def analyze_syllabus():
             conn.commit()
             conn.close()
 
-        response_doc = {k: v for k, v in syllabus_doc.items() if k != "_id"}
-        if isinstance(response_doc.get("created_at"), datetime):
-            response_doc["created_at"] = response_doc["created_at"].strftime("%Y-%m-%d %H:%M:%S")
-        if isinstance(response_doc.get("updated_at"), datetime):
-            response_doc["updated_at"] = response_doc["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+        response_doc = mongo_serialize(syllabus_doc)
 
         return jsonify({"success": True, "syllabus_id": syllabus_id, "analysis": analysis, "syllabus": response_doc}), 200
 
