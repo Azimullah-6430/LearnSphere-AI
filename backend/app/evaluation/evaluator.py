@@ -425,70 +425,157 @@ class EvaluationAgent:
                     except Exception:
                         pass
 
-            # Partition into attempted vs unattempted
-            attempted_list = [q for q in q_list if q.get("attempted")]
-            unattempted_list = [q for q in q_list if not q.get("attempted")]
+            # Detect option-level grouping (e.g. 6(a)(i) + 6(a)(ii) belong to Option A, 6(b) belongs to Option B)
+            options_map: Dict[str, List[Dict[str, Any]]] = {}
+            has_suboptions = False
 
-            # Sort attempted options by awarded_marks descending (highest score first)
-            attempted_sorted = sorted(attempted_list, key=lambda x: x["awarded_marks"], reverse=True)
-
-            counted_in_group = 0
-            for q_rec in attempted_sorted:
-                if counted_in_group < req_count:
-                    q_rec["counted_in_total"] = True
-                    q_rec["is_extra_choice"] = False
-                    q_rec["is_skipped_due_to_choice"] = False
-                    counted_obtained += q_rec["awarded_marks"]
-                    choice_group_max_counted += q_rec["maximum_marks"]
-                    counted_in_group += 1
+            for q in q_list:
+                qno = q.get("question_number", "")
+                opt_match = re.search(r"\b(?:q?\d+[\.\s]*)?\(?([a-zA-Z])\)?(?:\s*\(?[ivxlcdm0-9]+\)?)?", qno, re.I)
+                if opt_match and len(q_list) > 2:
+                    opt_key = opt_match.group(1).lower()
+                    has_suboptions = True
                 else:
-                    # Extra elective attempt beyond required choice count
-                    q_rec["counted_in_total"] = False
-                    q_rec["is_extra_choice"] = True
-                    q_rec["is_skipped_due_to_choice"] = False
-                    q_rec["marks_lost"] = 0.0
-                    q_rec["evaluation_reason"] += f" (Extra elective choice evaluated: Awarded {q_rec['awarded_marks']}/{q_rec['maximum_marks']}. Top scoring choice counted towards total)"
-                    q_rec["teacher_feedback"] = "Extra elective attempt evaluated for feedback (Highest scoring option was counted towards final total)."
-                all_final_questions.append(q_rec)
+                    opt_key = q.get("question_id") or qno
 
-            remaining_needed = req_count - counted_in_group
-            for q_rec in unattempted_list:
-                if remaining_needed > 0:
-                    # Student skipped without attempting even the required number of choices
-                    q_rec["counted_in_total"] = True
-                    q_rec["is_skipped_due_to_choice"] = False
-                    q_rec["is_extra_choice"] = False
-                    q_rec["marks_lost"] = q_rec["maximum_marks"]
-                    q_rec["answer_classification"] = "unanswered_question"
-                    q_rec["evaluation_reason"] = "Mandatory elective choice question was omitted. 0 marks awarded."
-                    q_rec["teacher_feedback"] = "Question was skipped. Attempt this question for credit."
-                    choice_group_max_counted += q_rec["maximum_marks"]
-                    remaining_needed -= 1
-                else:
-                    # Student skipped this alternative because they already attempted their required choice(s)!
-                    q_rec["counted_in_total"] = False
-                    q_rec["is_skipped_due_to_choice"] = True
-                    q_rec["is_extra_choice"] = False
-                    q_rec["marks_lost"] = 0.0
-                    q_rec["awarded_marks"] = 0.0
-                    q_rec["percentage_of_question"] = 0.0
-                    q_rec["answer_classification"] = "skipped_choice_option"
-                    q_rec["student_answer"] = "Skipped in accordance with elective choice (Alternative option attempted)."
-                    q_rec["evidence_reference"] = "Omitted per choice rule"
-                    q_rec["evaluation_reason"] = "This question was omitted in accordance with the internal elective choice / (OR) option on the paper."
-                    q_rec["teacher_feedback"] = "Skipped in accordance with elective choice (Alternative OR option attempted)."
-                    q_rec["what_is_missing"] = []
-                    q_rec["missing_points"] = []
-                    q_rec["what_is_incorrect"] = []
-                    q_rec["errors"] = []
-                    q_rec["what_was_done_correctly"] = []
-                    q_rec["strengths"] = []
-                    q_rec["how_to_improve"] = "Alternative choice option was successfully attempted."
-                    q_rec["conceptual_mistake"] = ""
-                    q_rec["step_or_calculation_mistake"] = ""
-                    q_rec["misconception_detected"] = False
-                    q_rec["misconception"] = ""
-                all_final_questions.append(q_rec)
+                if opt_key not in options_map:
+                    options_map[opt_key] = []
+                options_map[opt_key].append(q)
+
+            if has_suboptions and len(options_map) > 1:
+                # Option-level evaluation
+                option_stats = []
+                for opt_key, opt_qs in options_map.items():
+                    opt_awarded = sum(q["awarded_marks"] for q in opt_qs if q.get("attempted"))
+                    opt_max = sum(q["maximum_marks"] for q in opt_qs)
+                    any_attempted = any(q.get("attempted") for q in opt_qs)
+                    option_stats.append({
+                        "opt_key": opt_key,
+                        "questions": opt_qs,
+                        "awarded": opt_awarded,
+                        "max": opt_max,
+                        "attempted": any_attempted
+                    })
+
+                option_stats_sorted = sorted(option_stats, key=lambda x: (1 if x["attempted"] else 0, x["awarded"]), reverse=True)
+
+                counted_opts = 0
+                for opt_stat in option_stats_sorted:
+                    if counted_opts < req_count and opt_stat["attempted"]:
+                        for q_rec in opt_stat["questions"]:
+                            if q_rec.get("attempted"):
+                                q_rec["counted_in_total"] = True
+                                q_rec["is_extra_choice"] = False
+                                q_rec["is_skipped_due_to_choice"] = False
+                                counted_obtained += q_rec["awarded_marks"]
+                            else:
+                                q_rec["counted_in_total"] = True
+                                q_rec["is_skipped_due_to_choice"] = False
+                                q_rec["is_extra_choice"] = False
+                                q_rec["marks_lost"] = q_rec["maximum_marks"]
+                                q_rec["answer_classification"] = "unanswered_question"
+                                q_rec["evaluation_reason"] = "Sub-question in chosen elective option was omitted. 0 marks awarded."
+                            all_final_questions.append(q_rec)
+                        counted_opts += 1
+                    elif counted_opts < req_count and not opt_stat["attempted"]:
+                        for q_rec in opt_stat["questions"]:
+                            q_rec["counted_in_total"] = True
+                            q_rec["is_skipped_due_to_choice"] = False
+                            q_rec["is_extra_choice"] = False
+                            q_rec["marks_lost"] = q_rec["maximum_marks"]
+                            q_rec["answer_classification"] = "unanswered_question"
+                            all_final_questions.append(q_rec)
+                        counted_opts += 1
+                    else:
+                        is_extra = opt_stat["attempted"]
+                        for q_rec in opt_stat["questions"]:
+                            q_rec["counted_in_total"] = False
+                            q_rec["is_skipped_due_to_choice"] = not is_extra
+                            q_rec["is_extra_choice"] = is_extra
+                            q_rec["marks_lost"] = 0.0
+                            if not is_extra:
+                                q_rec["awarded_marks"] = 0.0
+                                q_rec["percentage_of_question"] = 0.0
+                                q_rec["answer_classification"] = "skipped_choice_option"
+                                q_rec["student_answer"] = "Skipped in accordance with elective choice (Alternative Option attempted)."
+                                q_rec["evidence_reference"] = "Omitted per choice rule"
+                                q_rec["evaluation_reason"] = "This question was omitted in accordance with the internal elective choice / (OR) option on the paper."
+                                q_rec["teacher_feedback"] = "Skipped in accordance with elective choice (Alternative Option attempted)."
+                                q_rec["what_is_missing"] = []
+                                q_rec["missing_points"] = []
+                                q_rec["what_is_incorrect"] = []
+                                q_rec["errors"] = []
+                                q_rec["what_was_done_correctly"] = []
+                                q_rec["strengths"] = []
+                                q_rec["how_to_improve"] = "Alternative choice option was attempted."
+                                q_rec["conceptual_mistake"] = ""
+                                q_rec["step_or_calculation_mistake"] = ""
+                                q_rec["misconception_detected"] = False
+                                q_rec["misconception"] = ""
+                            else:
+                                q_rec["evaluation_reason"] += f" (Extra elective option evaluated: Awarded {q_rec['awarded_marks']}/{q_rec['maximum_marks']}. Top scoring choice option counted towards total)"
+                                q_rec["teacher_feedback"] = "Extra elective choice evaluated for feedback (Highest scoring option counted towards total)."
+                            all_final_questions.append(q_rec)
+            else:
+                # Single item-level partition
+                attempted_list = [q for q in q_list if q.get("attempted")]
+                unattempted_list = [q for q in q_list if not q.get("attempted")]
+                attempted_sorted = sorted(attempted_list, key=lambda x: x["awarded_marks"], reverse=True)
+
+                counted_in_group = 0
+                for q_rec in attempted_sorted:
+                    if counted_in_group < req_count:
+                        q_rec["counted_in_total"] = True
+                        q_rec["is_extra_choice"] = False
+                        q_rec["is_skipped_due_to_choice"] = False
+                        counted_obtained += q_rec["awarded_marks"]
+                        choice_group_max_counted += q_rec["maximum_marks"]
+                        counted_in_group += 1
+                    else:
+                        q_rec["counted_in_total"] = False
+                        q_rec["is_extra_choice"] = True
+                        q_rec["is_skipped_due_to_choice"] = False
+                        q_rec["marks_lost"] = 0.0
+                        q_rec["evaluation_reason"] += f" (Extra elective choice evaluated: Awarded {q_rec['awarded_marks']}/{q_rec['maximum_marks']}. Top scoring choice counted towards total)"
+                        q_rec["teacher_feedback"] = "Extra elective attempt evaluated for feedback (Highest scoring option was counted towards final total)."
+                    all_final_questions.append(q_rec)
+
+                remaining_needed = req_count - counted_in_group
+                for q_rec in unattempted_list:
+                    if remaining_needed > 0:
+                        q_rec["counted_in_total"] = True
+                        q_rec["is_skipped_due_to_choice"] = False
+                        q_rec["is_extra_choice"] = False
+                        q_rec["marks_lost"] = q_rec["maximum_marks"]
+                        q_rec["answer_classification"] = "unanswered_question"
+                        q_rec["evaluation_reason"] = "Mandatory elective choice question was omitted. 0 marks awarded."
+                        q_rec["teacher_feedback"] = "Question was skipped. Attempt this question for credit."
+                        choice_group_max_counted += q_rec["maximum_marks"]
+                        remaining_needed -= 1
+                    else:
+                        q_rec["counted_in_total"] = False
+                        q_rec["is_skipped_due_to_choice"] = True
+                        q_rec["is_extra_choice"] = False
+                        q_rec["marks_lost"] = 0.0
+                        q_rec["awarded_marks"] = 0.0
+                        q_rec["percentage_of_question"] = 0.0
+                        q_rec["answer_classification"] = "skipped_choice_option"
+                        q_rec["student_answer"] = "Skipped in accordance with elective choice (Alternative option attempted)."
+                        q_rec["evidence_reference"] = "Omitted per choice rule"
+                        q_rec["evaluation_reason"] = "This question was omitted in accordance with the internal elective choice / (OR) option on the paper."
+                        q_rec["teacher_feedback"] = "Skipped in accordance with elective choice (Alternative OR option attempted)."
+                        q_rec["what_is_missing"] = []
+                        q_rec["missing_points"] = []
+                        q_rec["what_is_incorrect"] = []
+                        q_rec["errors"] = []
+                        q_rec["what_was_done_correctly"] = []
+                        q_rec["strengths"] = []
+                        q_rec["how_to_improve"] = "Alternative choice option was successfully attempted."
+                        q_rec["conceptual_mistake"] = ""
+                        q_rec["step_or_calculation_mistake"] = ""
+                        q_rec["misconception_detected"] = False
+                        q_rec["misconception"] = ""
+                    all_final_questions.append(q_rec)
 
         if total_max_marks <= 0:
             total_max_marks = sum(q["maximum_marks"] for q in all_final_questions if q.get("counted_in_total", True))

@@ -583,6 +583,44 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertTrue(q1_b["attempted"])
         self.assertEqual(q1_b["awarded_marks"], 4.5)
 
+    def test_33_multi_part_choice_group_evaluation(self):
+        """33. Multi-subpart choice: Option A has 6(a)(i) [8m] + 6(a)(ii) [8m] = 16m; Option B has 6(b) [16m].
+        Student answers 6(b) (15/16). Option A is skipped due to choice. Total marks must be 16.0, not 32.0.
+        """
+        qp_struct = {
+            "subject": "Software Engineering",
+            "total_marks": 16.0,
+            "questions": [
+                {"question_id": "q6_a_1", "question_number": "6(a)(i)", "question_text": "Spiral model diagram", "maximum_marks": 8.0, "choice_group": "choice_q6", "required_choice_count": 1},
+                {"question_id": "q6_a_2", "question_number": "6(a)(ii)", "question_text": "Prototyping approach", "maximum_marks": 8.0, "choice_group": "choice_q6", "required_choice_count": 1},
+                {"question_id": "q6_b", "question_number": "6(b)", "question_text": "Extreme Programming (XP)", "maximum_marks": 16.0, "choice_group": "choice_q6", "required_choice_count": 1}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {"question_id": "q6_b", "question_number": "6(b)", "attempted": True, "maximum_marks": 16.0, "awarded_marks": 15.0, "teacher_feedback": "Comprehensive XP answer."}
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 16.0, "Paper total with 1 of 2 16-mark options must be 16.0")
+        self.assertEqual(result["obtained_marks"], 15.0)
+        self.assertEqual(result["percentage"], 93.75)
+
+        q6_b = next(q for q in result["evaluations"] if q["question_number"] == "6(b)")
+        q6_a1 = next(q for q in result["evaluations"] if q["question_number"] == "6(a)(i)")
+        q6_a2 = next(q for q in result["evaluations"] if q["question_number"] == "6(a)(ii)")
+
+        self.assertTrue(q6_b["counted_in_total"])
+        self.assertEqual(q6_b["awarded_marks"], 15.0)
+
+        self.assertFalse(q6_a1["counted_in_total"])
+        self.assertTrue(q6_a1["is_skipped_due_to_choice"])
+        self.assertEqual(q6_a1["marks_lost"], 0.0)
+
+        self.assertFalse(q6_a2["counted_in_total"])
+        self.assertTrue(q6_a2["is_skipped_due_to_choice"])
+        self.assertEqual(q6_a2["marks_lost"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
