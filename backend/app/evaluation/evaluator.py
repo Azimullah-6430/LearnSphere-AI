@@ -780,6 +780,10 @@ class EvaluationAgent:
         total = float(data.get("total_marks") or 0.0)
 
         questions = []
+        last_main_num = None
+        last_opt_letter = None
+        last_choice_grp = None
+
         for idx, q in enumerate(raw_q):
             if not isinstance(q, dict): continue
             qno = str(q.get("question_number") or q.get("question_id") or f"Q{idx+1}").strip()
@@ -788,16 +792,62 @@ class EvaluationAgent:
             req_c = q.get("required_choice_count")
             q_text = str(q.get("question_text") or "").strip()
 
-            # Automatic fallback detection of (OR) choice groups if not explicitly populated by model
-            if not c_grp:
-                # Check for "(OR)" or "[OR]" or " OR " markers in question text or question number
-                if "(or)" in qno.lower() or "[or]" in qno.lower():
-                    base_no = re.sub(r"[\(\[\{]\s*or\s*[\)\]\}]", "", qno, flags=re.I).strip()
-                    c_grp = f"choice_{base_no}"
+            # Parse hierarchy of current item
+            main_n, opt_l, sub_p = self._parse_q_hierarchy(qno)
+
+            # Check for (OR) indicators in question number or text
+            is_or_choice = bool(
+                "(or)" in qno.lower() or "[or]" in qno.lower() or
+                "(or)" in q_text[:35].lower() or "[or]" in q_text[:35].lower() or
+                q_text.strip().upper().startswith("OR ") or q_text.strip().upper().startswith("OR\n")
+            )
+
+            # Clean '(OR)' markers from question number
+            clean_qno = re.sub(r"[\(\[\{]\s*or\s*[\)\]\}]", "", qno, flags=re.I).strip()
+            if clean_qno:
+                qno = clean_qno
+
+            # If main question number changes, reset last_choice_grp
+            if main_n is not None and last_main_num is not None and main_n != last_main_num:
+                last_choice_grp = None
+                last_opt_letter = None
+
+            # Case A: Standalone option without main number (e.g. "b", "(b)", "(b)(i)", "b)")
+            if main_n is None and opt_l is not None and last_main_num is not None:
+                main_n = last_main_num
+                qno = f"{main_n}({opt_l})" + (f"({sub_p})" if sub_p else "")
+                if not c_grp:
+                    c_grp = f"choice_q{main_n}"
                     req_c = 1
-                elif "(or)" in q_text[:30].lower() or "[or]" in q_text[:30].lower() or q_text.strip().upper().startswith("OR "):
-                    c_grp = f"choice_{re.sub(r'[^a-zA-Z0-9]', '_', qno)}"
+
+            # Case B: OR marker present after a question (e.g. after 6(a), text says "(OR) Discuss waterfall...")
+            if is_or_choice and last_main_num is not None:
+                if main_n is None or (opt_l == "b" and main_n > last_main_num):
+                    # Model mistakenly incremented main_num across an OR barrier (e.g. called 6b as 7 or 7a)
+                    main_n = last_main_num
+                    if not opt_l:
+                        opt_l = "b"
+                    qno = f"{main_n}({opt_l})" + (f"({sub_p})" if sub_p else "")
+                if not c_grp:
+                    c_grp = f"choice_q{main_n}"
                     req_c = 1
+
+            # Case C: Question has same main number and different option letter (e.g. 6(a) and 6(b))
+            if main_n is not None and main_n == last_main_num and opt_l is not None and last_opt_letter is not None and opt_l != last_opt_letter:
+                if not c_grp:
+                    c_grp = f"choice_q{main_n}"
+                    req_c = 1
+
+            # Default required choice count to 1 if choice group exists
+            if c_grp and not req_c:
+                req_c = 1
+
+            if main_n is not None:
+                last_main_num = main_n
+            if opt_l is not None:
+                last_opt_letter = opt_l
+            if c_grp:
+                last_choice_grp = c_grp
 
             questions.append({
                 "question_id": str(q.get("question_id") or f"q_{idx+1}"),
@@ -811,6 +861,18 @@ class EvaluationAgent:
                 "required_choice_count": req_c or (1 if c_grp else None),
                 "expected_components": q.get("expected_components") if isinstance(q.get("expected_components"), list) else []
             })
+
+        # Backfill choice groups to earlier siblings of the same main question
+        for q_item in questions:
+            cg = q_item.get("choice_group")
+            if cg:
+                m_num = self._parse_q_hierarchy(q_item.get("question_number"))[0]
+                if m_num is not None:
+                    for prev_q in questions:
+                        prev_m_num = self._parse_q_hierarchy(prev_q.get("question_number"))[0]
+                        if prev_m_num == m_num and not prev_q.get("choice_group"):
+                            prev_q["choice_group"] = cg
+                            prev_q["required_choice_count"] = q_item.get("required_choice_count") or 1
 
         # Calculate accurate total marks accounting for elective choice groups
         if total <= 0:

@@ -231,10 +231,14 @@ Context Hints (use only as background guidance; paper header is authoritative):
 EXTRACTION MANDATES:
 1. Extract the EXACT printed Subject Name, Exam Title, and Total Maximum Marks from the paper header/instructions.
    - For Total Maximum Marks: Note the authoritative paper maximum marks (e.g. 50, 70, 75, 80, 100). Do NOT naively sum all elective choice questions together.
-2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1(a), 1(b), 2, 3(i), 3(ii), Part A Q1).
-3. CRITICAL: (OR) / ELECTIVE CHOICE DETECTION:
-   - If questions or subparts are separated by '(OR)', '[OR]', 'OR', or instructions state 'Answer either ... OR ...' or 'Answer any X of Y', assign the EXACT same 'choice_group' identifier to all alternative options in that set (e.g., "choice_q1" for Q1(a) and Q1(b), or "choice_q3" for Q3 Option A and Q3 Option B).
-   - Set 'required_choice_count' to the exact number of options the student is required to answer from that group (usually 1).
+2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1(a), 1(b), 2, 3(i), 3(ii), Part A Q1, 6(a)(i), 6(a)(ii), 6(b)).
+3. CRITICAL: (OR) / ELECTIVE CHOICE DETECTION & MAIN QUESTION CONTINUITY:
+   - In examination papers, elective questions are often printed with '(OR)', '[OR]', 'OR' between Option A and Option B (e.g., 6. (a) ... (OR) ... (b) ...).
+   - CRITICAL RULE: Option B is frequently printed as just '(b)', 'b)', or placed directly below '(OR)' WITHOUT repeating the main question number '6' on top.
+   - DO NOT increment the main question number for Option B! Option B is ALWAYS '6(b)' (or 6(b)(i)), NEVER '7(a)' or '7'!
+   - The main question number increments ONLY when a genuinely new main question starts (e.g. '7.', '7(a)', 'Q7').
+   - Assign the EXACT same 'choice_group' identifier to all alternative options for that question (e.g. "choice_q6" for 6(a)(i), 6(a)(ii), and 6(b), or "choice_q7" for 7(a) and 7(b)).
+   - Set 'required_choice_count' to the exact number of options required (usually 1).
 4. For EVERY question:
    - Extract the complete verbatim 'question_text' including all parameters, numerical values, equations, constraints, and instructions.
    - For Multiple Choice Questions (MCQs), extract the full text of all printed options under 'options'.
@@ -306,14 +310,14 @@ OFFICIAL QUESTION PAPER STRUCTURE:
 {qp_json}
 
 STRICT HUMAN TEACHER EVALUATION RULES:
-1. DYNAMIC MAPPING & EXACT QUESTION BINDING (NEVER SWAP OR CONFUSE OPTIONS / SUBPARTS):
+1. DYNAMIC MAPPING & EXACT QUESTION BINDING (ZERO MAPPING ERRORS):
    - Inspect EVERY single page and line of the uploaded answer script with extreme care.
-   - Answers may be written in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
-   - Question numbers may be written in margins, underlined, circled, abbreviated (e.g. "Ans 6b", "6(b)", "7 a i", "Q7(a)(i)"), or implicit.
-   - You MUST include an evaluation item for EVERY SINGLE QUESTION in the Question Paper structure above, using the exact 'question_id' and 'question_number' provided in the official structure.
+   - Answers may be written in ANY order (e.g. student answered Q6(b) first, then Q7(a), then Q1).
+   - Question numbers may be written in margins, underlined, circled, abbreviated (e.g. "Ans 6b", "6(b)", "6 b", "6 OR", "7 a i", "Q7(a)(i)"), or implicit.
+   - TOPIC & SEMANTIC MATCHING: Even if the question number in the handwritten script is brief or missing the main number (e.g. student wrote "Ans (b)" or "OR part"), analyze the topic, diagrams, equations, and concepts to bind the answer to the correct question in the Question Paper structure.
    - STRICT OPTION DISAMBIGUATION:
      * When questions have elective choices (e.g. 6(a) vs 6(b), or 7(a)(i)+(ii) vs 7(b)(i)+(ii)):
-       - If the student attempted Option B (e.g. 6(b)), bind the answer strictly to '6(b)'. DO NOT mark it under 6(a).
+       - If the student attempted Option B (e.g. 6(b)), bind the answer strictly to '6(b)'. DO NOT mark it under 6(a) or 7(a).
        - If the student attempted Option A (e.g. 7(a)(i) and 7(a)(ii)), bind the answers strictly to 7(a)(i) and 7(a)(ii). DO NOT mark them under 7(b)(i) or 7(b)(ii).
        - For the unattempted alternative option(s), set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
    - DO NOT mark a question as unattempted if the student wrote an answer anywhere in the script!

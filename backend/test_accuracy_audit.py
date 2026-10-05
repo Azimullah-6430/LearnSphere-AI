@@ -746,6 +746,76 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertTrue(comp((6, 'b', None), (6, 'b', None)))
         self.assertTrue(comp((7, 'a', '1'), (7, 'a', '1')))
 
+    def test_36_unprinted_top_question_number_choice_continuity(self):
+        """36. Test scenario where Option B is printed as just '(b)' or under '(OR)' without '6' printed on top.
+        The normalization must assign it to 6(b), group under choice_q6, and ensure 7(a) is NOT confused with 6(b).
+        """
+        raw_extracted_qp = {
+            "subject": "Software Engineering",
+            "total_marks": 30.0,
+            "questions": [
+                # 6(a)(i) and 6(a)(ii)
+                {"question_id": "raw_1", "question_number": "6(a)(i)", "question_text": "Explain agile principles.", "maximum_marks": 7.0},
+                {"question_id": "raw_2", "question_number": "6(a)(ii)", "question_text": "Describe scrum sprints.", "maximum_marks": 8.0},
+                # Option B printed as just '(b)' with '(OR)' marker
+                {"question_id": "raw_3", "question_number": "(b)", "question_text": "(OR) Discuss waterfall model with neat diagram.", "maximum_marks": 15.0},
+
+                # 7(a)(i) and 7(a)(ii)
+                {"question_id": "raw_4", "question_number": "7(a)(i)", "question_text": "Draw banking use case diagram.", "maximum_marks": 8.0},
+                {"question_id": "raw_5", "question_number": "7(a)(ii)", "question_text": "Explain class relationships.", "maximum_marks": 7.0},
+                # Option B of Q7 printed as just 'b)' with OR
+                {"question_id": "raw_6", "question_number": "b)", "question_text": "OR Explain sequence diagrams.", "maximum_marks": 15.0}
+            ]
+        }
+
+        normalized_qp = self.agent._strict_normalize_qp(raw_extracted_qp)
+        q_map = {q["question_number"]: q for q in normalized_qp["questions"]}
+
+        # Verify Option B of Q6 was resolved to '6(b)'
+        self.assertIn("6(b)", q_map)
+        self.assertEqual(q_map["6(b)"]["choice_group"], "choice_q6")
+        self.assertEqual(q_map["6(a)(i)"]["choice_group"], "choice_q6")
+        self.assertEqual(q_map["6(a)(ii)"]["choice_group"], "choice_q6")
+
+        # Verify Option B of Q7 was resolved to '7(b)'
+        self.assertIn("7(b)", q_map)
+        self.assertEqual(q_map["7(b)"]["choice_group"], "choice_q7")
+        self.assertEqual(q_map["7(a)(i)"]["choice_group"], "choice_q7")
+        self.assertEqual(q_map["7(a)(ii)"]["choice_group"], "choice_q7")
+
+        # Now simulate student answering 6(b) and 7(a)(i) + 7(a)(ii)
+        ai_response = {
+            "evaluations": [
+                {"question_id": "raw_3", "question_number": "6(b)", "attempted": True, "maximum_marks": 15.0, "awarded_marks": 14.0, "teacher_feedback": "Detailed waterfall answer."},
+                {"question_id": "raw_4", "question_number": "7(a)(i)", "attempted": True, "maximum_marks": 8.0, "awarded_marks": 8.0, "teacher_feedback": "Accurate use cases."},
+                {"question_id": "raw_5", "question_number": "7(a)(ii)", "attempted": True, "maximum_marks": 7.0, "awarded_marks": 6.5, "teacher_feedback": "Good OOP relationship analysis."}
+            ]
+        }
+
+        result = self.agent.verify_and_finalize_evaluation(normalized_qp, ai_response)
+
+        # Total marks must be 30.0
+        self.assertEqual(result["total_marks"], 30.0)
+        # Total obtained: 14.0 + 8.0 + 6.5 = 28.5
+        self.assertEqual(result["obtained_marks"], 28.5)
+        self.assertEqual(result["percentage"], 95.0)
+
+        evals_by_qno = {q["question_number"]: q for q in result["evaluations"]}
+        self.assertTrue(evals_by_qno["6(b)"]["counted_in_total"])
+        self.assertEqual(evals_by_qno["6(b)"]["awarded_marks"], 14.0)
+
+        self.assertFalse(evals_by_qno["6(a)(i)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["6(a)(i)"]["is_skipped_due_to_choice"])
+
+        self.assertTrue(evals_by_qno["7(a)(i)"]["counted_in_total"])
+        self.assertEqual(evals_by_qno["7(a)(i)"]["awarded_marks"], 8.0)
+
+        self.assertTrue(evals_by_qno["7(a)(ii)"]["counted_in_total"])
+        self.assertEqual(evals_by_qno["7(a)(ii)"]["awarded_marks"], 6.5)
+
+        self.assertFalse(evals_by_qno["7(b)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["7(b)"]["is_skipped_due_to_choice"])
+
 
 if __name__ == "__main__":
     unittest.main()
