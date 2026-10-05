@@ -99,12 +99,12 @@ export default function MisconceptionMap() {
       ) : (
         <div className="space-y-5">
           {misconceptions.map((m, i) => {
-            const studentName = m.student_name || (m.student_names && m.student_names[0]) || "Rahul Kumar"
+            const studentName = m.student_name || (m.student_names && m.student_names[0]) || "Student"
             const affectedList = m.student_names || [studentName]
             const isHigh = (m.confidence || m.severity) === 'High'
             const isResolved = m.status === 'Completed / Resolved'
-            const occurrences = m.occurrences || 2
-            const assessmentsList = m.assessments || ["Mid-Term Exam", "Unit Test 2"]
+            const occurrences = m.occurrences || 1
+            const assessmentsList = m.assessments || []
 
             return (
               <Card key={m.id || i} className={`relative transition-all shadow-md border-l-4 ${isResolved ? 'opacity-75 bg-[var(--surface-alt)] border-l-gray-400' : isHigh ? 'border-l-[var(--error)] hover:border-[var(--accent-dim)]' : 'border-l-[var(--gold)] hover:border-[var(--accent-dim)]'}`}>

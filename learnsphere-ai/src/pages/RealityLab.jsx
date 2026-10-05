@@ -90,7 +90,7 @@ export default function RealityLab() {
       const res = await api.evaluateRealityLab(scenario.title, scenario.title, answer, activeSubject)
       if (res && res.success && res.evaluation) {
         const ev = res.evaluation
-        const pct = ev.score || 85
+        const pct = ev.score ?? 0
         setResult({
           qualityPct: pct,
           feedback: ev.feedback,

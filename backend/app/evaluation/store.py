@@ -263,6 +263,12 @@ def _store_mongodb(
         "rubrics_path": rubric_path,
         "questions": evaluations,
         "evaluations": evaluations,
+        "summary": summary,
+        "strengths": eval_result.get("strengths") or [],
+        "weaknesses": eval_result.get("weaknesses") or [],
+        "major_conceptual_errors": eval_result.get("major_conceptual_errors") or [],
+        "improvement_recommendations": eval_result.get("improvement_recommendations") or [],
+        "verification_status": eval_result.get("verification_status") or "verified",
         "plagiarism": plagiarism_result,
         "created_at": now,
     }

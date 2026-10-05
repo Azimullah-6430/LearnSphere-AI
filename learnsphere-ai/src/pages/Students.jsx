@@ -53,7 +53,7 @@ export default function Students() {
                   <td className="py-3.5 px-3 border-b border-[var(--border)] font-semibold">{s.name}</td>
                   <td className="py-3.5 px-3 border-b border-[var(--border)]">{s.section}</td>
                   <td className="py-3.5 px-3 border-b border-[var(--border)] font-bold text-[var(--accent)]">{s.average}%</td>
-                  <td className="py-3.5 px-3 border-b border-[var(--border)]">{s.evaluations || 8} completed</td>
+                  <td className="py-3.5 px-3 border-b border-[var(--border)]">{s.evaluations ?? 0} completed</td>
                   <td className="py-3.5 px-3 border-b border-[var(--border)]">
                     <Badge tone={s.status === 'On track' ? 'success' : s.status === 'At risk' ? 'error' : 'warning'}>
                       {s.status}

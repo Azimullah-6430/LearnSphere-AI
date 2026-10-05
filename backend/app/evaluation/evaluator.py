@@ -134,44 +134,64 @@ class EvaluationAgent:
 
         total_max_marks = float(qp.get("total_marks") or 0.0)
 
+        attempted_count = 0
+        unattempted_count = 0
+
         for q in qp["questions"]:
             qno = str(q.get("question_number") or "").strip()
             norm_qno = self._norm_qno(qno)
             item = by_qno.get(norm_qno)
 
             max_m = float(q.get("maximum_marks") or 0.0)
-            if max_m <= 0:
-                max_m = 5.0
 
             if item:
+                # Honest clamping: 0.0 <= awarded <= max_m
                 awarded = float(item.get("awarded_marks") or 0.0)
-                awarded = max(0.0, min(awarded, max_m))
+                if max_m > 0:
+                    awarded = max(0.0, min(awarded, max_m))
+                else:
+                    awarded = max(0.0, awarded)
+                    max_m = awarded if max_m <= 0 else max_m
+
                 attempted = bool(item.get("attempted", True))
+                if attempted:
+                    attempted_count += 1
+                else:
+                    unattempted_count += 1
+
                 student_ans = str(item.get("student_answer") or item.get("answer_summary") or "")
-                feedback_str = str(item.get("question_feedback") or "")
-                done_correctly = item.get("what_was_done_correctly") or []
-                what_missing = item.get("what_is_missing") or []
-                should_write = str(item.get("what_student_should_write") or "")
-                expected_ans = str(item.get("correct_answer_or_expected_points") or "")
+                evidence_ref = str(item.get("evidence_reference") or "")
+                eval_reason = str(item.get("evaluation_reason") or item.get("question_feedback") or "")
+                feedback_str = str(item.get("feedback") or item.get("question_feedback") or "")
+                strengths = item.get("strengths") or item.get("what_was_done_correctly") or []
+                errors = item.get("errors") or []
+                missing_points = item.get("missing_points") or item.get("what_is_missing") or []
+                should_have_written = str(item.get("what_student_should_have_written") or item.get("what_student_should_write") or "")
+                expected_ans = str(item.get("correct_answer_or_expected_points") or item.get("expected_answer") or "")
                 concepts = item.get("concepts_tested") or []
                 misconception = str(item.get("misconception") or "")
                 misconception_det = bool(item.get("misconception_detected", False))
-                conf = float(item.get("confidence") or 0.9)
+                conf = float(item.get("confidence") or 0.95)
             else:
                 awarded = 0.0
                 attempted = False
+                unattempted_count += 1
                 student_ans = "Question not attempted in student script."
-                feedback_str = "This question was not attempted in the uploaded script."
-                done_correctly = []
-                what_missing = ["Question was skipped / not attempted."]
-                should_write = "Attempt the question for credit."
+                evidence_ref = "Not present in script"
+                eval_reason = "This question was omitted or not attempted in the uploaded answer script."
+                feedback_str = "Question was skipped. Attempt this question for credit."
+                strengths = []
+                errors = ["Question not attempted"]
+                missing_points = ["Complete response required for credit"]
+                should_have_written = "Review this concept and provide a full step-by-step response."
                 expected_ans = ""
                 concepts = []
                 misconception = ""
                 misconception_det = False
                 conf = 1.0
 
-            marks_lost = round(max_m - awarded, 2)
+            pct_of_q = round((awarded / max_m) * 100, 2) if max_m > 0 else 0.0
+            marks_lost = round(max(0.0, max_m - awarded), 2)
 
             q_record = {
                 "question_id": q.get("question_id") or norm_qno,
@@ -180,25 +200,24 @@ class EvaluationAgent:
                 "maximum_marks": max_m,
                 "awarded_marks": round(awarded, 2),
                 "marks_lost": marks_lost,
+                "percentage_of_question": pct_of_q,
                 "attempted": attempted,
                 "student_answer": student_ans,
+                "evidence_reference": evidence_ref,
+                "evaluation_reason": eval_reason,
+                "strengths": strengths if isinstance(strengths, list) else [strengths],
+                "errors": errors if isinstance(errors, list) else [errors],
+                "missing_points": missing_points if isinstance(missing_points, list) else [missing_points],
+                "what_student_should_have_written": should_have_written,
+                "feedback": feedback_str,
                 "correct_answer_or_expected_points": expected_ans,
-                "question_feedback": feedback_str,
-                "what_was_done_correctly": done_correctly if isinstance(done_correctly, list) else [done_correctly],
-                "what_is_missing": what_missing if isinstance(what_missing, list) else [what_missing],
-                "what_student_should_write": should_write,
                 "concepts_tested": concepts if isinstance(concepts, list) else [concepts],
                 "misconception_detected": misconception_det,
                 "misconception": misconception,
                 "confidence": conf,
                 "choice_group": q.get("choice_group"),
                 "required_choice_count": q.get("required_choice_count"),
-                "feedback": {
-                    "what_was_done_well": done_correctly if isinstance(done_correctly, list) else [done_correctly],
-                    "missing_points": what_missing if isinstance(what_missing, list) else [what_missing],
-                    "expected_answer": expected_ans,
-                    "improvement": should_write
-                }
+                "counted_in_total": True,
             }
 
             c_group = q.get("choice_group")
@@ -209,16 +228,17 @@ class EvaluationAgent:
             else:
                 processed_questions.append(q_record)
 
-        # Handle optional choice groups (select top required_choice_count attempts per group)
+        # Handle elective / choice groups
         counted_obtained = sum(q["awarded_marks"] for q in processed_questions)
         all_final_questions = list(processed_questions)
 
         for c_group, q_list in choice_groups.items():
-            # Sort by awarded marks descending
             q_list_sorted = sorted(q_list, key=lambda x: x["awarded_marks"], reverse=True)
             req_count = q_list_sorted[0].get("required_choice_count") or 1
-            try: req_count = int(req_count)
-            except: req_count = 1
+            try:
+                req_count = int(req_count)
+            except Exception:
+                req_count = 1
 
             for idx, q_rec in enumerate(q_list_sorted):
                 if idx < req_count:
@@ -226,7 +246,7 @@ class EvaluationAgent:
                     counted_obtained += q_rec["awarded_marks"]
                 else:
                     q_rec["counted_in_total"] = False
-                    q_rec["question_feedback"] += " (Extra optional attempt - not counted towards final total)"
+                    q_rec["evaluation_reason"] += " (Extra elective attempt - highest scoring choice was counted towards final total)"
                 all_final_questions.append(q_rec)
 
         if total_max_marks <= 0:
@@ -235,19 +255,42 @@ class EvaluationAgent:
         total_obtained = round(min(total_max_marks, max(0.0, counted_obtained)), 2)
         percentage = round((total_obtained / total_max_marks) * 100, 2) if total_max_marks > 0 else 0.0
 
+        # Exam-wide qualitative feedback extraction
+        strengths_list = ai_eval.get("strengths") or []
+        if not isinstance(strengths_list, list) or not strengths_list:
+            strengths_list = [s for q in all_final_questions for s in q.get("strengths", []) if s][:5]
+
+        weaknesses_list = ai_eval.get("weaknesses") or []
+        if not isinstance(weaknesses_list, list) or not weaknesses_list:
+            weaknesses_list = [m for q in all_final_questions for m in q.get("missing_points", []) if m][:5]
+
+        major_misc = ai_eval.get("major_conceptual_errors") or []
+        if not isinstance(major_misc, list) or not major_misc:
+            major_misc = [q["misconception"] for q in all_final_questions if q.get("misconception_detected") and q.get("misconception")]
+
+        recs = ai_eval.get("improvement_recommendations") or []
+        if not isinstance(recs, list) or not recs:
+            recs = [q["what_student_should_have_written"] for q in all_final_questions if q.get("marks_lost", 0) > 0 and q.get("what_student_should_have_written")][:4]
+
         return {
             "obtained_marks": total_obtained,
             "total_marks": total_max_marks,
             "percentage": percentage,
             "grade": self._grade(percentage),
-            "ai_confidence": round(sum(q.get("confidence", 0.9) for q in all_final_questions) / max(1, len(all_final_questions)), 2),
+            "ai_confidence": round(sum(q.get("confidence", 0.95) for q in all_final_questions) / max(1, len(all_final_questions)), 2),
             "evaluation_status": "COMPLETED",
             "teacher_review_required": False,
             "questions": all_final_questions,
             "evaluations": all_final_questions,
-            "overall_feedback": ai_eval.get("overall_feedback") or f"Evaluation completed successfully. Score: {total_obtained}/{total_max_marks} ({percentage}%).",
+            "overall_feedback": ai_eval.get("overall_feedback") or f"Evaluation finalized. Awarded {total_obtained}/{total_max_marks} ({percentage}%).",
+            "strengths": strengths_list,
+            "weaknesses": weaknesses_list,
+            "major_conceptual_errors": major_misc,
+            "improvement_recommendations": recs,
             "summary": {
                 "total_questions": len(all_final_questions),
+                "attempted_questions": attempted_count,
+                "unattempted_questions": unattempted_count,
                 "total_marks": total_max_marks,
                 "awarded_marks": total_obtained,
                 "percentage": percentage,
@@ -269,6 +312,10 @@ class EvaluationAgent:
             "overall_feedback": f"Evaluation could not be automatically finalized: {reason}. Manual teacher review is required.",
             "questions": [],
             "evaluations": [],
+            "strengths": [],
+            "weaknesses": [reason],
+            "major_conceptual_errors": [],
+            "improvement_recommendations": ["Submit clear, legible document scans for automated grading."],
             "student": {
                 "name": request.get("student_name", "Student"),
                 "roll_number": request.get("roll_number", "N/A"),
@@ -314,25 +361,28 @@ class EvaluationAgent:
         for idx, q in enumerate(raw_q):
             if not isinstance(q, dict): continue
             qno = str(q.get("question_number") or q.get("question_id") or f"Q{idx+1}").strip()
-            max_m = float(q.get("maximum_marks") or 5.0)
+            max_m = float(q.get("maximum_marks") or 0.0)
             questions.append({
-                "question_id": f"q_{idx+1}",
+                "question_id": str(q.get("question_id") or f"q_{idx+1}"),
                 "question_number": qno,
                 "question_text": str(q.get("question_text") or "").strip(),
                 "maximum_marks": max_m,
                 "section": str(q.get("section") or ""),
                 "question_type": str(q.get("question_type") or "descriptive"),
+                "options": q.get("options") if isinstance(q.get("options"), list) else [],
                 "choice_group": q.get("choice_group"),
-                "required_choice_count": q.get("required_choice_count")
+                "required_choice_count": q.get("required_choice_count"),
+                "expected_components": q.get("expected_components") if isinstance(q.get("expected_components"), list) else []
             })
 
         if total <= 0:
-            total = sum(q["maximum_marks"] for q in questions)
+            total = sum(q["maximum_marks"] for q in questions if q.get("maximum_marks", 0) > 0)
 
         return {
             "subject": str(data.get("subject") or "").strip(),
             "exam_title": str(data.get("exam_title") or "").strip(),
             "total_marks": total,
+            "instructions": str(data.get("instructions") or "").strip(),
             "sections": data.get("sections") if isinstance(data.get("sections"), list) else [],
             "questions": questions
         }
@@ -343,7 +393,7 @@ class EvaluationAgent:
         s = re.sub(r"^question\s*", "", s)
         s = re.sub(r"^q\s*", "", s)
         s = re.sub(r"\s+", "", s)
-        return s.replace(".", "").replace("-", "")
+        return s.replace(".", "").replace("-", "").replace("(", "").replace(")", "")
 
     @staticmethod
     def _grade(percentage: float) -> str:

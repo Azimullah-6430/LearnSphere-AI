@@ -203,24 +203,6 @@ export default function Evaluate() {
       const file = e.target.files[0]
       setQpRawFile(file)
       setQpFile(file.name)
-
-      // Auto-detect subject from filename if present
-      const fname = file.name.toLowerCase()
-      if (fname.includes('software') || fname.includes('se_') || fname.includes('cse') || fname.includes('computer') || fname.includes('coding')) {
-        setSubject('Software Engineering')
-      } else if (fname.includes('math') || fname.includes('calc') || fname.includes('algebra')) {
-        setSubject('Mathematics')
-      } else if (fname.includes('chem')) {
-        setSubject('Chemistry')
-      } else if (fname.includes('phy')) {
-        setSubject('Physics')
-      } else if (fname.includes('tamil')) {
-        setSubject('Tamil')
-      } else if (fname.includes('hindi')) {
-        setSubject('Hindi')
-      } else if (fname.includes('eng')) {
-        setSubject('English')
-      }
     }
   }
 
@@ -587,51 +569,90 @@ export default function Evaluate() {
               {eq ? (
                 <>
                   <div className="mb-4">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Question Number & Type</div>
-                    <div className="text-[14px] font-semibold">{eq.question_number} ({eq.question_type || 'short_answer'})</div>
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Question {eq.question_number} ({eq.question_type || 'short_answer'})</div>
+                    {eq.question_text && (
+                      <div className="text-[13.5px] font-semibold text-[var(--text)] bg-[var(--surface-alt)] p-3 rounded-lg border border-[var(--border)]">
+                        {eq.question_text}
+                      </div>
+                    )}
                   </div>
                   
                   <div className="mb-4">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Handwritten Script Extraction</div>
-                    <div className="text-[13.5px] leading-relaxed text-[var(--text-soft)] bg-[var(--surface-alt)] p-3 rounded-md">{eq.answer_summary || 'No response detected for this question.'}</div>
-                  </div>
-
-                  <div className="flex items-center gap-4 p-3.5 px-4 bg-[var(--accent-soft)] rounded-lg mb-4">
-                    <div className="text-2xl font-extrabold text-[var(--accent)]">{eq.awarded_marks}</div>
-                    <div className="text-[13px] text-[var(--text-soft)]">
-                      out of {eq.maximum_marks ?? eq.max_marks ?? 0} marks · <Badge tone={statusTone}>{eq.awarded_marks === (eq.maximum_marks ?? eq.max_marks) && (eq.maximum_marks ?? eq.max_marks) > 0 ? 'Full Marks' : eq.awarded_marks > 0 ? 'Partial Credit' : 'Incorrect'}</Badge>
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Student Answer & Extraction</div>
+                    <div className="text-[13px] leading-relaxed text-[var(--text-soft)] bg-[var(--surface)] p-3 rounded-md border border-[var(--border)] italic">
+                      {eq.student_answer || eq.answer_summary || 'No answer detected in script.'}
                     </div>
+                    {eq.evidence_reference && (
+                      <div className="text-[11px] text-[var(--text-faint)] mt-1 font-mono">
+                        Evidence Reference: {eq.evidence_reference}
+                      </div>
+                    )}
                   </div>
 
-                  {eq.feedback?.what_was_done_well?.length > 0 && (
+                  <div className="flex items-center justify-between p-3.5 px-4 bg-[var(--accent-soft)] rounded-lg mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl font-extrabold text-[var(--accent)]">{eq.awarded_marks}</div>
+                      <div className="text-[13px] text-[var(--text-soft)]">
+                        out of {eq.maximum_marks ?? eq.max_marks ?? 0} marks
+                        {eq.percentage_of_question !== undefined && (
+                          <span className="font-semibold text-[var(--accent)] ml-1.5">({eq.percentage_of_question}%)</span>
+                        )}
+                      </div>
+                    </div>
+                    <Badge tone={statusTone}>
+                      {eq.awarded_marks === (eq.maximum_marks ?? eq.max_marks) && (eq.maximum_marks ?? eq.max_marks) > 0 ? 'Full Marks' : eq.awarded_marks > 0 ? 'Partial Credit' : 'Zero Marks'}
+                    </Badge>
+                  </div>
+
+                  {eq.evaluation_reason && (
+                    <div className="mb-3 p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Evaluation Rationale</div>
+                      <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">{eq.evaluation_reason}</div>
+                    </div>
+                  )}
+
+                  {(eq.strengths?.length > 0 || eq.feedback?.what_was_done_well?.length > 0) && (
                     <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--success)] mb-1">Correct Working Points</div>
-                      <ul className="list-disc pl-5 text-[13px] space-y-1">
-                        {eq.feedback.what_was_done_well.map((pt, idx) => <li key={idx}>{pt}</li>)}
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--success)] mb-1">Demonstrated Knowledge / Strengths</div>
+                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--text)]">
+                        {(eq.strengths || eq.feedback?.what_was_done_well || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
                       </ul>
                     </div>
                   )}
 
-                  {eq.feedback?.missing_points?.length > 0 && (
+                  {eq.errors?.length > 0 && (
                     <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--warning)] mb-1">Missing / Incorrect Points</div>
-                      <ul className="list-disc pl-5 text-[13px] space-y-1 text-[var(--warning)]">
-                        {eq.feedback.missing_points.map((pt, idx) => <li key={idx}>{pt}</li>)}
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--error)] mb-1">Identified Errors</div>
+                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--error)]">
+                        {eq.errors.map((pt, idx) => <li key={idx}>{pt}</li>)}
                       </ul>
                     </div>
                   )}
 
-                  {eq.feedback?.expected_answer && (
+                  {(eq.missing_points?.length > 0 || eq.feedback?.missing_points?.length > 0) && (
                     <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Expected Standard Solution</div>
-                      <div className="text-[13px] p-2.5 bg-[var(--surface)] border border-[var(--border)] rounded">{eq.feedback.expected_answer}</div>
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--warning)] mb-1">Missing Key Concepts / Steps</div>
+                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--warning)]">
+                        {(eq.missing_points || eq.feedback?.missing_points || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
+                      </ul>
                     </div>
                   )}
 
-                  {eq.feedback?.improvement && (
+                  {(eq.what_student_should_have_written || eq.feedback?.expected_answer) && (
+                    <div className="mb-3">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">What Student Should Have Written</div>
+                      <div className="text-[12.5px] p-2.5 bg-[var(--surface)] border border-[var(--border)] rounded text-[var(--text)] leading-relaxed">
+                        {eq.what_student_should_have_written || eq.feedback?.expected_answer}
+                      </div>
+                    </div>
+                  )}
+
+                  {(eq.feedback_text || eq.feedback?.improvement || eq.improvement_advice) && (
                     <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent-dim)] mb-1">How to Improve</div>
-                      <div className="text-[13.5px] leading-relaxed text-[var(--accent-dim)]">{eq.feedback.improvement}</div>
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent-dim)] mb-1">Improvement Guidance</div>
+                      <div className="text-[12.5px] leading-relaxed text-[var(--accent-dim)]">
+                        {eq.feedback_text || eq.feedback?.improvement || eq.improvement_advice}
+                      </div>
                     </div>
                   )}
                 </>

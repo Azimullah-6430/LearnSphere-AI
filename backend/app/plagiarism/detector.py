@@ -120,25 +120,33 @@ class PlagiarismDetector:
                                 "details": f"Identical file hash detected (SHA-256: {file_sha256[:12]}...). Exact duplicate submission."
                             }
 
-            # Level 2 & Level 3: Answer-Level Similarity & 4+ Student Collusion Check
+            # Level 2 & Level 3: Answer-Level Text Similarity & Collusion Check
             max_similarity = 0.0
             matched_student = None
             colluding_students = set()
 
+            # Extract current answers text for token-based comparison if available
+            current_answers_tokens = set()
+            if isinstance(answer_script, dict) and answer_script.get("text"):
+                current_answers_tokens = set(self._normalize_text(answer_script["text"]).split())
+
             for past in past_evals:
-                past_path = past.get("answer_script_path")
-                if past_path and os.path.exists(past_path):
-                    size_a = os.path.getsize(ans_path) if os.path.exists(ans_path) else 0
-                    size_b = os.path.getsize(past_path)
-                    if size_a > 100 and size_b > 100:
-                        diff = abs(size_a - size_b)
-                        if diff < 100:
-                            sim = round(max(0.0, 95.0 - (diff / 2.0)), 1)
-                            if sim > max_similarity:
-                                max_similarity = sim
-                                matched_student = past["student_name"]
-                            if sim >= 80.0:
-                                colluding_students.add(past["student_name"])
+                past_questions = past.get("questions") or []
+                past_text = " ".join([
+                    str(q.get("student_answer") or q.get("answer_summary") or "")
+                    for q in past_questions if isinstance(q, dict)
+                ])
+                if past_text and current_answers_tokens:
+                    past_tokens = set(self._normalize_text(past_text).split())
+                    if past_tokens and len(past_tokens) > 10 and len(current_answers_tokens) > 10:
+                        intersection = current_answers_tokens.intersection(past_tokens)
+                        union = current_answers_tokens.union(past_tokens)
+                        sim = round((len(intersection) / len(union)) * 100.0, 1) if union else 0.0
+                        if sim > max_similarity:
+                            max_similarity = sim
+                            matched_student = past["student_name"]
+                        if sim >= 80.0:
+                            colluding_students.add(past["student_name"])
 
             # Classify overall result based on similarity threshold
             if max_similarity >= 90.0:

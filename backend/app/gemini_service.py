@@ -189,48 +189,68 @@ class GeminiService:
         raise ValueError("Response from Gemini 3.6 Flash was not valid JSON.")
 
     # ------------------------------------------------------------------
-    # Specialized Gemini Operations
+    # Specialized Gemini Operations (Unified Strict Evaluation Engine)
     # ------------------------------------------------------------------
 
-    def evaluate_question_paper(self, qp_file: Any, subject: str = "", level: str = "school", board: str = "", stream: str = "", semester: str = "") -> Dict[str, Any]:
+    def evaluate_question_paper(
+        self,
+        qp_file: Any,
+        subject: str = "",
+        level: str = "school",
+        board: str = "",
+        stream: str = "",
+        semester: str = ""
+    ) -> Dict[str, Any]:
+        """Extract complete, verbatim question paper structure from uploaded document.
+        The uploaded question paper is the SOLE source of truth for questions, maximum marks, subparts, and choices.
+        """
         prompt = f"""
-You are the QUESTION PAPER EXTRACTION ENGINE for LearnSphere AI.
-Extract the exact question paper structure printed on the uploaded document using gemini-3.6-flash.
+You are the QUESTION PAPER STRUCTURAL EXTRACTION ENGINE for LearnSphere AI.
+Analyze ALL pages of the uploaded question paper document with extreme precision.
 
-Context:
+Context Hints (use only as background guidance; paper header is authoritative):
 - Subject hint: {subject}
-- Level: {level}
+- Academic Level: {level}
 - Board: {board}
 - Stream: {stream}
 - Semester: {semester}
 
-RULES:
-1. Extract exact printed subject name from paper title/header.
-2. Inspect ALL pages. Extract exact question numbers, question text, maximum marks, sections, and choice groups.
-3. If choice options exist (e.g. Q1 OR Q2, Answer any 1), group them under 'choice_group' and 'required_choice_count'.
-4. Do NOT invent maximum marks. If unprinted/ambiguous, leave maximum_marks null or specify 0 so it requires review.
+EXTRACTION MANDATES:
+1. Extract the EXACT printed Subject Name, Exam Title, and Total Maximum Marks from the header/instructions.
+2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1(a), 1(b), 2, 3(i), 3(ii), Part A Q1).
+3. For EVERY question:
+   - Extract the complete verbatim 'question_text' including all parameters, numerical values, equations, constraints, and instructions.
+   - For Multiple Choice Questions (MCQs), extract the full text of all printed options under 'options'.
+   - Extract the exact printed 'maximum_marks' for each question or subpart. Do NOT guess or default marks.
+   - If marks are printed as a section total or subparts share marks, divide them logically and set 'is_marks_inferred': true/false.
+   - Identify 'question_type' as one of: 'mcq', 'short_answer', 'long_answer', 'numerical', 'derivation', 'diagram', 'proof', 'code', 'case_study'.
+   - If questions belong to an elective/choice group (e.g., "Answer either Q1 OR Q2", "Answer any 3 of 5", "Answer 1(a) OR 1(b)"), assign a unique 'choice_group' and the exact 'required_choice_count' (e.g. 1 or 3).
+   - Extract 'expected_components' (e.g. ["Formula", "Substitution", "SI Unit", "Circuit Diagram"]).
 
-Return ONLY JSON matching schema:
+Return ONLY a valid JSON object matching this schema:
 {{
-  "subject": "Printed Subject Name",
-  "exam_title": "Exam Title",
-  "total_marks": 50,
-  "sections": ["Section A", "Section B"],
+  "subject": "Exact Printed Subject Name",
+  "exam_title": "Exact Printed Exam Title",
+  "total_marks": 50.0,
+  "instructions": "General instructions printed on paper",
+  "sections": ["Section A (Objective)", "Section B (Descriptive)"],
   "questions": [
     {{
-      "question_id": "q1",
+      "question_id": "q1_a",
       "question_number": "1(a)",
-      "question_text": "Exact text",
-      "maximum_marks": 5,
+      "question_text": "Complete verbatim text of the question",
+      "maximum_marks": 5.0,
       "section": "Section A",
-      "question_type": "descriptive",
-      "choice_group": "group_1",
-      "required_choice_count": 1
+      "question_type": "numerical",
+      "options": [],
+      "choice_group": "group_q1_or_q2",
+      "required_choice_count": 1,
+      "expected_components": ["Formula selection", "Step-by-step substitution", "Final answer with units"]
     }}
   ]
 }}
 """
-        raw = self.generate_content(prompt, files=[qp_file], json_output=True)
+        raw = self.generate_content(prompt, files=[qp_file], json_output=True, temperature=0.0)
         return self.parse_json_response(raw)
 
     def evaluate_answer_script(
@@ -243,49 +263,88 @@ Return ONLY JSON matching schema:
         syllabus_file: Optional[Any] = None,
         level: str = "school"
     ) -> Dict[str, Any]:
+        """Perform multimodal, strict, evidence-based grading of student handwritten/typed answer script.
+        Adheres to human examiner standards: partial credit for valid methods, strict marks bounds, zero fabricated answers.
+        """
         qp_json = json.dumps(qp_structure, ensure_ascii=False, indent=2)
         prompt = f"""
-You are LearnSphere AI's STRICT HUMAN EXAMINATION EVALUATOR running gemini-3.6-flash.
+You are LearnSphere AI's STRICT, HIGHLY EXPERIENCED HUMAN TEACHER AND EXAMINER.
+You are evaluating a student's answer script against the official Question Paper and marking criteria.
 
 SUBJECT: {subject}
-LEVEL: {level}
+ACADEMIC LEVEL: {level}
 
-EXTRACTED QUESTION PAPER STRUCTURE:
+OFFICIAL QUESTION PAPER STRUCTURE:
 {qp_json}
 
-RULES:
-1. Inspect EVERY page of the handwritten answer script. Match answers to question numbers regardless of page order.
-2. Evaluate student's actual handwritten answer for correctness, formula derivation, substitution, arithmetic, and completeness.
-3. Award marks <= maximum_marks.
-4. Calculate marks_lost = maximum_marks - awarded_marks.
-5. Provide specific, evidence-based feedback referring directly to the student's actual written text or equation.
-6. Flag conceptual misunderstandings under 'misconception_detected' with 'misconception' detail. Simple arithmetic slips are NOT misconceptions.
+EXAMINATION & GRADING PRINCIPLES:
+1. DYNAMIC MAPPING & COMPLETE SCRIPT SCAN:
+   - Inspect EVERY page of the uploaded answer script.
+   - Answers may be in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
+   - Question numbers may be written in margins, underlined, or circled.
+   - Answers may span across multiple pages or continue later.
+   - Map each written answer to its corresponding question in the Question Paper structure.
+   - If student explicitly skipped or did NOT attempt a question, set attempted: false, awarded_marks: 0.0, student_answer: "Not attempted in script".
 
-Return ONLY JSON matching schema:
+2. EVIDENCE-BASED ASSESSMENT (NEVER HALLUCINATE OR INVENT):
+   - Evaluate ONLY what the student actually wrote or drew.
+   - Transcribe/summarize what the student wrote accurately under 'student_answer'.
+   - Cite the location under 'evidence_reference' (e.g. "Script Page 2, lines 1-15").
+
+3. MATHEMATICS, SCIENCE & NUMERICAL PROBLEMS:
+   - Check formula selection, value substitution, intermediate derivations, calculation accuracy, and final units.
+   - Award PARTIAL MARKS when the method, law, or formula is correct but an arithmetic slip occurred in later steps.
+   - Penalize incorrect formulas, missing SI units, or unverified leaps in logic.
+
+4. THEORY, DESCRIPTIVE & CONCEPTUAL QUESTIONS:
+   - Check key terminology, depth of explanation, logical arguments, and necessary examples.
+   - Do not deduct marks for extraneous correct information unless it introduces a direct contradiction.
+
+5. MCQs & OBJECTIVE QUESTIONS:
+   - Grade strictly against the options provided in the Question Paper.
+
+6. DIAGRAMS & CODE:
+   - Inspect student's drawn diagrams, axes, labels, circuit components, or code syntax.
+
+7. STRICT MARK BOUNDS:
+   - For every question: 0.0 <= awarded_marks <= maximum_marks.
+   - Calculate percentage_of_question = round((awarded_marks / maximum_marks) * 100, 2).
+
+8. MISTAKE vs. MISCONCEPTION DISTINCTION:
+   - A calculation error or forgotten unit is a regular error (misconception_detected = false).
+   - A fundamental flaw in physical/mathematical reasoning (e.g. treating force as proportional to velocity instead of acceleration) is a misconception (misconception_detected = true with detailed diagnostic).
+
+Return ONLY a valid JSON object matching this schema:
 {{
   "is_unreadable": false,
   "unreadable_reason": "",
   "evaluations": [
     {{
-      "question_id": "q1",
+      "question_id": "q1_a",
       "question_number": "1(a)",
       "attempted": true,
-      "maximum_marks": 5,
-      "awarded_marks": 4,
-      "marks_lost": 1,
-      "student_answer": "Exact summary of what student wrote",
-      "correct_answer_or_expected_points": "Model answer",
-      "question_feedback": "Detailed specific feedback referring to student answer",
-      "what_was_done_correctly": ["Correct formula applied"],
-      "what_is_missing": ["Missing final SI unit"],
-      "what_student_should_write": "Exact required response for full marks",
-      "concepts_tested": ["Newton's Second Law"],
+      "maximum_marks": 5.0,
+      "awarded_marks": 4.0,
+      "percentage_of_question": 80.0,
+      "student_answer": "Student applied F = m*a, substituted m=10kg and a=2m/s^2 to calculate F=20, but omitted final unit N.",
+      "evidence_reference": "Script Page 1, Section A",
+      "evaluation_reason": "Correct physical formula and arithmetic execution; 1 mark deducted for missing SI unit of force (Newtons).",
+      "strengths": ["Correctly identified Newton's Second Law", "Accurate arithmetic substitution"],
+      "errors": ["Missing standard SI unit (N)"],
+      "missing_points": ["State final answer with unit: 20 N"],
+      "what_student_should_have_written": "F = m * a = 10 kg * 2 m/s^2 = 20 N.",
+      "feedback": "Great conceptual start. Remember to always append proper SI units to final numerical results.",
+      "concepts_tested": ["Newton's Second Law", "Force and Acceleration"],
       "misconception_detected": false,
       "misconception": "",
       "confidence": 0.95
     }}
   ],
-  "overall_feedback": "Detailed overall performance summary."
+  "overall_feedback": "Comprehensive examination summary assessing overall accuracy, pacing, and conceptual depth.",
+  "strengths": ["Strong foundational understanding of mechanics", "Clear step-by-step formula derivations"],
+  "weaknesses": ["Inconsistent inclusion of final dimensional units", "Skipped question 4(b)"],
+  "major_conceptual_errors": [],
+  "improvement_recommendations": ["Practice appending units at each calculation step", "Review thermodynamics definitions in Chapter 4"]
 }}
 """
         files = [qp_file, ans_file]
@@ -294,39 +353,40 @@ Return ONLY JSON matching schema:
         if syllabus_file:
             files.append(syllabus_file)
 
-        raw = self.generate_content(prompt, files=files, json_output=True)
+        raw = self.generate_content(prompt, files=files, json_output=True, temperature=0.0)
         return self.parse_json_response(raw)
 
     def verify_evaluation(self, qp_structure: Dict[str, Any], eval_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Independent second verification pass enforcing strict consistency, mark bounds, and arithmetic validation."""
         prompt = f"""
-You are the INDEPENDENT EVALUATION VERIFIER for LearnSphere AI running gemini-3.6-flash.
+You are the INDEPENDENT EVALUATION VERIFIER for LearnSphere AI.
+Verify the integrity, mathematical consistency, and evidence alignment of this evaluation.
 
-Inspect the question paper structure and the AI evaluation result below.
-
-QUESTION PAPER:
-{json.dumps(qp_structure, ensure_ascii=False)[:4000]}
+QUESTION PAPER STRUCTURE:
+{json.dumps(qp_structure, ensure_ascii=False)[:5000]}
 
 EVALUATION RESULT:
-{json.dumps(eval_result, ensure_ascii=False)[:6000]}
+{json.dumps(eval_result, ensure_ascii=False)[:8000]}
 
-TASK:
-Verify:
-1. Question count and Question IDs match.
-2. Awarded marks <= maximum marks for all questions.
-3. Arithmetic sum of awarded marks equals total obtained marks.
-4. Optional question choice rules were obeyed without double counting.
-5. Feedback is specific and refers to actual student work.
+VALIDATION CHECKLIST:
+1. Question count and question numbers match the Question Paper structure.
+2. Every question has 0.0 <= awarded_marks <= maximum_marks.
+3. Total obtained marks equals the exact sum of awarded marks of all counted questions.
+4. Choice/elective rules (OR groups, Answer any X) are strictly followed without double-counting.
+5. All feedback statements directly reflect the student's actual written answers.
+6. Check for duplicate question answers or unresolved ambiguities.
 
-Return ONLY JSON matching schema:
+Return ONLY a valid JSON object matching this schema:
 {{
   "verified": true,
   "disagreement_detected": false,
-  "reason": "Evaluation verified clean and consistent.",
+  "reason": "Evaluation verified mathematically clean and consistent with uploaded exam paper.",
+  "confidence_score": 0.98,
   "suggested_status": "COMPLETED"
 }}
-If disagreement is detected, set "verified": false, "disagreement_detected": true, "suggested_status": "NEEDS_TEACHER_REVIEW".
+If any contradiction or bounds violation is detected, set "verified": false, "disagreement_detected": true, "suggested_status": "NEEDS_TEACHER_REVIEW".
 """
-        raw = self.generate_content(prompt, json_output=True)
+        raw = self.generate_content(prompt, json_output=True, temperature=0.0)
         return self.parse_json_response(raw)
 
     def analyze_syllabus(self, content_or_file: Any, level: str = "college", semester: str = "5", class_level: str = "12", domain: str = "", stream: str = "") -> Dict[str, Any]:

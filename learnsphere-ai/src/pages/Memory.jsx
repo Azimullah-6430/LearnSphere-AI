@@ -44,10 +44,10 @@ export default function Memory() {
             <div key={i} className="flex items-center justify-between py-3.5 border-b border-[var(--border)] last:border-0">
               <div>
                 <div className="text-[13.5px] font-bold">{c.subject} — {c.topic}</div>
-                <div className="text-xs text-[var(--text-faint)] mt-0.5">Retention Rate: {c.retention_rate || 80}%</div>
+                <div className="text-xs text-[var(--text-faint)] mt-0.5">Retention Rate: {c.retention_rate ?? 0}%</div>
               </div>
               <Badge tone={c.status === 'Mastered' ? 'success' : 'warning'}>
-                {c.status || 'Learning'} ({c.mastery || 50}% Mastery)
+                {c.status || 'Learning'} ({c.mastery ?? 0}% Mastery)
               </Badge>
             </div>
           ))}
