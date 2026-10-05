@@ -39,9 +39,23 @@ def _feedback(q: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _is_conceptual_issue(q: Dict[str, Any]) -> bool:
-    """Only create a misconception when the evaluator explicitly identifies one."""
-    if q.get("misconception") is True:
-        return True
+    """Only create a misconception when the evaluator explicitly identifies a genuine conceptual misunderstanding.
+    Wrong arithmetic, spelling errors, skipped questions, or calculation slips are strictly excluded.
+    """
+    if not q.get("attempted", True):
+        return False
+
+    classification = str(q.get("answer_classification") or "").lower()
+    if classification in {"unanswered_question", "correct_concept_with_calculation_error", "correct_answer"}:
+        return False
+
+    if q.get("misconception_detected") is True:
+        misc = str(q.get("misconception") or q.get("conceptual_mistake") or "").strip()
+        return bool(misc and len(misc) > 3)
+
+    if q.get("conceptual_mistake"):
+        cm = str(q.get("conceptual_mistake")).strip()
+        return bool(cm and len(cm) > 3)
 
     labels = q.get("issue_types")
     if isinstance(labels, list):
@@ -299,7 +313,7 @@ def _store_mongodb(
         })
 
     # Create misconceptions only when the evaluator explicitly identifies a
-    # conceptual issue. Losing marks alone is not evidence of a misconception.
+    # genuine conceptual issue from the completed evaluation.
     for q in evaluations:
         if not isinstance(q, dict) or not _is_conceptual_issue(q):
             continue
@@ -307,33 +321,51 @@ def _store_mongodb(
         feedback = _feedback(q)
         max_marks = _number(q.get("maximum_marks"), 0)
         awarded = _number(q.get("awarded_marks"), 0)
-        missing = feedback.get("missing_points")
+        missing = feedback.get("missing_points") or q.get("missing_points")
         if not isinstance(missing, list):
             missing = []
-        actual = str(q.get("misconception") if isinstance(q.get("misconception"), str) else (missing[0] if missing else "Conceptual error"))
+
+        actual = str(q.get("misconception") or q.get("conceptual_mistake") or (missing[0] if missing else "Conceptual error"))
         q_num = str(q.get("question_number") or "Unknown")
         ratio = awarded / max_marks if max_marks > 0 else 0
+        concepts_list = q.get("concepts_tested") or []
+        concept_name = str(concepts_list[0] if isinstance(concepts_list, list) and concepts_list else (q.get("topic") or f"Concept in Question {q_num}"))
+        q_text = str(q.get("question_text") or "")
+        std_ans = str(q.get("student_answer") or q.get("answer_summary") or "")
+        evidence_text = str(q.get("evidence_reference") or std_ans or actual)
+        correct_model = str(q.get("what_student_should_have_written") or q.get("correct_answer_or_expected_points") or feedback.get("expected_answer") or "")
+        remediation = str(q.get("how_to_improve") or feedback.get("improvement") or "Targeted concept practice with the Personal AI Trainer.")
 
         db["misconceptions"].insert_one({
             "student_id": student_id,
             "teacher_id": teacher_id,
             "student_name": student_name,
+            "evaluation_id": eval_id,
             "subject": subject,
             "topic": f"{subject} — Question {q_num}",
-            "concept": str(q.get("topic") or f"Concept in Question {q_num}"),
+            "question_number": q_num,
+            "question_num": f"Question {q_num}",
+            "exact_question": q_text,
+            "student_answer": std_ans,
+            "student_reasoning": std_ans,
+            "awarded_marks": awarded,
+            "maximum_marks": max_marks,
+            "identified_concept": concept_name,
+            "concept": concept_name,
+            "misconception": actual,
             "actual_misconception": actual,
             "description": actual,
-            "question_num": f"Question {q_num}",
-            "student_reasoning": str(q.get("student_answer") or ""),
-            "correct_concept": str(q.get("correct_answer") or feedback.get("expected_answer") or ""),
-            "evidence": str(q.get("grader_notes") or actual),
+            "evidence": evidence_text,
+            "correct_understanding": correct_model,
+            "correct_concept": correct_model,
             "occurrences": 1,
             "assessments": [assessment_title],
             "confidence": str(q.get("confidence") or ("High" if ratio < 0.5 else "Medium")),
             "affected_count": 1,
             "student_names": [student_name],
             "severity": "High" if ratio < 0.5 else "Medium",
-            "remedy": str(feedback.get("improvement") or "Targeted concept practice with the Personal AI Trainer."),
+            "recommended_remediation": remediation,
+            "remedy": remediation,
             "status": "Active",
             "created_at": now,
         })

@@ -315,9 +315,14 @@ STRICT HUMAN TEACHER EVALUATION RULES:
 6. THEORY, DESCRIPTIVE & ESSAY QUESTIONS:
    - Evaluate terminology, logical coherence, core principles, required diagrams, and relevant examples.
 
-7. STRICT MARK BOUNDS:
-   - For every question: 0.0 <= awarded_marks <= maximum_marks.
-   - Calculate percentage_of_question = round((awarded_marks / maximum_marks) * 100, 2).
+8. CRITICAL MISCONCEPTION IDENTIFICATION RULES:
+   - A wrong answer is NOT automatically a misconception.
+   - Wrong arithmetic != conceptual misconception.
+   - A spelling error != conceptual misconception.
+   - A skipped/unanswered question != conceptual misconception.
+   - A calculation slip != conceptual misconception unless the underlying model or principle is flawed.
+   - A misconception should be created (misconception_detected: true) ONLY when the student's answer demonstrates a misunderstanding of the underlying concept (e.g. believes action and reaction act on the same object, treats INNER JOIN as returning unmatched rows, inverts voltage-current relations).
+   - If there is insufficient evidence to identify a genuine conceptual misunderstanding, set misconception_detected: false and misconception: "".
 
 Return ONLY a valid JSON object matching this schema:
 {{
