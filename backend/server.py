@@ -655,16 +655,21 @@ def evaluate():
         rubric_path  = save_uploaded_file(rubrics, "rubrics") if rubrics and rubrics.filename else None
         syllabus_path = save_uploaded_file(syllabus, "syllabus") if syllabus and syllabus.filename else None
 
+        user = _lookup_user_by_id(user_id)
+        if session_role == "student" and user:
+            student_name = user.get("name") or student_name
+            roll_number = user.get("roll_number") or roll_number
+
         evaluation_request = {
             "evaluation_id":   f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}",
             "submitted_by":     user_id,
             "submitter_role":   session_role,
-            "student_id":       user_id if session_role == "student" else None,
+            "student_id":       user_id if session_role == "student" else (request.form.get("student_id") or None),
             "teacher_id":       user_id if session_role == "teacher" else None,
             "subject":          subject,
             "student_name":     student_name,
             "roll_number":      roll_number,
-            "assessment_title": assessment_title,
+            "assessment_title": assessment_title or "Self Evaluation Examination",
             "level":            level,
             "board":            board,
             "stream":           stream,
