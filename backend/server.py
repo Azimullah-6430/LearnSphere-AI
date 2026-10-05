@@ -656,6 +656,11 @@ def evaluate():
         syllabus_path = save_uploaded_file(syllabus, "syllabus") if syllabus and syllabus.filename else None
 
         evaluation_request = {
+            "evaluation_id":   f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}",
+            "submitted_by":     user_id,
+            "submitter_role":   session_role,
+            "student_id":       user_id if session_role == "student" else None,
+            "teacher_id":       user_id if session_role == "teacher" else None,
             "subject":          subject,
             "student_name":     student_name,
             "roll_number":      roll_number,
@@ -692,12 +697,8 @@ def evaluate():
             except Exception as p_err:
                 logger.warning("Plagiarism check error: %s", p_err)
 
-        # ── Attach submitter ID for data ownership ────────────────────────────
-        evaluation_request["submitted_by"] = user_id
-        evaluation_request["submitter_role"] = session_role
-
         # ── Persist ───────────────────────────────────────────────────────────
-        eval_id = f"eval_{int(datetime.now().timestamp())}"
+        eval_id = result.get("evaluation_id") or f"eval_{int(datetime.now().timestamp())}"
         try:
             stored_id = store_evaluation_pipeline(
                 request_data=evaluation_request,

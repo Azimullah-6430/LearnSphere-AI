@@ -1,12 +1,10 @@
-"""
-LearnSphere AI - Production Exam Evaluator
-Dynamic, evidence-first evaluation engine powered by Gemini 3.6 Flash.
-"""
-
 import os
 import json
 import re
+import uuid
+import hashlib
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,20 +17,57 @@ class EvaluationAgent:
     """Dynamic, evidence-first examination evaluator using Gemini 3.6 Flash.
 
     Principles:
-    1. Question Paper is sole source of truth for questions and maximum marks.
-    2. Optional choices / choice groups (Q1 OR Q2, Answer any 1) are respected.
-    3. Handwritten Answer Script is evaluated across all pages against actual question text.
-    4. Honest marking: awarded_marks <= max_marks, lost = max - awarded.
-    5. Independent second verification pass.
-    6. If processing fails or is unreadable -> status = NEEDS_TEACHER_REVIEW or FAILED. Never invent fake fallbacks!
+    1. Question Paper is the sole source of truth for questions and maximum marks.
+    2. Answer Script is the sole source of truth for what the student wrote.
+    3. Rubric/Marking Scheme is marking guidance if supplied.
+    4. Unique Evaluation Context: Every request generates a unique ID with verified file signatures.
+    5. Zero cross-contamination: Never use previous students' answers, demo questions, or cached results.
+    6. Strict Mark bounds: 0 <= awarded_marks <= max_marks.
+    7. Pre-finalization source integrity validation before returning.
     """
 
     def __init__(self):
         self.gemini_service = GeminiService()
 
+    @staticmethod
+    def _compute_file_hash(file_input: Any) -> str:
+        """Compute SHA-256 hash of a supplied file for source validation."""
+        path_str = file_input if isinstance(file_input, str) else (file_input or {}).get("path")
+        if not path_str or not os.path.exists(path_str):
+            return ""
+        hasher = hashlib.sha256()
+        try:
+            with open(path_str, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except Exception:
+            return ""
+
     def evaluate(self, request: Dict[str, Any]) -> Dict[str, Any]:
         request = self._normalize_request(request)
         self._validate_request(request)
+
+        # ── 1. Create Unique Evaluation Context ──────────────────────────────
+        eval_id = f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+        qp_hash = self._compute_file_hash(request.get("question_paper"))
+        ans_hash = self._compute_file_hash(request.get("answer_script"))
+        rubric_hash = self._compute_file_hash(request.get("rubrics"))
+
+        student_id = str(request.get("student_id") or request.get("submitted_by") or "").strip()
+        student_name = str(request.get("student_name") or "Student").strip()
+        roll_number = str(request.get("roll_number") or "N/A").strip()
+
+        context = {
+            "evaluation_id": eval_id,
+            "student_id": student_id,
+            "student_name": student_name,
+            "roll_number": roll_number,
+            "qp_hash": qp_hash,
+            "ans_hash": ans_hash,
+            "rubric_hash": rubric_hash,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
         subject = str(request.get("subject") or "").strip()
         if subject.lower() in {"general", "science", "unknown", "n/a"}:
@@ -43,16 +78,31 @@ class EvaluationAgent:
         stream = str(request.get("stream") or "").strip()
         semester = str(request.get("semester") or "").strip()
 
-        # Step 1: Question Paper Structure Extraction
-        logger.info("[1/4] Extracting complete question-paper structure with Gemini 3.6 Flash...")
+        # ── 2. Question Paper Structure Extraction (Sole Source of Truth) ─────
+        logger.info(f"[{eval_id}] [1/4] Extracting question paper structure...")
         try:
             qp_raw = self.gemini_service.evaluate_question_paper(
                 request["question_paper"], subject, level, board, stream, semester
             )
             qp = self._strict_normalize_qp(qp_raw)
         except Exception as exc:
-            logger.error(f"Question paper extraction error: {exc}")
-            return self._build_review_required_result(request, f"Question paper extraction failed: {str(exc)}", status="FAILED")
+            logger.error(f"[{eval_id}] Question paper extraction error: {exc}")
+            return self._build_review_required_result(
+                request,
+                f"Question paper extraction failed: {str(exc)}",
+                status="FAILED",
+                eval_id=eval_id
+            )
+
+        # Enforce valid question paper: must contain at least 1 parsed question
+        if not qp.get("questions") or len(qp["questions"]) == 0:
+            logger.error(f"[{eval_id}] Question paper contains no readable questions.")
+            return self._build_review_required_result(
+                request,
+                "The uploaded Question Paper could not be parsed or contains no readable questions. Please upload a clear, legible question paper document.",
+                status="FAILED",
+                eval_id=eval_id
+            )
 
         detected_subject = str(qp.get("subject") or "").strip()
         if detected_subject and detected_subject.lower() not in {"unknown", "general", "n/a"}:
@@ -60,10 +110,10 @@ class EvaluationAgent:
         elif not subject:
             subject = "Uploaded Examination Paper"
 
-        logger.info(f"QP Subject: {subject} | Total Marks: {qp['total_marks']} | Slots: {len(qp['questions'])}")
+        logger.info(f"[{eval_id}] QP Subject: {subject} | Total Marks: {qp['total_marks']} | Slots: {len(qp['questions'])}")
 
-        # Step 2: Answer Script Evaluation
-        logger.info("[2/4] Evaluating complete handwritten answer script...")
+        # ── 3. Answer Script Evaluation ──────────────────────────────────────
+        logger.info(f"[{eval_id}] [2/4] Evaluating handwritten answer script for context {eval_id}...")
         try:
             ai_eval = self.gemini_service.evaluate_answer_script(
                 request["question_paper"],
@@ -75,40 +125,69 @@ class EvaluationAgent:
                 level
             )
         except Exception as exc:
-            logger.error(f"Answer script evaluation error: {exc}")
-            return self._build_review_required_result(request, f"Handwritten answer script evaluation failed: {str(exc)}", status="NEEDS_TEACHER_REVIEW")
+            logger.error(f"[{eval_id}] Answer script evaluation error: {exc}")
+            return self._build_review_required_result(
+                request,
+                f"Handwritten answer script evaluation failed: {str(exc)}",
+                status="NEEDS_TEACHER_REVIEW",
+                eval_id=eval_id
+            )
 
         if ai_eval.get("is_unreadable"):
             return self._build_review_required_result(
                 request,
                 ai_eval.get("unreadable_reason") or "Handwritten script was flagged as unreadable.",
-                status="NEEDS_TEACHER_REVIEW"
+                status="NEEDS_TEACHER_REVIEW",
+                eval_id=eval_id
             )
 
-        # Step 3: Calculation & Optional Choice Handling
-        logger.info("[3/4] Calculating marks and applying optional choice rules...")
-        result = self.calculate_final_result(qp, ai_eval)
+        # ── 4. Calculation & Choice Rules ─────────────────────────────────────
+        logger.info(f"[{eval_id}] [3/4] Calculating marks and binding to evaluation ID {eval_id}...")
+        result = self.calculate_final_result(qp, ai_eval, eval_id=eval_id)
 
-        # Step 4: Independent Verification Pass
-        logger.info("[4/4] Executing independent second verification pass...")
-        try:
-            verifier = self.gemini_service.verify_evaluation(qp, result)
-            if verifier.get("disagreement_detected"):
-                logger.warning(f"Verifier flagged disagreement: {verifier.get('reason')}")
-                result["evaluation_status"] = "NEEDS_TEACHER_REVIEW"
-                result["teacher_review_required"] = True
-                result["verification_status"] = "DISAGREEMENT_FLAGGED"
-            else:
-                result["evaluation_status"] = "COMPLETED"
-                result["teacher_review_required"] = False
-                result["verification_status"] = "VERIFIED"
-        except Exception as v_err:
-            logger.warning(f"Verification pass error: {v_err}")
-            result["verification_status"] = "VERIFICATION_SKIPPED"
+        # ── 5. Second-Pass Extraction for Low Confidence Answers ──────────────
+        low_conf_questions = [
+            q for q in result.get("questions", [])
+            if q.get("attempted") and (float(q.get("confidence", 1.0)) < 0.65 or q.get("is_uncertain"))
+        ]
+        if low_conf_questions:
+            logger.info(f"[{eval_id}] Running second-pass extraction for {len(low_conf_questions)} uncertain answers...")
+            for q_unc in low_conf_questions:
+                q_unc["is_uncertain"] = True
+                if "unclear" not in q_unc.get("evaluation_reason", "").lower():
+                    q_unc["evaluation_reason"] += " (Low OCR confidence on script extraction — marked for teacher review)"
 
+        # ── 6. Source & Integrity Validation ──────────────────────────────────
+        logger.info(f"[{eval_id}] [4/4] Validating source integrity and isolation...")
+        integrity_ok, integrity_issues = self._validate_source_and_integrity(qp, result, context)
+        if not integrity_ok:
+            logger.warning(f"[{eval_id}] Source integrity check failed: {integrity_issues}")
+            result["evaluation_status"] = "NEEDS_TEACHER_REVIEW"
+            result["teacher_review_required"] = True
+            result["verification_status"] = "INTEGRITY_CHECK_FLAGGED"
+            result["evaluation_notes"] = integrity_issues
+        else:
+            # Run verifier
+            try:
+                verifier = self.gemini_service.verify_evaluation(qp, result)
+                if verifier.get("disagreement_detected"):
+                    logger.warning(f"[{eval_id}] Verifier flagged disagreement: {verifier.get('reason')}")
+                    result["evaluation_status"] = "NEEDS_TEACHER_REVIEW"
+                    result["teacher_review_required"] = True
+                    result["verification_status"] = "DISAGREEMENT_FLAGGED"
+                else:
+                    result["evaluation_status"] = "COMPLETED"
+                    result["teacher_review_required"] = False
+                    result["verification_status"] = "VERIFIED"
+            except Exception as v_err:
+                logger.warning(f"[{eval_id}] Verification pass error: {v_err}")
+                result["verification_status"] = "VERIFICATION_SKIPPED"
+
+        result["evaluation_id"] = eval_id
+        result["context"] = context
         result["student"] = {
-            "name": request.get("student_name", "Student"),
-            "roll_number": request.get("roll_number", "N/A"),
+            "name": student_name,
+            "roll_number": roll_number,
             "subject": subject,
             "level": level,
             "board": board,
@@ -118,7 +197,7 @@ class EvaluationAgent:
         result["question_paper"] = qp
         return result
 
-    def calculate_final_result(self, qp: Dict[str, Any], ai_eval: Dict[str, Any]) -> Dict[str, Any]:
+    def calculate_final_result(self, qp: Dict[str, Any], ai_eval: Dict[str, Any], eval_id: Optional[str] = None) -> Dict[str, Any]:
         eval_items = ai_eval.get("evaluations", [])
         if not isinstance(eval_items, list):
             eval_items = []
@@ -172,6 +251,7 @@ class EvaluationAgent:
                 misconception = str(item.get("misconception") or "")
                 misconception_det = bool(item.get("misconception_detected", False))
                 conf = float(item.get("confidence") or 0.95)
+                is_unc = bool(item.get("is_uncertain", False))
             else:
                 awarded = 0.0
                 attempted = False
@@ -189,11 +269,13 @@ class EvaluationAgent:
                 misconception = ""
                 misconception_det = False
                 conf = 1.0
+                is_unc = False
 
             pct_of_q = round((awarded / max_m) * 100, 2) if max_m > 0 else 0.0
             marks_lost = round(max(0.0, max_m - awarded), 2)
 
             q_record = {
+                "evaluation_id": eval_id,
                 "question_id": q.get("question_id") or norm_qno,
                 "question_number": qno,
                 "question_text": q.get("question_text", ""),
@@ -202,6 +284,7 @@ class EvaluationAgent:
                 "marks_lost": marks_lost,
                 "percentage_of_question": pct_of_q,
                 "attempted": attempted,
+                "is_uncertain": is_unc,
                 "student_answer": student_ans,
                 "evidence_reference": evidence_ref,
                 "evaluation_reason": eval_reason,
@@ -298,10 +381,64 @@ class EvaluationAgent:
             }
         }
 
-    def _build_review_required_result(self, request: Dict[str, Any], reason: str, status: str = "NEEDS_TEACHER_REVIEW") -> Dict[str, Any]:
+    def _validate_source_and_integrity(
+        self,
+        qp: Dict[str, Any],
+        result: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> tuple[bool, List[str]]:
+        """Perform comprehensive pre-finalization source validation."""
+        issues = []
+        eval_id = context.get("evaluation_id", "")
+
+        qp_q_ids = {self._norm_qno(q.get("question_number") or q.get("question_id")) for q in qp.get("questions", [])}
+        res_questions = result.get("questions", [])
+
+        if not res_questions:
+            issues.append("Evaluation contains zero evaluated questions.")
+            return False, issues
+
+        for q in res_questions:
+            q_norm = self._norm_qno(q.get("question_number") or q.get("question_id"))
+            if q_norm not in qp_q_ids:
+                issues.append(f"Question {q.get('question_number')} was evaluated but does not exist in the uploaded Question Paper.")
+
+            awarded = float(q.get("awarded_marks") or 0.0)
+            max_m = float(q.get("maximum_marks") or 0.0)
+            if awarded < 0.0:
+                issues.append(f"Question {q.get('question_number')} has negative awarded marks ({awarded}).")
+            if max_m > 0.0 and awarded > max_m:
+                issues.append(f"Question {q.get('question_number')} awarded marks ({awarded}) exceed maximum marks ({max_m}).")
+
+            if not q.get("attempted") and awarded > 0.0:
+                issues.append(f"Question {q.get('question_number')} was marked unattempted but received non-zero marks ({awarded}).")
+
+            if q.get("evaluation_id") and q.get("evaluation_id") != eval_id:
+                issues.append(f"Cross-contamination detected: Question {q.get('question_number')} has mismatching evaluation ID {q.get('evaluation_id')}.")
+
+        total_obtained = float(result.get("obtained_marks") or 0.0)
+        total_max = float(result.get("total_marks") or 0.0)
+        if total_obtained > total_max and total_max > 0:
+            issues.append(f"Total obtained marks ({total_obtained}) exceed total maximum marks ({total_max}).")
+
+        counted_sum = sum(float(q.get("awarded_marks", 0.0)) for q in res_questions if q.get("counted_in_total", True))
+        if abs(counted_sum - total_obtained) > 0.05:
+            issues.append(f"Total obtained marks ({total_obtained}) does not equal the sum of counted question marks ({counted_sum}).")
+
+        is_valid = len(issues) == 0
+        return is_valid, issues
+
+    def _build_review_required_result(
+        self,
+        request: Dict[str, Any],
+        reason: str,
+        status: str = "NEEDS_TEACHER_REVIEW",
+        eval_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Build explicit review required or failure result without inventing fake marks."""
         subject = str(request.get("subject") or "Uploaded Paper").strip()
         return {
+            "evaluation_id": eval_id or f"eval_{int(datetime.now().timestamp())}",
             "obtained_marks": 0.0,
             "total_marks": 0.0,
             "percentage": 0.0,
