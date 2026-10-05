@@ -353,7 +353,6 @@ export function AppProvider({ children }) {
 
     const currentSeq = ++authSequenceRef.current
     _clearAuthState()
-    setAuthLoading(true)
 
     const user = {
       ...userData,
@@ -365,6 +364,7 @@ export function AppProvider({ children }) {
     setCurrentUser(user)
     setRole(serverRole || user.role || 'student')
     setAuthenticated(true)
+    setAuthLoading(false)
 
     // Cache under user-specific storage key
     const profileKey = getUserStorageKey('profile', user)
@@ -374,11 +374,7 @@ export function AppProvider({ children }) {
     _restoreStreak(user)
     _startSession()
 
-    await _fetchSyllabus(currentSeq)
-
-    if (authSequenceRef.current === currentSeq) {
-      setAuthLoading(false)
-    }
+    _fetchSyllabus(currentSeq)
   }, [_applyInstitutionMode, _clearAuthState, _fetchSyllabus, _restoreStreak, _startSession])
 
   /**
