@@ -184,6 +184,57 @@ except urllib.error.HTTPError as e:
     body17 = {}
 check("X-User-ID header does NOT bypass auth (401)", status17 == 401, f"got {status17}: {body17}")
 
+# 17. Account Switch Scenario & Empty Profile verification
+print("\n--- Account Switch & Profile Isolation Tests ---")
+# Student A (Class 10)
+req("POST", "/api/auth/register", {
+    "name": "Student Alpha",
+    "email": "student_alpha@example.com",
+    "password": "Password123",
+    "role": "student",
+    "level": "school",
+    "grade_level": "10",
+    "section": "A",
+    "institution_name": "Alpha High School"
+})
+status_a, login_a = req("POST", "/api/auth/login", {
+    "email": "student_alpha@example.com",
+    "password": "Password123",
+    "role": "student"
+})
+check("Student A login successful", status_a == 200, str(login_a))
+user_a = login_a.get("user", {})
+check("Student A grade is 10", user_a.get("grade_level") == "10", str(user_a))
+check("Student A school is Alpha High School", user_a.get("institution_name") == "Alpha High School", str(user_a))
+
+# Logout A
+req("POST", "/api/auth/logout")
+
+# Student B (Empty profile — no school/class configured)
+req("POST", "/api/auth/register", {
+    "name": "Student Beta",
+    "email": "student_beta@example.com",
+    "password": "Password123",
+    "role": "student",
+    "level": "school"
+})
+status_b, login_b = req("POST", "/api/auth/login", {
+    "email": "student_beta@example.com",
+    "password": "Password123",
+    "role": "student"
+})
+check("Student B login successful", status_b == 200, str(login_b))
+user_b = login_b.get("user", {})
+check("Student B has NO fake 12B/Class 12 fallback", user_b.get("grade_level") in (None, "", "null") and user_b.get("section") in (None, "", "null"), str(user_b))
+check("Student B does NOT see Student A's school", user_b.get("institution_name") != "Alpha High School", str(user_b))
+
+# Student B dashboard analytics isolation
+status_dash, dash_b = req("GET", "/api/analytics/dashboard")
+check("Student B dashboard returns 200", status_dash == 200, str(dash_b))
+check("Student B dashboard recentEvaluations is empty list", dash_b.get("recentEvaluations") == [], str(dash_b.get("recentEvaluations")))
+
+req("POST", "/api/auth/logout")
+
 # Summary
 print(f"\n{'='*50}")
 print(f"PASSED: {len(PASS)}/{len(PASS)+len(FAIL)}")
