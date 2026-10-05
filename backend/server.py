@@ -540,18 +540,28 @@ def update_user_profile():
         data = request.get_json(force=True) or {}
 
         allowed_fields = {
-            "name", "level", "board", "grade_level", "classLevel", "stream",
-            "domain", "semester", "department", "institution_name", "institutionName",
-            "section", "roll_number", "subjects"
+            "name", "level", "board", "grade_level", "classLevel", "class", "stream",
+            "domain", "semester", "department", "institution_name", "institutionName", "school",
+            "section", "roll_number", "rollNumber", "course", "program", "academic_year",
+            "academicYear", "year", "subjects", "city", "state", "country", "phone", "bio",
+            "teacher_level", "teacherLevel"
         }
 
         update_fields = {}
         for k, v in data.items():
-            if k in allowed_fields and v is not None:
-                if k == "classLevel":
-                    update_fields["grade_level"] = str(v)
-                elif k == "institutionName":
-                    update_fields["institution_name"] = str(v)
+            if k in allowed_fields:
+                if k in ("classLevel", "class"):
+                    update_fields["grade_level"] = str(v) if v is not None else None
+                elif k in ("institutionName", "school"):
+                    update_fields["institution_name"] = str(v) if v is not None else None
+                elif k == "rollNumber":
+                    update_fields["roll_number"] = str(v) if v is not None else None
+                elif k in ("academicYear", "year"):
+                    update_fields["academic_year"] = str(v) if v is not None else None
+                elif k == "teacherLevel":
+                    update_fields["teacher_level"] = str(v) if v is not None else None
+                elif k == "program":
+                    update_fields["course"] = str(v) if v is not None else None
                 else:
                     update_fields[k] = v
 
@@ -559,13 +569,16 @@ def update_user_profile():
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
+            query = {}
             if ObjectId and len(str(user_id)) == 24:
                 try:
-                    mongo_db["users"].update_one({"_id": ObjectId(user_id)}, {"$set": update_fields})
+                    query = {"_id": ObjectId(user_id)}
                 except Exception:
-                    pass
-            mongo_db["users"].update_one({"user_id": str(user_id)}, {"$set": update_fields})
-            mongo_db["users"].update_one({"id": str(user_id)}, {"$set": update_fields})
+                    query = {"$or": [{"user_id": str(user_id)}, {"id": str(user_id)}]}
+            else:
+                query = {"$or": [{"user_id": str(user_id)}, {"id": str(user_id)}]}
+
+            mongo_db["users"].update_one(query, {"$set": update_fields})
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()

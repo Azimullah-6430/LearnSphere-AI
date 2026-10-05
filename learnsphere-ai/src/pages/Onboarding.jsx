@@ -71,10 +71,13 @@ export default function Onboarding() {
     const profileData = {
       level,
       board: level === 'school' ? board : null,
+      grade_level: level === 'school' ? classLevel : null,
       classLevel: level === 'school' ? classLevel : null,
       stream: level === 'school' ? stream : null,
-      subjects: level === 'school' ? subjects : ['Mathematics', 'Physics', 'Computer Science'],
+      subjects: level === 'school' ? subjects : (user?.subjects || []),
       semester: level === 'college' ? semester : null,
+      domain: level === 'college' ? (user?.domain || user?.department || null) : null,
+      department: level === 'college' ? (user?.department || user?.domain || null) : null,
     }
     try {
       if (updateProfile) await updateProfile(profileData)
