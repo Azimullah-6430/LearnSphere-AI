@@ -206,7 +206,7 @@ class EvaluationAgent:
         if not isinstance(eval_items, list):
             eval_items = []
 
-        # Exhaustive multi-strategy question matcher
+        # Exhaustive multi-strategy question matcher with strict hierarchy enforcement
         used_item_indices = set()
 
         def find_matching_eval_item(q_spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -216,51 +216,68 @@ class EvaluationAgent:
             target_norm_no = self._norm_qno(target_no)
             target_text = str(q_spec.get("question_text") or "").strip().lower()
 
+            target_hier = self._parse_q_hierarchy(target_no)
+            if target_hier == (None, None, None):
+                target_hier = self._parse_q_hierarchy(target_id)
+
+            def get_item_hiers(item: Dict[str, Any]) -> tuple[tuple[Optional[int], Optional[str], Optional[str]], tuple[Optional[int], Optional[str], Optional[str]]]:
+                h_no = self._parse_q_hierarchy(item.get("question_number"))
+                h_id = self._parse_q_hierarchy(item.get("question_id"))
+                return h_no, h_id
+
+            def is_item_compatible(item: Dict[str, Any]) -> bool:
+                h_no, h_id = get_item_hiers(item)
+                # If item has explicit question number hierarchy, check compatibility
+                if h_no != (None, None, None):
+                    if not self.is_hierarchy_compatible(target_hier, h_no):
+                        return False
+                if h_id != (None, None, None):
+                    if not self.is_hierarchy_compatible(target_hier, h_id):
+                        return False
+                return True
+
             # Pass 1: Exact question_id match
             for idx, item in enumerate(eval_items):
                 if idx in used_item_indices: continue
                 item_id = str(item.get("question_id") or "").strip()
                 if item_id and target_id and item_id.lower() == target_id.lower():
-                    used_item_indices.add(idx)
-                    return item
+                    if is_item_compatible(item):
+                        used_item_indices.add(idx)
+                        return item
 
             # Pass 2: Exact question_number match
             for idx, item in enumerate(eval_items):
                 if idx in used_item_indices: continue
                 item_no = str(item.get("question_number") or "").strip()
                 if item_no and target_no and item_no.lower() == target_no.lower():
-                    used_item_indices.add(idx)
-                    return item
+                    if is_item_compatible(item):
+                        used_item_indices.add(idx)
+                        return item
 
-            # Pass 3: Normalized question_id match
-            for idx, item in enumerate(eval_items):
-                if idx in used_item_indices: continue
-                item_id = str(item.get("question_id") or "").strip()
-                if item_id and target_norm_id and self._norm_qno(item_id) == target_norm_id:
-                    used_item_indices.add(idx)
-                    return item
+            # Pass 3: Strict Hierarchy Exact Match (e.g. 6(a)(i) <-> 6.a.1 or 7b(ii) <-> 7(b)(ii))
+            if target_hier[0] is not None:
+                for idx, item in enumerate(eval_items):
+                    if idx in used_item_indices: continue
+                    h_no, h_id = get_item_hiers(item)
+                    if self.is_hierarchy_exact_match(target_hier, h_no) or self.is_hierarchy_exact_match(target_hier, h_id):
+                        used_item_indices.add(idx)
+                        return item
 
-            # Pass 4: Normalized question_number match
-            for idx, item in enumerate(eval_items):
-                if idx in used_item_indices: continue
-                item_no = str(item.get("question_number") or "").strip()
-                if item_no and target_norm_no and self._norm_qno(item_no) == target_norm_no:
-                    used_item_indices.add(idx)
-                    return item
-
-            # Pass 5: Cross-match normalized question_number with item question_id
+            # Pass 4: Normalized question_id / question_number match
             for idx, item in enumerate(eval_items):
                 if idx in used_item_indices: continue
                 item_id = str(item.get("question_id") or "").strip()
                 item_no = str(item.get("question_number") or "").strip()
-                if target_norm_no and self._norm_qno(item_id) == target_norm_no:
-                    used_item_indices.add(idx)
-                    return item
-                if target_norm_id and self._norm_qno(item_no) == target_norm_id:
-                    used_item_indices.add(idx)
-                    return item
+                if target_norm_id and (self._norm_qno(item_id) == target_norm_id or self._norm_qno(item_no) == target_norm_id):
+                    if is_item_compatible(item):
+                        used_item_indices.add(idx)
+                        return item
+                if target_norm_no and (self._norm_qno(item_no) == target_norm_no or self._norm_qno(item_id) == target_norm_no):
+                    if is_item_compatible(item):
+                        used_item_indices.add(idx)
+                        return item
 
-            # Pass 6: Alphanumeric core match (e.g. "q1_a" <-> "1a", "q2_b" <-> "2(b)")
+            # Pass 5: Alphanumeric core match (e.g. "q1_a" <-> "1a", "q2_b" <-> "2(b)")
             target_clean = re.sub(r"[^0-9a-z]", "", target_no.lower())
             if target_clean:
                 for idx, item in enumerate(eval_items):
@@ -271,19 +288,28 @@ class EvaluationAgent:
                         re.sub(r"[^0-9a-z]", "", item_id.lower()),
                         re.sub(r"[^0-9a-z]", "", item_no.lower())
                     }
-                    if target_clean in item_cleans:
+                    if target_clean in item_cleans and is_item_compatible(item):
                         used_item_indices.add(idx)
                         return item
 
-            # Pass 7: Substring keyword alignment if question text exists
-            if target_text and len(target_text) > 12:
-                target_words = {w for w in re.findall(r"\w{4,}", target_text) if w not in {"what", "explain", "describe", "define", "calculate", "prove", "following"}}
-                if target_words:
+            # Pass 6: Substring keyword alignment ONLY when hierarchy is strictly compatible
+            if target_text and len(target_text) > 15:
+                stop_words = {
+                    "what", "explain", "describe", "define", "calculate", "prove", "following",
+                    "software", "engineering", "system", "model", "diagram", "design", "process",
+                    "method", "phase", "level", "type", "types", "state", "case", "write", "short",
+                    "notes", "note", "with", "neat", "help", "example", "examples", "discuss",
+                    "detail", "briefly", "advantages", "disadvantages", "difference", "between"
+                }
+                target_words = {w for w in re.findall(r"\b[a-z]{4,}\b", target_text) if w not in stop_words}
+                if len(target_words) >= 2:
                     for idx, item in enumerate(eval_items):
                         if idx in used_item_indices: continue
+                        if not is_item_compatible(item): continue
                         item_text = str(item.get("question_text") or item.get("student_answer") or item.get("teacher_feedback") or "").lower()
-                        item_words = set(re.findall(r"\w{4,}", item_text))
-                        if len(target_words.intersection(item_words)) >= min(2, len(target_words)):
+                        item_words = set(re.findall(r"\b[a-z]{4,}\b", item_text))
+                        matched_words = target_words.intersection(item_words)
+                        if len(matched_words) >= min(3, len(target_words)):
                             used_item_indices.add(idx)
                             return item
 
@@ -427,22 +453,24 @@ class EvaluationAgent:
 
             # Detect option-level grouping (e.g. 6(a)(i) + 6(a)(ii) belong to Option A, 6(b) belongs to Option B)
             options_map: Dict[str, List[Dict[str, Any]]] = {}
-            has_suboptions = False
 
             for q in q_list:
                 qno = q.get("question_number", "")
-                opt_match = re.search(r"\b(?:q?\d+[\.\s]*)?\(?([a-zA-Z])\)?(?:\s*\(?[ivxlcdm0-9]+\)?)?", qno, re.I)
-                if opt_match and len(q_list) > 2:
-                    opt_key = opt_match.group(1).lower()
-                    has_suboptions = True
+                hier = self._parse_q_hierarchy(qno)
+                if hier[1]:
+                    opt_key = hier[1]
                 else:
-                    opt_key = q.get("question_id") or qno
+                    opt_match = re.search(r"\b(?:q?\d+[\.\s]*)?\(?([a-zA-Z])\)?(?:\s*\(?[ivxlcdm0-9]+\)?)?", qno, re.I)
+                    if opt_match:
+                        opt_key = opt_match.group(1).lower()
+                    else:
+                        opt_key = q.get("question_id") or qno
 
                 if opt_key not in options_map:
                     options_map[opt_key] = []
                 options_map[opt_key].append(q)
 
-            if has_suboptions and len(options_map) > 1:
+            if len(options_map) > 1:
                 # Option-level evaluation
                 option_stats = []
                 for opt_key, opt_qs in options_map.items():
@@ -821,6 +849,118 @@ class EvaluationAgent:
             "sections": data.get("sections") if isinstance(data.get("sections"), list) else [],
             "questions": questions
         }
+
+    @staticmethod
+    def _parse_q_hierarchy(val: Any) -> tuple[Optional[int], Optional[str], Optional[str]]:
+        """Parse any question number or ID into (main_number, option_letter, subpart_number).
+        Examples:
+          '6(a)(i)' -> (6, 'a', '1')
+          '6(a)(ii)' -> (6, 'a', '2')
+          '6(b)' -> (6, 'b', None)
+          '7a i' -> (7, 'a', '1')
+          '7b (ii)' -> (7, 'b', '2')
+          'q7_b_2' -> (7, 'b', '2')
+          '3(i)' -> (3, None, '1')
+          'Q5' -> (5, None, None)
+        """
+        if not val:
+            return (None, None, None)
+        s = str(val).strip().lower()
+        s = re.sub(r"^(?:question[\s\._-]*|q[\s\._-]*(?=\d))", "", s)
+
+        roman_to_int = {
+            "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5",
+            "vi": "6", "vii": "7", "viii": "8", "ix": "9", "x": "10",
+            "xi": "11", "xii": "12", "xiii": "13", "xiv": "14", "xv": "15"
+        }
+
+        # Compound pattern: 6(a)(i), 6.a.i, 6_a_1, 6 a i, 6(a)(1), 7_b_2
+        m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]*\(?([a-z])\)?\s*[\.\_\-\s/]*\(?([ivxlcdm0-9]+)\)?", s)
+        if m:
+            main_n = int(m.group(1))
+            opt_l = m.group(2).lower()
+            raw_sub = m.group(3).lower()
+            sub_p = roman_to_int.get(raw_sub, raw_sub)
+            return (main_n, opt_l, sub_p)
+
+        # Main + roman subpart: 3(i), 3(ii), 3(iii), 3(iv), 3(v), 3(vi), 3(vii), 3(viii), 3(ix), 3(x)
+        m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]*\(?([ivxlcdm]+)\)?(?![a-z0-9])", s)
+        if m and m.group(2).lower() in roman_to_int:
+            main_n = int(m.group(1))
+            raw_sub = m.group(2).lower()
+            sub_p = roman_to_int[raw_sub]
+            return (main_n, None, sub_p)
+
+        # Main + option letter: 6(b), 6b, 6.b, 6_b, 6 b (excluding roman subparts)
+        m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]*\(?([a-z])\)?(?![a-z0-9])", s)
+        if m:
+            main_n = int(m.group(1))
+            raw_letter = m.group(2).lower()
+            if raw_letter in roman_to_int and raw_letter not in {"a", "b", "c", "d", "e", "f", "g", "h"}:
+                return (main_n, None, roman_to_int[raw_letter])
+            return (main_n, raw_letter, None)
+
+        # Main + numeric subpart: 3.1, 3(1), 3_1
+        m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]+\(?(\d+)\)?(?![a-z0-9])", s)
+        if m:
+            main_n = int(m.group(1))
+            sub_p = m.group(2)
+            return (main_n, None, sub_p)
+
+        # Standalone option + subpart: (a)(i), a.i, a_1
+        m = re.search(r"(?:^|[^a-z0-9])\(?([a-z])\)?\s*[\.\_\-\s/]*\(?([ivxlcdm0-9]+)\)?", s)
+        if m:
+            opt_l = m.group(1).lower()
+            raw_sub = m.group(2).lower()
+            sub_p = roman_to_int.get(raw_sub, raw_sub)
+            return (None, opt_l, sub_p)
+
+        # Main question only: 1, 5, 12, 1.
+        m = re.search(r"(?:^|[^a-z0-9])(\d+)", s)
+        if m:
+            return (int(m.group(1)), None, None)
+
+        # Standalone option letter: (a) or (b)
+        m = re.search(r"\(?([a-z])\)?", s)
+        if m:
+            return (None, m.group(1).lower(), None)
+
+        return (None, None, None)
+
+    @staticmethod
+    def is_hierarchy_compatible(
+        target_hier: tuple[Optional[int], Optional[str], Optional[str]],
+        item_hier: tuple[Optional[int], Optional[str], Optional[str]]
+    ) -> bool:
+        """Strictly prevent cross-option (e.g. 6a vs 6b) or cross-subpart mismatching."""
+        t_main, t_opt, t_sub = target_hier
+        i_main, i_opt, i_sub = item_hier
+
+        # Main question numbers must match if both present
+        if t_main is not None and i_main is not None and t_main != i_main:
+            return False
+
+        # Option letters must match if both present (Option A != Option B)
+        if t_opt is not None and i_opt is not None and t_opt != i_opt:
+            return False
+
+        # Subparts must match if both present (Subpart 1 != Subpart 2)
+        if t_sub is not None and i_sub is not None and t_sub != i_sub:
+            return False
+
+        return True
+
+    @staticmethod
+    def is_hierarchy_exact_match(
+        target_hier: tuple[Optional[int], Optional[str], Optional[str]],
+        item_hier: tuple[Optional[int], Optional[str], Optional[str]]
+    ) -> bool:
+        t_main, t_opt, t_sub = target_hier
+        i_main, i_opt, i_sub = item_hier
+        if t_main is not None and i_main is not None and t_main == i_main:
+            if t_opt == i_opt and t_sub == i_sub:
+                return True
+        return False
 
     @staticmethod
     def _norm_qno(value: Any) -> str:

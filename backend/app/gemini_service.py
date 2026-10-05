@@ -306,15 +306,18 @@ OFFICIAL QUESTION PAPER STRUCTURE:
 {qp_json}
 
 STRICT HUMAN TEACHER EVALUATION RULES:
-1. DYNAMIC MAPPING & THOROUGH SCRIPT SCAN (DO NOT MISS ANY ANSWER):
+1. DYNAMIC MAPPING & EXACT QUESTION BINDING (NEVER SWAP OR CONFUSE OPTIONS / SUBPARTS):
    - Inspect EVERY single page and line of the uploaded answer script with extreme care.
    - Answers may be written in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
-   - Question numbers may be written in margins, underlined, circled, abbreviated (e.g. "Ans 1", "1 a", "Q3 (i)"), or implicit.
-   - Answers may continue across page boundaries or be completed later in the script.
-   - You MUST thoroughly scan the handwritten text and diagrams to locate the student's attempt for EVERY question.
+   - Question numbers may be written in margins, underlined, circled, abbreviated (e.g. "Ans 6b", "6(b)", "7 a i", "Q7(a)(i)"), or implicit.
+   - You MUST include an evaluation item for EVERY SINGLE QUESTION in the Question Paper structure above, using the exact 'question_id' and 'question_number' provided in the official structure.
+   - STRICT OPTION DISAMBIGUATION:
+     * When questions have elective choices (e.g. 6(a) vs 6(b), or 7(a)(i)+(ii) vs 7(b)(i)+(ii)):
+       - If the student attempted Option B (e.g. 6(b)), bind the answer strictly to '6(b)'. DO NOT mark it under 6(a).
+       - If the student attempted Option A (e.g. 7(a)(i) and 7(a)(ii)), bind the answers strictly to 7(a)(i) and 7(a)(ii). DO NOT mark them under 7(b)(i) or 7(b)(ii).
+       - For the unattempted alternative option(s), set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
    - DO NOT mark a question as unattempted if the student wrote an answer anywhere in the script!
-   - You MUST include an evaluation item for EVERY SINGLE QUESTION in the Question Paper structure above, using the exact 'question_id' and 'question_number'.
-   - If a question was genuinely omitted/skipped by the student, set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
+   - DO NOT mix up subparts (e.g., subpart (i) vs subpart (ii)).
 
 2. EVIDENCE-BASED ASSESSMENT (NEVER FABRICATE OR HALLUCINATE):
    - Evaluate ONLY what the student actually wrote or drew.
@@ -344,7 +347,7 @@ STRICT HUMAN TEACHER EVALUATION RULES:
 6. THEORY, DESCRIPTIVE & ESSAY QUESTIONS:
    - Evaluate terminology, logical coherence, core principles, required diagrams, and relevant examples.
 
-8. CRITICAL MISCONCEPTION IDENTIFICATION RULES:
+7. CRITICAL MISCONCEPTION IDENTIFICATION RULES:
    - A wrong answer is NOT automatically a misconception.
    - Wrong arithmetic != conceptual misconception.
    - A spelling error != conceptual misconception.

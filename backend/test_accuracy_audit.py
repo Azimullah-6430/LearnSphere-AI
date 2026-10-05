@@ -621,6 +621,131 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertTrue(q6_a2["is_skipped_due_to_choice"])
         self.assertEqual(q6_a2["marks_lost"], 0.0)
 
+    def test_34_prevent_cross_option_and_subpart_mismatch(self):
+        """34. Strict mapping: When student answers 6(b), 7(a)(i), and 7(a)(ii):
+        - 6(b) must map ONLY to 6(b), NEVER to 6(a)(i) or 6(a)(ii).
+        - 7(a)(i) must map ONLY to 7(a)(i), NEVER to 7(b)(i) or 7(a)(ii).
+        - 7(a)(ii) must map ONLY to 7(a)(ii), NEVER to 7(b)(ii) or 7(a)(i).
+        - 6(a)(i), 6(a)(ii), 7(b)(i), 7(b)(ii) must be correctly marked as skipped choice options.
+        """
+        qp_struct = {
+            "subject": "Computer Science & Engineering",
+            "total_marks": 30.0,
+            "questions": [
+                # Question 6 elective group (15 marks total)
+                {"question_id": "q6_a_1", "question_number": "6(a)(i)", "question_text": "Explain agile principles.", "maximum_marks": 7.0, "choice_group": "choice_q6", "required_choice_count": 1},
+                {"question_id": "q6_a_2", "question_number": "6(a)(ii)", "question_text": "Describe scrum sprints.", "maximum_marks": 8.0, "choice_group": "choice_q6", "required_choice_count": 1},
+                {"question_id": "q6_b", "question_number": "6(b)", "question_text": "Discuss waterfall model with diagram.", "maximum_marks": 15.0, "choice_group": "choice_q6", "required_choice_count": 1},
+
+                # Question 7 elective group (15 marks total)
+                {"question_id": "q7_a_1", "question_number": "7(a)(i)", "question_text": "Draw use case diagram for banking.", "maximum_marks": 8.0, "choice_group": "choice_q7", "required_choice_count": 1},
+                {"question_id": "q7_a_2", "question_number": "7(a)(ii)", "question_text": "Explain class relationships.", "maximum_marks": 7.0, "choice_group": "choice_q7", "required_choice_count": 1},
+                {"question_id": "q7_b_1", "question_number": "7(b)(i)", "question_text": "Sequence diagram for ATM.", "maximum_marks": 8.0, "choice_group": "choice_q7", "required_choice_count": 1},
+                {"question_id": "q7_b_2", "question_number": "7(b)(ii)", "question_text": "Activity diagram for checkout.", "maximum_marks": 7.0, "choice_group": "choice_q7", "required_choice_count": 1}
+            ]
+        }
+
+        # Simulated AI evaluation matching the student's actual handwritten answers:
+        ai_response = {
+            "evaluations": [
+                # Student wrote 6(b)
+                {
+                    "question_id": "q6_b",
+                    "question_number": "6(b)",
+                    "attempted": True,
+                    "maximum_marks": 15.0,
+                    "awarded_marks": 13.5,
+                    "student_answer": "Student drew complete waterfall phases with feedback loops.",
+                    "teacher_feedback": "Excellent waterfall explanation and neat diagram."
+                },
+                # Student wrote 7(a)(i)
+                {
+                    "question_id": "q7_a_1",
+                    "question_number": "7(a)(i)",
+                    "attempted": True,
+                    "maximum_marks": 8.0,
+                    "awarded_marks": 7.5,
+                    "student_answer": "Student drew banking use cases with actors and include/extend relationships.",
+                    "teacher_feedback": "Accurate use cases and actors."
+                },
+                # Student wrote 7(a)(ii)
+                {
+                    "question_id": "q7_a_2",
+                    "question_number": "7(a)(ii)",
+                    "attempted": True,
+                    "maximum_marks": 7.0,
+                    "awarded_marks": 6.0,
+                    "student_answer": "Student detailed generalization, association, and aggregation.",
+                    "teacher_feedback": "Good explanation of OOP relationships."
+                }
+            ]
+        }
+
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+
+        # 1. Total marks should be 30.0 (15 for Q6 + 15 for Q7)
+        self.assertEqual(result["total_marks"], 30.0)
+        # 2. Total obtained should be 13.5 + 7.5 + 6.0 = 27.0
+        self.assertEqual(result["obtained_marks"], 27.0)
+        self.assertEqual(result["percentage"], 90.0)
+
+        # Check Question 6 mapping
+        evals_by_qno = {q["question_number"]: q for q in result["evaluations"]}
+
+        self.assertTrue(evals_by_qno["6(b)"]["attempted"])
+        self.assertEqual(evals_by_qno["6(b)"]["awarded_marks"], 13.5)
+        self.assertTrue(evals_by_qno["6(b)"]["counted_in_total"])
+
+        self.assertFalse(evals_by_qno["6(a)(i)"]["attempted"])
+        self.assertEqual(evals_by_qno["6(a)(i)"]["awarded_marks"], 0.0)
+        self.assertFalse(evals_by_qno["6(a)(i)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["6(a)(i)"]["is_skipped_due_to_choice"])
+
+        self.assertFalse(evals_by_qno["6(a)(ii)"]["attempted"])
+        self.assertEqual(evals_by_qno["6(a)(ii)"]["awarded_marks"], 0.0)
+        self.assertFalse(evals_by_qno["6(a)(ii)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["6(a)(ii)"]["is_skipped_due_to_choice"])
+
+        # Check Question 7 mapping
+        self.assertTrue(evals_by_qno["7(a)(i)"]["attempted"])
+        self.assertEqual(evals_by_qno["7(a)(i)"]["awarded_marks"], 7.5)
+        self.assertTrue(evals_by_qno["7(a)(i)"]["counted_in_total"])
+
+        self.assertTrue(evals_by_qno["7(a)(ii)"]["attempted"])
+        self.assertEqual(evals_by_qno["7(a)(ii)"]["awarded_marks"], 6.0)
+        self.assertTrue(evals_by_qno["7(a)(ii)"]["counted_in_total"])
+
+        self.assertFalse(evals_by_qno["7(b)(i)"]["attempted"])
+        self.assertEqual(evals_by_qno["7(b)(i)"]["awarded_marks"], 0.0)
+        self.assertFalse(evals_by_qno["7(b)(i)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["7(b)(i)"]["is_skipped_due_to_choice"])
+
+        self.assertFalse(evals_by_qno["7(b)(ii)"]["attempted"])
+        self.assertEqual(evals_by_qno["7(b)(ii)"]["awarded_marks"], 0.0)
+        self.assertFalse(evals_by_qno["7(b)(ii)"]["counted_in_total"])
+        self.assertTrue(evals_by_qno["7(b)(ii)"]["is_skipped_due_to_choice"])
+
+    def test_35_hierarchy_parser_variants(self):
+        """35. Hierarchy parser unit tests on wide variety of numbering formats."""
+        p = self.agent._parse_q_hierarchy
+        self.assertEqual(p("6(a)(i)"), (6, 'a', '1'))
+        self.assertEqual(p("6(a)(ii)"), (6, 'a', '2'))
+        self.assertEqual(p("6(b)"), (6, 'b', None))
+        self.assertEqual(p("7a i"), (7, 'a', '1'))
+        self.assertEqual(p("7.b.ii"), (7, 'b', '2'))
+        self.assertEqual(p("Q7_b_2"), (7, 'b', '2'))
+        self.assertEqual(p("3(i)"), (3, None, '1'))
+        self.assertEqual(p("Q5"), (5, None, None))
+        self.assertEqual(p("12(c)"), (12, 'c', None))
+
+        # Compatibility checks
+        comp = self.agent.is_hierarchy_compatible
+        self.assertFalse(comp((6, 'a', '1'), (6, 'b', None)), "Option A cannot match Option B")
+        self.assertFalse(comp((7, 'a', '1'), (7, 'b', '1')), "7a cannot match 7b")
+        self.assertFalse(comp((7, 'a', '1'), (7, 'a', '2')), "Subpart 1 cannot match Subpart 2")
+        self.assertTrue(comp((6, 'b', None), (6, 'b', None)))
+        self.assertTrue(comp((7, 'a', '1'), (7, 'a', '1')))
+
 
 if __name__ == "__main__":
     unittest.main()
