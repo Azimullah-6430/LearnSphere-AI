@@ -27,25 +27,12 @@ import {
 } from 'lucide-react'
 
 export default function ActionCenter() {
-  const { recordActivity } = useApp()
+  const { user, recordActivity } = useApp()
   const navigate = useNavigate()
 
   // Items State
-  const [items, setItems] = useState(() => {
-    try {
-      const saved = localStorage.getItem('learnsphere_action_center_items')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        // Clean out legacy demo items if present
-        const cleanItems = parsed.filter(i => !['act-1', 'act-2', 'act-3', 'act-4'].includes(i.id))
-        const filtered = cleanItems.filter(i => (i.marks_lost || 0) >= 20 || (i.academic_status && !i.academic_status.includes('On track')))
-        return filtered
-      }
-      return []
-    } catch {
-      return []
-    }
-  })
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('')
@@ -61,28 +48,26 @@ export default function ActionCenter() {
   const [toastMessage, setToastMessage] = useState('')
 
   useEffect(() => {
-    try {
-      localStorage.setItem('learnsphere_action_center_items', JSON.stringify(items))
-    } catch {}
-  }, [items])
-
-  useEffect(() => {
     async function fetchBackendItems() {
+      setLoading(true)
       try {
         const res = await api.getActionCenterItems()
-        if (res && res.success && Array.isArray(res.items) && res.items.length > 0) {
+        if (res && res.success && Array.isArray(res.items)) {
           // Strictly filter out toppers and students with <= 20 marks lost
           const atRiskOnly = res.items.filter(i => (i.marks_lost || 0) >= 20 || (i.academic_status && !i.academic_status.includes('On track')))
-          if (atRiskOnly.length > 0) {
-            setItems(atRiskOnly)
-          }
+          setItems(atRiskOnly)
+        } else {
+          setItems([])
         }
       } catch (err) {
         console.warn('Action Center API notice:', err)
+        setItems([])
+      } finally {
+        setLoading(false)
       }
     }
     fetchBackendItems()
-  }, [])
+  }, [user])
 
   const handleStatusChange = (id, newStatus) => {
     setItems((prev) =>

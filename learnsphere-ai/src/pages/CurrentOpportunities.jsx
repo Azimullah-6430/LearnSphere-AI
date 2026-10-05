@@ -51,23 +51,36 @@ export default function CurrentOpportunities() {
   const [activeCategory, setActiveCategory] = useState('All')
   const [presetFilter, setPresetFilter] = useState('All') // 'All' | 'Recommended' | 'ClosingSoon' | 'NearYou'
 
-  // Saved / Bookmarked items in LocalStorage
-  const [savedIds, setSavedIds] = useState(() => {
-    try {
-      const stored = localStorage.getItem('learnsphere_saved_opps')
-      return stored ? JSON.parse(stored) : []
-    } catch (e) {
-      return []
+  // User-scoped storage key for saved / bookmarked items
+  const userStorageKey = useMemo(() => {
+    const uid = activeProfile?.id || activeProfile?._id || (activeProfile?.email ? activeProfile.email.toLowerCase().replace(/[^a-z0-9]/g, '_') : null)
+    return uid ? `learnsphere_saved_opps_${uid}` : null
+  }, [activeProfile])
+
+  const [savedIds, setSavedIds] = useState([])
+
+  // Re-hydrate bookmarks whenever the authenticated user changes
+  useEffect(() => {
+    if (!userStorageKey) {
+      setSavedIds([])
+      return
     }
-  })
+    try {
+      const stored = localStorage.getItem(userStorageKey)
+      setSavedIds(stored ? JSON.parse(stored) : [])
+    } catch {
+      setSavedIds([])
+    }
+  }, [userStorageKey])
 
   useEffect(() => {
+    if (!userStorageKey) return
     try {
-      localStorage.setItem('learnsphere_saved_opps', JSON.stringify(savedIds))
+      localStorage.setItem(userStorageKey, JSON.stringify(savedIds))
     } catch (e) {
       console.error(e)
     }
-  }, [savedIds])
+  }, [savedIds, userStorageKey])
 
   const toggleBookmark = (id) => {
     setSavedIds((prev) => {

@@ -57,6 +57,19 @@ function safeRemove(key) {
   try { localStorage.removeItem(key) } catch {}
 }
 
+function clearAllUserStorage() {
+  try {
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('learnsphere_')) {
+        keysToRemove.push(k)
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k))
+  } catch {}
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }) {
@@ -213,10 +226,12 @@ export function AppProvider({ children }) {
           _fetchSyllabus(currentSeq)
         } else {
           _clearAuthState()
+          clearAllUserStorage()
         }
       } catch {
         if (authSequenceRef.current === currentSeq) {
           _clearAuthState()
+          clearAllUserStorage()
         }
       } finally {
         if (authSequenceRef.current === currentSeq) {
@@ -370,7 +385,6 @@ export function AppProvider({ children }) {
    * logout() — Invalidates server session, immediately wipes state and caches.
    */
   const logout = useCallback(async () => {
-    const userToClean = currentUser
     ++authSequenceRef.current
 
     if (studySessions.length > 0) {
@@ -381,16 +395,8 @@ export function AppProvider({ children }) {
     try { await api.logout() } catch { /* best effort */ }
 
     _clearAuthState()
-
-    if (userToClean) {
-      safeRemove(getUserStorageKey('profile', userToClean))
-      safeRemove(getUserStorageKey('teacher_classes', userToClean))
-      safeRemove(getUserStorageKey('active_class_id', userToClean))
-      safeRemove(getUserStorageKey('institution_mode', userToClean))
-      safeRemove(getUserStorageKey('streak', userToClean))
-      safeRemove(getUserStorageKey('last_active_date', userToClean))
-    }
-  }, [_clearAuthState, currentUser, studySessions])
+    clearAllUserStorage()
+  }, [_clearAuthState, studySessions])
 
   const recordActivity = useCallback((type, title, details = {}) => {
     if (currentUser) _restoreStreak(currentUser)
