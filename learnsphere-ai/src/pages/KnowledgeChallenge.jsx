@@ -25,8 +25,8 @@ function ScoreRing({ score, size = 80 }) {
 }
 
 export default function KnowledgeChallenge() {
-  const { user, profile, syllabusData, recordActivity } = useApp()
-  const activeProfile = { ...user, ...profile }
+  const { user, syllabusData, recordActivity } = useApp()
+  const activeProfile = user
 
   const subjects = getDynamicSubjects(activeProfile, syllabusData)
   const hasExtractedSubjects = subjects.length > 0

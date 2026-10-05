@@ -80,9 +80,9 @@ function generateReply(method, technique, concept, subject, input) {
 }
 
 export default function Trainer() {
-  const { user, profile, syllabusData, recordActivity, streakDays } = useApp()
+  const { user, syllabusData, recordActivity, streakDays } = useApp()
   const location = useLocation()
-  const activeProfile = { ...user, ...profile }
+  const activeProfile = user
 
   const rawSubjects = getDynamicSubjects(activeProfile, syllabusData)
   const hasExtractedSyllabus = rawSubjects.length > 0
@@ -138,7 +138,9 @@ export default function Trainer() {
       concept: selectedConcept
     })
 
-    const targetContext = activeProfile?.level === 'college' ? `Semester ${activeProfile?.semester || 5}` : `Class ${activeProfile?.grade_level || activeProfile?.classLevel || 12}`
+    const targetContext = activeProfile?.level === 'college'
+      ? `Semester ${activeProfile?.semester || ''}`.trim()
+      : (activeProfile?.grade_level ? `Class ${activeProfile.grade_level}` : 'School Program')
 
     const teachText = `📚 **Personal AI Trainer Initialized (${targetContext})**:\n\n` +
       `• **Subject**: ${selectedSubject}\n` +
@@ -168,9 +170,9 @@ export default function Trainer() {
         subject: selectedSubject,
         concept: selectedConcept,
         study_method: selectedMethod?.name || selectedMethod?.id,
-        level: activeProfile?.level || 'college',
-        semester: activeProfile?.semester || 5,
-        class_level: activeProfile?.grade_level || activeProfile?.classLevel || 12,
+        level: activeProfile?.level || 'school',
+        semester: activeProfile?.semester || '',
+        class_level: activeProfile?.grade_level || activeProfile?.classLevel || '',
         history: newMsgList.slice(-6)
       })
 

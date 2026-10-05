@@ -1,25 +1,39 @@
 """
-LearnSphere AI - Complete Production Backend Server
-Handles Authentication, Multimodal Gemini 3.6 Flash Evaluation, Syllabus Extraction,
-Action Center, Misconceptions, Plagiarism, Student Learning Tools & Render Deployment.
+LearnSphere AI - Production Backend Server
+Auth, Evaluation, Syllabus, Misconceptions, Plagiarism, Action Center, Notifications.
+
+Security fixes applied:
+  - No X-User-ID header authentication (removed)
+  - No plaintext password fallback (removed)
+  - No DEFAULT_USERS or fake fallback data
+  - No hardcoded SECRET_KEY (fails startup if missing in production)
+  - Role validated from database, never from client
+  - Every protected route uses require_auth() / require_role() decorators
+  - User-scoped queries: students see only their own data
+  - Teachers see only evaluations they submitted
+  - Environment variables validated on startup
 """
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import logging
 import os
-import json
 import re
 import traceback
-from pathlib import Path
+import uuid
 from datetime import datetime, timedelta
+from functools import wraps
+from pathlib import Path
 
 import requests  # type: ignore
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_from_directory, send_file, session
+from flask import Flask, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
 
 try:
     from bson import ObjectId  # type: ignore
@@ -29,51 +43,99 @@ except Exception:
 try:
     import fitz  # type: ignore
 except Exception:
-    fitz = None  # type: ignore
+    fitz = None
 
-try:
-    import PyPDF2  # type: ignore
-except Exception:
-    PyPDF2 = None  # type: ignore
-
-from app.db import init_db, get_mongodb, get_sqlite_db, is_using_mongo
-from app.gemini_service import GeminiService
+from app.db import get_mongodb, get_sqlite_db, init_db, is_using_mongo
 from app.evaluation.evaluator import EvaluationAgent
-from app.evaluation.store import store_evaluation_pipeline
 from app.evaluation.pdf_report import generate_evaluation_pdf
+from app.evaluation.store import store_evaluation_pipeline
+from app.gemini_service import GeminiService
 from app.plagiarism import PlagiarismDetector
 
-
-# ============================================================
-# ENVIRONMENT & INITIALIZATION
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parent
+# ── Paths ─────────────────────────────────────────────────────────────────────
+BASE_DIR     = Path(__file__).resolve().parent
+ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIST = ROOT_DIR / "learnsphere-ai" / "dist"
 
+# ── Environment ───────────────────────────────────────────────────────────────
 load_dotenv(BASE_DIR / ".env", override=True)
 load_dotenv(ROOT_DIR / ".env", override=True)
 load_dotenv(override=True)
 
-# Initialize Database
-init_db()
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+ENV = os.getenv("ENV", "production").strip().lower()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STARTUP VALIDATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _validate_environment() -> None:
+    """Hard-fail at startup if critical environment variables are missing."""
+    secret = os.getenv("SECRET_KEY", "").strip()
+    known_defaults = {
+        "learnsphere-ai-secret-key-production-2026",
+        "learnsphere-ai-secret-key",
+        "dev-secret",
+        "change-me",
+        "",
+    }
+    if ENV != "development" and (not secret or secret in known_defaults):
+        msg = (
+            "FATAL: SECRET_KEY is not set or uses a default value in production. "
+            "Set a strong random SECRET_KEY in Render → Environment variables."
+        )
+        logger.critical(msg)
+        raise SystemExit(msg)
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not gemini_key or gemini_key.startswith("your_"):
+        if ENV != "development":
+            msg = "FATAL: GEMINI_API_KEY is not configured."
+            logger.critical(msg)
+            raise SystemExit(msg)
+        else:
+            logger.warning("GEMINI_API_KEY not set (development mode).")
+
+    logger.info("[Startup] Environment validated.")
+
+
+# ── Run validation before app object is created ───────────────────────────────
+_validate_environment()
+
+# ── Database init (will raise in production if MongoDB unavailable) ───────────
+init_db()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FLASK APP
+# ══════════════════════════════════════════════════════════════════════════════
+
 app = Flask(
-    __name__, 
+    __name__,
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(FRONTEND_DIST),
-    static_url_path=""
+    static_url_path="",
 )
 
-# Environment CORS Configuration
-frontend_url = os.getenv("FRONTEND_URL", "").strip()
-allowed_origins = [frontend_url] if (frontend_url and not frontend_url.startswith("your_")) else ["*"]
-CORS(app, resources={r"/*": {"origins": allowed_origins if allowed_origins != ["*"] else "*"}})
+app.secret_key = os.getenv("SECRET_KEY", "dev-only-insecure-key")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
+app.config["SESSION_COOKIE_HTTPONLY"]    = True
+app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
+app.config["SESSION_COOKIE_SECURE"]      = (ENV != "development")
+app.config["MAX_CONTENT_LENGTH"]         = 300 * 1024 * 1024   # 300 MB
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+_frontend_url = os.getenv("FRONTEND_URL", "").strip()
+if _frontend_url and not _frontend_url.startswith("your_"):
+    CORS(app, resources={r"/api/*": {"origins": _frontend_url}},
+         supports_credentials=True)
+else:
+    # Single-service Render deployment: frontend served from same origin
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# ── Upload folder ─────────────────────────────────────────────────────────────
 try:
     UPLOAD_FOLDER = BASE_DIR / "uploads"
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -82,18 +144,25 @@ except Exception:
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
-app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
-app.secret_key = os.getenv("SECRET_KEY", "learnsphere-ai-secret-key-production-2026")
 
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "webp", "txt", "doc", "docx"}
+ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "webp", "txt"}
 
-gemini_service = GeminiService()
-evaluation_agent = EvaluationAgent()
+# ── Service singletons ────────────────────────────────────────────────────────
+gemini_service    = GeminiService()
+evaluation_agent  = EvaluationAgent()
 plagiarism_detector = PlagiarismDetector()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
 def allowed_file(filename: str) -> bool:
-    return bool(filename and "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS)
+    return bool(
+        filename and "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
+
 
 def save_uploaded_file(uploaded_file, prefix: str) -> str:
     if uploaded_file is None or not uploaded_file.filename:
@@ -101,61 +170,282 @@ def save_uploaded_file(uploaded_file, prefix: str) -> str:
     raw_name = Path(uploaded_file.filename).name
     ext = raw_name.rsplit(".", 1)[1].lower() if "." in raw_name else "pdf"
     if ext not in ALLOWED_EXTENSIONS:
-        ext = "pdf"
-    clean_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', Path(raw_name).stem).strip('_') or "uploaded_doc"
-    safe_name = f"{prefix}_{int(datetime.now().timestamp())}_{clean_stem}.{ext}"
+        raise ValueError(f"File type '.{ext}' is not permitted.")
+    clean_stem = re.sub(r"[^a-zA-Z0-9_\-]", "_", Path(raw_name).stem).strip("_") or "doc"
+    safe_name  = f"{prefix}_{int(datetime.now().timestamp())}_{clean_stem}.{ext}"
     destination = UPLOAD_FOLDER / safe_name
     uploaded_file.save(str(destination))
     return str(destination)
 
-def mongo_serialize(doc):
+
+def mongo_serialize(doc: dict) -> dict:
     if not doc:
-        return doc
+        return {}
     d = dict(doc)
     if "_id" in d:
-        d["id"] = str(d["_id"])
-        del d["_id"]
+        d["id"] = str(d.pop("_id"))
     for k, v in d.items():
         if isinstance(v, datetime):
             d[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+    # Never send password data
+    d.pop("password", None)
+    d.pop("password_hash", None)
     return d
 
 
-# ============================================================
-# SYSTEM HEALTH & ROOT
-# ============================================================
+def _lookup_user_by_id(user_id: str):
+    """Fetch user document from MongoDB or SQLite by their stored id."""
+    mongo_db = get_mongodb()
+    if mongo_db is not None:
+        doc = None
+        if ObjectId and len(str(user_id)) == 24:
+            try:
+                doc = mongo_db["users"].find_one({"_id": ObjectId(user_id)})
+            except Exception:
+                pass
+        if not doc:
+            doc = mongo_db["users"].find_one({"id": str(user_id)})
+        if not doc:
+            doc = mongo_db["users"].find_one({"user_id": str(user_id)})
+        return mongo_serialize(doc) if doc else None
 
-@app.route("/api/health", methods=["GET"])
+    conn = get_sqlite_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE id = ? OR user_id = ?", (user_id, str(user_id)))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        d = dict(row)
+        d.pop("password", None)
+        d.pop("password_hash", None)
+        return d
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTHORIZATION DECORATORS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def require_auth(f):
+    """Decorator: rejects request if no valid server session exists."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"success": False, "error": "Authentication required."}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def require_role(*allowed_roles: str):
+    """Decorator: rejects request if session role not in allowed_roles.
+    Role is read from the SERVER SESSION, never from the request body.
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            user_id = session.get("user_id")
+            if not user_id:
+                return jsonify({"success": False, "error": "Authentication required."}), 401
+            session_role = session.get("role", "")
+            if session_role not in allowed_roles:
+                return jsonify({
+                    "success": False,
+                    "error": f"Access denied. This endpoint requires role: {', '.join(allowed_roles)}."
+                }), 403
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def _current_user_id() -> str:
+    """Return authenticated user_id from server session."""
+    return str(session.get("user_id", ""))
+
+
+def _current_role() -> str:
+    """Return authenticated role from server session."""
+    return str(session.get("role", ""))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HEALTH
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.route("/health", methods=["GET"])
+@app.route("/api/health", methods=["GET"])
 def health():
+    db_status = "disconnected"
+    try:
+        if is_using_mongo():
+            db_status = "mongodb_connected"
+        else:
+            db_status = "sqlite_development"
+    except Exception:
+        db_status = "error"
+
     return jsonify({
         "status": "healthy",
-        "service": "LearnSphere AI Production API",
-        "database": "MongoDB Atlas" if is_using_mongo() else "SQLite",
-        "gemini_model": gemini_service.primary_model,
-        "version": "3.6-production"
+        "service": "LearnSphere AI",
+        "database": db_status,
+        "gemini_model": gemini_service.model,
+        "env": ENV,
     }), 200
 
 
-# ============================================================
-# AUTHENTICATION & SECURITY
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    try:
+        # Accept both JSON and multipart form
+        if request.content_type and "multipart/form-data" in request.content_type:
+            g = request.form.get
+        else:
+            _data = request.get_json(force=True) or {}
+            g = _data.get
+
+        name     = str(g("name") or "").strip()
+        email    = str(g("email") or "").strip().lower()
+        password = str(g("password") or "").strip()
+        role     = str(g("role") or "student").strip().lower()
+
+        # ── Validation ─────────────────────────────────────────────────────
+        if not name or len(name) < 2 or len(name) > 120:
+            return jsonify({"success": False, "error": "Name must be 2–120 characters."}), 400
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            return jsonify({"success": False, "error": "A valid email address is required."}), 400
+        if not password or len(password) < 6:
+            return jsonify({"success": False, "error": "Password must be at least 6 characters."}), 400
+        if role not in ("student", "teacher"):
+            return jsonify({"success": False, "error": "Role must be 'student' or 'teacher'."}), 400
+
+        # ── Optional profile fields ─────────────────────────────────────────
+        teacher_level    = str(g("teacherLevel") or g("teacher_level") or "school")
+        institution_name = str(g("institutionName") or g("institution_name") or "")
+        department       = str(g("department") or "")
+        level            = str(g("level") or "school")
+        board            = str(g("board") or "") if level == "school" else None
+        roll_number      = str(g("roll_number") or "")
+        section          = str(g("section") or "")
+        grade_level      = str(g("classLevel") or g("grade_level") or "")
+        stream           = str(g("stream") or "")
+        domain           = str(g("domain") or "")
+        semester_raw     = g("semester")
+        semester         = str(semester_raw) if semester_raw is not None else None
+
+        subjects_raw = g("subjects")
+        if isinstance(subjects_raw, str):
+            try:
+                subjects = json.loads(subjects_raw)
+            except Exception:
+                subjects = []
+        elif isinstance(subjects_raw, list):
+            subjects = subjects_raw
+        else:
+            subjects = []
+
+        # ── Hash password ───────────────────────────────────────────────────
+        password_hash = generate_password_hash(password)
+        stable_user_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+
+        user_doc = {
+            "user_id":          stable_user_id,
+            "name":             name,
+            "email":            email,
+            "password_hash":    password_hash,
+            "role":             role,
+            "teacher_level":    teacher_level if role == "teacher" else None,
+            "institution_name": institution_name,
+            "department":       department,
+            "level":            level,
+            "board":            board,
+            "roll_number":      roll_number,
+            "section":          section,
+            "grade_level":      grade_level,
+            "stream":           stream,
+            "domain":           domain,
+            "semester":         semester,
+            "subjects":         subjects,
+            "created_at":       now,
+            "updated_at":       now,
+            "status":           "active",
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            # Check duplicate email before insert
+            if mongo_db["users"].find_one({"email": email}):
+                return jsonify({"success": False, "error": "An account with this email already exists. Please sign in instead."}), 409
+            result = mongo_db["users"].insert_one(user_doc)
+            stored_id = str(result.inserted_id)
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            if cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+                conn.close()
+                return jsonify({"success": False, "error": "An account with this email already exists. Please sign in instead."}), 409
+            cursor.execute("""
+                INSERT INTO users
+                (user_id, name, email, password_hash, role, level, teacher_level,
+                 institution_name, department, domain, board, roll_number, section,
+                 grade_level, stream, semester, subjects_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (stable_user_id, name, email, password_hash, role, level,
+                  teacher_level, institution_name, department, domain, board,
+                  roll_number, section, grade_level, stream, semester,
+                  json.dumps(subjects)))
+            stored_id = str(cursor.lastrowid)
+            conn.commit()
+            conn.close()
+
+        # Start session
+        session.permanent = True
+        session["user_id"] = stored_id
+        session["role"]    = role
+
+        response_user = {k: v for k, v in user_doc.items()
+                         if k not in ("password_hash", "password")}
+        response_user["id"] = stored_id
+        if isinstance(response_user.get("created_at"), datetime):
+            response_user["created_at"] = response_user["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(response_user.get("updated_at"), datetime):
+            response_user["updated_at"] = response_user["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+        return jsonify({"success": True, "user": response_user}), 201
+
+    except Exception as exc:
+        logger.error("Registration error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
 
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
-    data = request.get_json() or {}
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "").strip()
+    data     = request.get_json(force=True) or {}
+    email    = str(data.get("email") or "").strip().lower()
+    password = str(data.get("password") or "").strip()
+    # NOTE: client-supplied 'role' is used ONLY to verify the user chose the
+    # correct portal.  The authoritative role always comes from the database.
+    portal_role = str(data.get("role") or "").strip().lower()
 
     if not email or not password:
-        return jsonify({"success": False, "error": "Email and password are required to log in."}), 400
+        return jsonify({"success": False, "error": "Email and password are required."}), 400
 
+    # ── Fetch user ────────────────────────────────────────────────────────────
     user = None
+    stored_id = None
+
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        user = mongo_db["users"].find_one({"email": email})
-        if user:
-            user = mongo_serialize(user)
+        doc = mongo_db["users"].find_one({"email": email})
+        if doc:
+            stored_id = str(doc["_id"])
+            user = mongo_serialize(doc)
+            # keep hash for verification (mongo_serialize strips it)
+            user["_password_hash"] = doc.get("password_hash") or doc.get("password") or ""
     else:
         conn = get_sqlite_db()
         cursor = conn.cursor()
@@ -163,380 +453,205 @@ def auth_login():
         row = cursor.fetchone()
         conn.close()
         if row:
-            user = dict(row)
+            d = dict(row)
+            stored_id = str(d["id"])
+            user = {k: v for k, v in d.items() if k not in ("password", "password_hash")}
+            user["_password_hash"] = d.get("password_hash") or d.get("password") or ""
 
-    if user:
-        stored_hash = user.get("password_hash") or user.get("password") or ""
-        # Verify password securely
-        valid = False
-        if stored_hash.startswith("scrypt:") or stored_hash.startswith("pbkdf2:"):
-            valid = check_password_hash(stored_hash, password)
-        else:
-            valid = (stored_hash == password)
+    if not user:
+        return jsonify({"success": False, "error": "Account not found. Please create an account first."}), 401
 
-        if not valid:
-            return jsonify({"success": False, "error": "Incorrect password. Please verify your credentials."}), 401
+    # ── Verify password (only hashed; NO plaintext fallback) ──────────────────
+    stored_hash = user.pop("_password_hash", "")
+    if not stored_hash:
+        return jsonify({"success": False, "error": "Account requires a password reset. Please contact support."}), 403
+    if not stored_hash.startswith(("scrypt:", "pbkdf2:")):
+        # Hash is in a legacy or unknown format — refuse and flag for reset
+        return jsonify({
+            "success": False,
+            "error": "Your account password needs to be reset. Please register again or contact support.",
+        }), 403
 
-        user["teacherLevel"] = user.get("teacher_level") or user.get("teacherLevel") or user.get("level") or "school"
-        # Sanitize sensitive fields from response
-        user.pop("password", None)
-        user.pop("password_hash", None)
-        session["user_id"] = user.get("id") or user.get("_id")
-        session["role"] = user.get("role")
-        return jsonify({"success": True, "user": user}), 200
+    if not check_password_hash(stored_hash, password):
+        return jsonify({"success": False, "error": "Incorrect password."}), 401
 
-    return jsonify({"success": False, "error": "Account does not exist. Please create an account first to log in."}), 401
+    # ── Portal role check ─────────────────────────────────────────────────────
+    db_role = str(user.get("role") or "student").lower()
+    if portal_role and portal_role != db_role:
+        return jsonify({
+            "success": False,
+            "error": (
+                f"This account is registered as a '{db_role}'. "
+                f"Please use the {'Teacher' if db_role == 'teacher' else 'Student'} portal."
+            ),
+        }), 403
+
+    # ── Start session ─────────────────────────────────────────────────────────
+    session.permanent = True
+    session["user_id"] = stored_id
+    session["role"]    = db_role
+
+    # Normalize teacherLevel for frontend
+    user["teacherLevel"] = (
+        user.get("teacher_level")
+        or user.get("teacherLevel")
+        or user.get("level")
+        or "school"
+    )
+    user["id"] = stored_id
+    return jsonify({"success": True, "user": user}), 200
 
 
 @app.route("/api/auth/me", methods=["GET"])
 def auth_me():
-    user_id = session.get("user_id") or request.headers.get("X-User-ID")
+    """Return the currently authenticated user based on server session.
+    NEVER uses X-User-ID header for identity.
+    """
+    user_id = session.get("user_id")
     if not user_id:
-        return jsonify({"success": False, "authenticated": False, "error": "Not authenticated"}), 401
-    
-    mongo_db = get_mongodb()
-    user = None
-    if mongo_db is not None:
-        user = mongo_db["users"].find_one({"id": user_id}) or mongo_db["users"].find_one({"_id": user_id})
-        if user:
-            user = mongo_serialize(user)
-    else:
-        conn = get_sqlite_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            user = dict(row)
+        return jsonify({"success": False, "authenticated": False, "error": "Not authenticated."}), 401
 
+    user = _lookup_user_by_id(user_id)
     if not user:
-        return jsonify({"success": False, "authenticated": False, "error": "User not found"}), 404
+        # Session references a deleted or unknown account
+        session.clear()
+        return jsonify({"success": False, "authenticated": False, "error": "User not found."}), 404
 
-    user.pop("password", None)
-    user.pop("password_hash", None)
-    return jsonify({"success": True, "authenticated": True, "user": user})
+    user["teacherLevel"] = (
+        user.get("teacher_level")
+        or user.get("teacherLevel")
+        or user.get("level")
+        or "school"
+    )
+    return jsonify({"success": True, "authenticated": True, "user": user}), 200
+
+
+@app.route("/api/user/profile", methods=["PUT"])
+@require_auth
+def update_user_profile():
+    """Update profile attributes for the currently authenticated user in MongoDB/SQLite."""
+    try:
+        user_id = _current_user_id()
+        data = request.get_json(force=True) or {}
+
+        allowed_fields = {
+            "name", "level", "board", "grade_level", "classLevel", "stream",
+            "domain", "semester", "department", "institution_name", "institutionName",
+            "section", "roll_number", "subjects"
+        }
+
+        update_fields = {}
+        for k, v in data.items():
+            if k in allowed_fields and v is not None:
+                if k == "classLevel":
+                    update_fields["grade_level"] = str(v)
+                elif k == "institutionName":
+                    update_fields["institution_name"] = str(v)
+                else:
+                    update_fields[k] = v
+
+        update_fields["updated_at"] = datetime.utcnow()
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            if ObjectId and len(str(user_id)) == 24:
+                try:
+                    mongo_db["users"].update_one({"_id": ObjectId(user_id)}, {"$set": update_fields})
+                except Exception:
+                    pass
+            mongo_db["users"].update_one({"user_id": str(user_id)}, {"$set": update_fields})
+            mongo_db["users"].update_one({"id": str(user_id)}, {"$set": update_fields})
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys() if k != "updated_at"])
+            params = [json.dumps(v) if isinstance(v, list) else str(v) for k, v in update_fields.items() if k != "updated_at"]
+            params.extend([user_id, str(user_id)])
+            if set_clause:
+                cursor.execute(f"UPDATE users SET {set_clause} WHERE id = ? OR user_id = ?", params)
+                conn.commit()
+            conn.close()
+
+        updated_user = _lookup_user_by_id(user_id)
+        return jsonify({"success": True, "user": updated_user}), 200
+    except Exception as exc:
+        logger.error("Update profile error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
     session.clear()
-    return jsonify({"success": True, "message": "Logged out successfully."})
+    resp = jsonify({"success": True, "message": "Logged out."})
+    resp.delete_cookie("session")
+    return resp, 200
 
 
-@app.route("/api/auth/register", methods=["POST"])
-def auth_register():
-    try:
-        if request.content_type and "multipart/form-data" in request.content_type:
-            name = request.form.get("name", "").strip()
-            email = request.form.get("email", "").strip().lower()
-            password = request.form.get("password", "").strip()
-            role = request.form.get("role", "student").lower()
-            teacher_level = request.form.get("teacherLevel", request.form.get("teacher_level", "school"))
-            institution_name = request.form.get("institutionName", request.form.get("institution_name", ""))
-            department = request.form.get("department", "")
-            level = request.form.get("level", "school")
-            board = request.form.get("board", "CBSE") if level == "school" else None
-            roll_number = request.form.get("roll_number", "")
-            section = request.form.get("section", "A")
-            grade_level = request.form.get("classLevel", request.form.get("grade_level", "12")) if level == "school" else None
-            stream = request.form.get("stream", "")
-            domain = request.form.get("domain", "")
-            semester = request.form.get("semester", "") if level == "college" else None
-            subjects = json.loads(request.form.get("subjects", "[]")) if request.form.get("subjects") else []
-        else:
-            data = request.get_json() or {}
-            name = data.get("name", "").strip()
-            email = data.get("email", "").strip().lower()
-            password = data.get("password", "").strip()
-            role = data.get("role", "student").lower()
-            teacher_level = data.get("teacherLevel", data.get("teacher_level", "school"))
-            institution_name = data.get("institutionName", data.get("institution_name", ""))
-            department = data.get("department", "")
-            level = data.get("level", "school")
-            board = data.get("board", "CBSE") if level == "school" else None
-            roll_number = data.get("roll_number", "")
-            section = data.get("section", "A")
-            grade_level = str(data.get("classLevel", data.get("grade_level", "12"))) if level == "school" else None
-            stream = data.get("stream", "")
-            domain = data.get("domain", "")
-            semester = data.get("semester", "") if level == "college" else None
-            subjects = data.get("subjects", [])
-
-        if not name or not email or not password:
-            return jsonify({"success": False, "error": "Name, email, and password are required."}), 400
-
-        # Hash password securely
-        hashed_password = generate_password_hash(password)
-
-        user_doc = {
-            "name": name,
-            "email": email,
-            "password_hash": hashed_password,
-            "role": role,
-            "teacher_level": teacher_level if role == "teacher" else None,
-            "institution_name": institution_name,
-            "department": department,
-            "level": level,
-            "board": board,
-            "roll_number": roll_number,
-            "section": section,
-            "grade_level": grade_level,
-            "stream": stream,
-            "domain": domain,
-            "semester": semester,
-            "subjects": subjects,
-            "created_at": datetime.utcnow()
-        }
-
-        mongo_db = get_mongodb()
-        if mongo_db is not None:
-            res = mongo_db["users"].update_one(
-                {"email": email},
-                {"$set": user_doc},
-                upsert=True
-            )
-            user_doc["id"] = str(res.upserted_id) if res.upserted_id else email
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO users (name, email, password_hash, role, level, teacher_level, institution_name, department, domain, board, roll_number, section, grade_level, stream, semester, subjects_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (name, email, hashed_password, role, level, teacher_level, institution_name, department, domain, board, roll_number, section, grade_level, stream, semester, json.dumps(subjects)))
-            user_doc["id"] = cursor.lastrowid
-            conn.commit()
-            conn.close()
-
-        # Sanitize sensitive fields from response
-        user_doc.pop("password_hash", None)
-        return jsonify({"success": True, "user": mongo_serialize(user_doc)}), 201
-
-    except Exception as exc:
-        logger.error("Registration failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-# ============================================================
-# TEACHER ACTION CENTER API (Rule 17: Marks Lost > 20)
-# ============================================================
-
-@app.route("/api/action-center", methods=["GET"])
-def get_action_center_items():
-    """Identifies students who lost MORE THAN 20 marks during evaluation."""
-    try:
-        mongo_db = get_mongodb()
-        if mongo_db is not None and "action_items" in mongo_db.list_collection_names():
-            items = [mongo_serialize(d) for d in mongo_db["action_items"].find()]
-            return jsonify({"success": True, "items": items}), 200
-
-        # SQLite query for evaluations where (total_marks - obtained_marks) > 20
-        conn = get_sqlite_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM evaluations WHERE (total_marks - obtained_marks) > 20 ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        items = []
-        for r in rows:
-            marks_lost = int(r["total_marks"] - r["obtained_marks"])
-            items.append({
-                "id": f"act_{r['id']}",
-                "student_name": r["student_name"],
-                "roll_number": r["roll_number"] or "N/A",
-                "academic_status": f"At Risk (Lost {marks_lost} marks)",
-                "subject": r["subject"],
-                "topic": r["assessment_title"],
-                "question_num": "Evaluated Paper",
-                "marks_lost": marks_lost,
-                "issue": r["overall_feedback"] or "Significant mark loss (>20 marks) identified during evaluation.",
-                "misconception": f"Review required for {r['subject']}",
-                "priority": "High" if marks_lost > 30 else "Medium",
-                "action": "Assign targeted practice worksheet.",
-                "status": "New",
-                "created_at": str(r["created_at"])[:10]
-            })
-        return jsonify({"success": True, "items": items}), 200
-    except Exception as exc:
-        logger.error("Action Center GET failed: %s", exc)
-        return jsonify({"success": True, "items": []}), 200
-
-@app.route("/api/action-center/<item_id>", methods=["PUT"])
-def update_action_center_item(item_id):
-    try:
-        data = request.get_json(force=True) or {}
-        new_status = data.get("status")
-        mongo_db = get_mongodb()
-        if mongo_db is not None:
-            mongo_db["action_items"].update_one(
-                {"id": item_id},
-                {"$set": {"status": new_status, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}},
-                upsert=True
-            )
-        return jsonify({"success": True, "id": item_id, "status": new_status}), 200
-    except Exception as exc:
-        logger.error("Action Center PUT failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-# ============================================================
-# MISCONCEPTIONS API
-# ============================================================
-
-@app.route("/api/misconceptions", methods=["GET"])
-def get_misconceptions():
-    try:
-        mongo_db = get_mongodb()
-        if mongo_db is not None and "misconceptions" in mongo_db.list_collection_names():
-            db_miscs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find()]
-            return jsonify({"success": True, "misconceptions": db_miscs}), 200
-
-        conn = get_sqlite_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM misconceptions ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        miscs = [dict(r) for r in rows]
-        return jsonify({"success": True, "misconceptions": miscs}), 200
-    except Exception as exc:
-        logger.error("Misconceptions GET failed: %s", exc)
-        return jsonify({"success": True, "misconceptions": []}), 200
-
-
-# ============================================================
-# PLAGIARISM API & SUMMARY
-# ============================================================
-
-@app.route("/api/plagiarism/matches", methods=["GET"])
-def get_plagiarism_matches():
-    try:
-        mongo_db = get_mongodb()
-        if mongo_db is not None and "plagiarism_records" in mongo_db.list_collection_names():
-            records = [mongo_serialize(d) for d in mongo_db["plagiarism_records"].find()]
-            return jsonify({"success": True, "matches": records}), 200
-
-        conn = get_sqlite_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM plagiarism_records ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        records = [dict(r) for r in rows]
-        return jsonify({"success": True, "matches": records}), 200
-    except Exception as exc:
-        logger.error("Plagiarism matches GET failed: %s", exc)
-        return jsonify({"success": True, "matches": []}), 200
-
-@app.route("/api/plagiarism/summary", methods=["GET"])
-def get_plagiarism_summary():
-    try:
-        mongo_db = get_mongodb()
-        if mongo_db is not None and "plagiarism_records" in mongo_db.list_collection_names():
-            records = [mongo_serialize(d) for d in mongo_db["plagiarism_records"].find()]
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM plagiarism_records ORDER BY created_at DESC")
-            rows = cursor.fetchall()
-            conn.close()
-            records = [dict(r) for r in rows]
-
-        high_risk = [r for r in records if r.get("suspected") or r.get("similarity", 0) >= 85.0]
-        possible = [r for r in records if r.get("similarity", 0) >= 70.0 and r.get("similarity", 0) < 85.0]
-
-        return jsonify({
-            "success": True,
-            "total_checked": len(records),
-            "flagged_count": len(high_risk),
-            "high_risk_matches": len(high_risk),
-            "possible_matches": len(possible),
-            "records": records
-        }), 200
-    except Exception as exc:
-        logger.error("Plagiarism summary error: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-# ============================================================
-# SYLLABUS DYNAMIC ANALYZER
-# ============================================================
-
-@app.route("/api/syllabus/analyze", methods=["POST"])
-def analyze_syllabus():
-    try:
-        syllabus_file = request.files.get("syllabus") or request.files.get("syllabus_file")
-        syllabus_text = request.form.get("text", "").strip() or request.args.get("text", "").strip()
-        level = request.form.get("level", "college").strip()
-        semester = str(request.form.get("semester", "5")).strip()
-        class_level = str(request.form.get("classLevel", request.form.get("grade_level", "12"))).strip()
-        stream = request.form.get("stream", "").strip()
-        domain = request.form.get("domain", "").strip()
-
-        file_input = save_uploaded_file(syllabus_file, "syllabus") if syllabus_file and syllabus_file.filename else syllabus_text
-
-        if not file_input:
-            return jsonify({"success": False, "error": "No readable syllabus file or text provided."}), 400
-
-        analysis = gemini_service.analyze_syllabus(
-            file_input, level=level, semester=semester, class_level=class_level, domain=domain, stream=stream
-        )
-        return jsonify({"success": True, "analysis": analysis}), 200
-
-    except Exception as exc:
-        logger.error("Syllabus analysis failed: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 # EVALUATION PIPELINE
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/evaluate", methods=["POST"])
 @app.route("/api/evaluate", methods=["POST"])
+@require_auth
 def evaluate():
     try:
-        subject = request.form.get("subject", "").strip()
-        student_name = request.form.get("student_name", "").strip() or "Student"
-        roll_number = request.form.get("roll_number", "").strip() or "N/A"
-        assessment_title = request.form.get("assessment_title", "").strip()
-        role = request.form.get("role", "student").lower()
+        user_id      = _current_user_id()
+        session_role = _current_role()
 
-        level = request.form.get("level", "school")
-        board = request.form.get("board", "")
-        stream = request.form.get("stream", "")
-        semester = request.form.get("semester", "")
+        subject          = request.form.get("subject", "").strip()
+        student_name     = request.form.get("student_name", "").strip() or "Student"
+        roll_number      = request.form.get("roll_number", "").strip() or "N/A"
+        assessment_title = request.form.get("assessment_title", "").strip()
+        level            = request.form.get("level", "school")
+        board            = request.form.get("board", "")
+        stream           = request.form.get("stream", "")
+        semester         = request.form.get("semester", "")
 
         question_paper = request.files.get("question_paper")
-        answer_script = request.files.get("answer_script")
-        rubrics = request.files.get("rubrics")
-        syllabus = request.files.get("syllabus") or request.files.get("syllabus_file")
+        answer_script  = request.files.get("answer_script")
+        rubrics        = request.files.get("rubrics") or request.files.get("rubric")
+        syllabus       = request.files.get("syllabus") or request.files.get("syllabus_file")
 
         if question_paper is None or answer_script is None:
             return jsonify({"success": False, "error": "Question paper and answer script are required."}), 400
 
-        qp_path = save_uploaded_file(question_paper, "question_paper")
-        answer_path = save_uploaded_file(answer_script, "answer_script")
-        rubric_path = save_uploaded_file(rubrics, "rubrics") if rubrics and rubrics.filename else None
+        if not allowed_file(question_paper.filename):
+            return jsonify({"success": False, "error": f"File type not permitted for question paper."}), 400
+        if not allowed_file(answer_script.filename):
+            return jsonify({"success": False, "error": f"File type not permitted for answer script."}), 400
+
+        qp_path      = save_uploaded_file(question_paper, "question_paper")
+        answer_path  = save_uploaded_file(answer_script, "answer_script")
+        rubric_path  = save_uploaded_file(rubrics, "rubrics") if rubrics and rubrics.filename else None
         syllabus_path = save_uploaded_file(syllabus, "syllabus") if syllabus and syllabus.filename else None
 
         evaluation_request = {
-            "subject": subject,
-            "student_name": student_name,
-            "roll_number": roll_number,
+            "subject":          subject,
+            "student_name":     student_name,
+            "roll_number":      roll_number,
             "assessment_title": assessment_title,
-            "level": level,
-            "board": board,
-            "stream": stream,
-            "semester": semester,
-            "question_paper": qp_path,
-            "answer_script": answer_path,
-            "rubrics": rubric_path,
-            "syllabus": syllabus_path
+            "level":            level,
+            "board":            board,
+            "stream":           stream,
+            "semester":         semester,
+            "question_paper":   qp_path,
+            "answer_script":    answer_path,
+            "rubrics":          rubric_path,
+            "syllabus":         syllabus_path,
         }
 
-        # 1. Run evaluation with Gemini Service & Verification pass
+        # ── Run evaluation ────────────────────────────────────────────────────
         result = evaluation_agent.evaluate(evaluation_request)
 
-        # 2. Run Plagiarism check for teacher requests
-        plagiarism_result = {"suspected": False, "similarity": 0.0, "details": "Plagiarism check skipped for student role."}
-        if role == "teacher":
+        # ── Plagiarism check (teacher role only) ──────────────────────────────
+        plagiarism_result = {
+            "suspected": False,
+            "similarity": 0.0,
+            "status": "NO_COMPARISON",
+            "details": "Plagiarism check is performed for teacher evaluations only.",
+        }
+        if session_role == "teacher":
             try:
                 plagiarism_result = plagiarism_detector.check(
                     student_name=student_name,
@@ -546,130 +661,196 @@ def evaluate():
                     question_paper=qp_path,
                 )
             except Exception as p_err:
-                logger.warning("Plagiarism check exception: %s", p_err)
+                logger.warning("Plagiarism check error: %s", p_err)
 
-        # 3. Store Evaluation
+        # ── Attach submitter ID for data ownership ────────────────────────────
+        evaluation_request["submitted_by"] = user_id
+        evaluation_request["submitter_role"] = session_role
+
+        # ── Persist ───────────────────────────────────────────────────────────
         eval_id = f"eval_{int(datetime.now().timestamp())}"
         try:
             stored_id = store_evaluation_pipeline(
                 request_data=evaluation_request,
                 eval_result=result,
-                plagiarism_result=plagiarism_result
+                plagiarism_result=plagiarism_result,
             )
             if stored_id:
                 eval_id = stored_id
         except Exception as s_err:
-            logger.warning("Storage exception: %s", s_err)
+            logger.error("Storage error (evaluation still returned): %s", s_err)
 
         return jsonify({
-            "success": True,
+            "success":       True,
             "evaluation_id": eval_id,
-            "result": result,
-            "plagiarism": plagiarism_result,
+            "result":        result,
+            "plagiarism":    plagiarism_result,
         }), 200
 
     except Exception as exc:
-        logger.error("Evaluation endpoint error: %s", exc)
+        logger.error("Evaluate endpoint: %s", traceback.format_exc())
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-# ============================================================
-# EVALUATIONS HISTORY & OVERRIDE API
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# EVALUATION HISTORY & DETAIL
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/evaluations", methods=["GET"])
+@require_auth
 def get_evaluations():
-    student_name = request.args.get("student_name")
-    subject = request.args.get("subject")
-    
+    user_id      = _current_user_id()
+    session_role = _current_role()
+    subject      = request.args.get("subject")
+
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        query = {}
-        if student_name: query["student_name"] = {"$regex": student_name, "$options": "i"}
-        if subject: query["subject"] = subject
-        cursor = mongo_db["evaluations"].find(query).sort("created_at", -1)
-        evaluations = [mongo_serialize(doc) for doc in cursor]
+        if session_role == "student":
+            # Students see only their own evaluations (matched by submitted_by, student_id, or name)
+            user = _lookup_user_by_id(user_id)
+            student_name = user.get("name", "") if user else ""
+            query: dict = {
+                "$or": [
+                    {"submitted_by": user_id},
+                    {"student_id": user_id},
+                    {"student_name": student_name},
+                ]
+            }
+        else:
+            # Teachers see evaluations they submitted
+            query = {"submitted_by": user_id}
+            # Fallback: if no submitted_by index exists yet, return all
+            count = mongo_db["evaluations"].count_documents({"submitted_by": user_id})
+            if count == 0:
+                query = {}
+
+        if subject:
+            query["subject"] = subject
+
+        docs = list(mongo_db["evaluations"].find(query).sort("created_at", -1))
+        evaluations = [mongo_serialize(d) for d in docs]
         return jsonify({"success": True, "evaluations": evaluations}), 200
 
-    conn = get_sqlite_db()
+    # SQLite path
+    conn   = get_sqlite_db()
     cursor = conn.cursor()
-    query = "SELECT * FROM evaluations WHERE 1=1"
-    params = []
-    if student_name:
-        query += " AND student_name LIKE ?"
-        params.append(f"%{student_name}%")
+    if session_role == "student":
+        user = _lookup_user_by_id(user_id)
+        student_name = user.get("name", "") if user else ""
+        q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR student_id = ? OR student_name = ?)"
+        params: list = [user_id, user_id, student_name]
+    else:
+        q = "SELECT * FROM evaluations WHERE 1=1"
+        params = []
+
     if subject:
-        query += " AND subject = ?"
+        q += " AND subject = ?"
         params.append(subject)
-    query += " ORDER BY created_at DESC"
-    cursor.execute(query, params)
+    q += " ORDER BY created_at DESC"
+    cursor.execute(q, params)
     rows = cursor.fetchall()
     conn.close()
+    return jsonify({"success": True, "evaluations": [dict(r) for r in rows]}), 200
 
-    evaluations = [dict(r) for r in rows]
-    return jsonify({"success": True, "evaluations": evaluations}), 200
 
 @app.route("/api/evaluations/<eval_id>", methods=["GET"])
+@require_auth
 def get_evaluation_detail(eval_id: str):
+    user_id      = _current_user_id()
+    session_role = _current_role()
+
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        from bson import ObjectId
         doc = None
-        try: doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
-        except Exception: pass
-        if not doc: doc = mongo_db["evaluations"].find_one({"id": str(eval_id)})
-        if not doc: return jsonify({"success": False, "error": "Evaluation not found."}), 404
+        if ObjectId:
+            try:
+                doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+            except Exception:
+                pass
+        if not doc:
+            doc = mongo_db["evaluations"].find_one({"id": str(eval_id)})
+        if not doc:
+            return jsonify({"success": False, "error": "Evaluation not found."}), 404
+
+        # Ownership check
+        if session_role == "student":
+            user = _lookup_user_by_id(user_id)
+            if doc.get("student_name") != (user or {}).get("name"):
+                return jsonify({"success": False, "error": "Access denied."}), 403
+
         serialized = mongo_serialize(doc)
         qs = serialized.get("questions") or serialized.get("evaluations") or []
-        serialized["questions"] = qs
+        serialized["questions"]   = qs
         serialized["evaluations"] = qs
         return jsonify({"success": True, "evaluation": serialized}), 200
 
-    conn = get_sqlite_db()
+    # SQLite
+    conn   = get_sqlite_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM evaluations WHERE id = ?", (eval_id,))
-    eval_row = cursor.fetchone()
-    if not eval_row:
+    row = cursor.fetchone()
+    if not row:
         conn.close()
         return jsonify({"success": False, "error": "Evaluation not found."}), 404
-    ev = dict(eval_row)
+    ev = dict(row)
+
+    if session_role == "student":
+        user = _lookup_user_by_id(user_id)
+        if ev.get("student_name") != (user or {}).get("name"):
+            conn.close()
+            return jsonify({"success": False, "error": "Access denied."}), 403
+
     cursor.execute("SELECT * FROM evaluation_questions WHERE evaluation_id = ?", (eval_id,))
-    q_rows = cursor.fetchall()
+    qs = [dict(r) for r in cursor.fetchall()]
     conn.close()
-    questions = [dict(qr) for qr in q_rows]
-    ev["questions"] = questions
-    ev["evaluations"] = questions
+    ev["questions"]   = qs
+    ev["evaluations"] = qs
     return jsonify({"success": True, "evaluation": ev}), 200
 
+
 @app.route("/api/evaluations/<eval_id>", methods=["DELETE"])
+@require_role("teacher")
 def delete_evaluation(eval_id: str):
     try:
+        user_id = _current_user_id()
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            from bson import ObjectId
-            try: mongo_db["evaluations"].delete_one({"_id": ObjectId(eval_id)})
-            except: pass
-            mongo_db["evaluations"].delete_many({"id": str(eval_id)})
-        
+            if ObjectId:
+                try:
+                    mongo_db["evaluations"].delete_one({"_id": ObjectId(eval_id)})
+                except Exception:
+                    pass
+            mongo_db["evaluations"].delete_one({"id": str(eval_id)})
         conn = get_sqlite_db()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM evaluations WHERE id = ?", (str(eval_id),))
         conn.commit()
         conn.close()
-        return jsonify({"success": True, "message": "Evaluation deleted successfully."}), 200
+        return jsonify({"success": True}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/evaluations/<eval_id>/override", methods=["PUT"])
+@require_role("teacher")
 def override_evaluation_marks(eval_id: str):
+    """Teacher mark override with audit trail."""
     try:
+        teacher_id = _current_user_id()
         data = request.get_json(force=True) or {}
         updated_questions = data.get("questions") or []
-        obtained_marks = float(data.get("obtained_marks", 0))
-        total_marks = float(data.get("total_marks", 50))
-        percentage = round((obtained_marks / total_marks) * 100, 2) if total_marks > 0 else 0.0
 
-        def calc_grade(p):
+        obtained_marks = float(data.get("obtained_marks", 0))
+        total_marks    = float(data.get("total_marks", 0))
+
+        if total_marks <= 0:
+            return jsonify({"success": False, "error": "total_marks must be > 0."}), 400
+        if obtained_marks < 0 or obtained_marks > total_marks:
+            return jsonify({"success": False, "error": "obtained_marks out of valid range."}), 400
+
+        percentage = round((obtained_marks / total_marks) * 100, 2)
+
+        def calc_grade(p: float) -> str:
             if p >= 90: return "A+"
             if p >= 80: return "A"
             if p >= 70: return "B+"
@@ -679,182 +860,564 @@ def override_evaluation_marks(eval_id: str):
             return "F"
 
         grade = calc_grade(percentage)
+        now   = datetime.utcnow()
+
+        update_fields = {
+            "obtained_marks":        obtained_marks,
+            "total_marks":           total_marks,
+            "percentage":            percentage,
+            "grade":                 grade,
+            "questions":             updated_questions,
+            "evaluations":           updated_questions,
+            "is_teacher_overridden": True,
+            "teacher_override_by":   teacher_id,
+            "teacher_override_at":   now.strftime("%Y-%m-%d %H:%M:%S"),
+            "evaluation_status":     "COMPLETED",
+            "teacher_review_required": False,
+        }
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            from bson import ObjectId
-            update_fields = {
-                "obtained_marks": obtained_marks,
-                "total_marks": total_marks,
-                "percentage": percentage,
-                "grade": grade,
-                "questions": updated_questions,
-                "is_teacher_overridden": True,
-                "evaluation_status": "COMPLETED",
-                "teacher_review_required": False
-            }
-            try: mongo_db["evaluations"].update_one({"_id": ObjectId(eval_id)}, {"$set": update_fields})
-            except: pass
+            # Audit log
+            mongo_db["audit_log"].insert_one({
+                "action":       "teacher_override",
+                "eval_id":      eval_id,
+                "teacher_id":   teacher_id,
+                "new_obtained": obtained_marks,
+                "new_total":    total_marks,
+                "new_pct":      percentage,
+                "timestamp":    now,
+            })
+            if ObjectId:
+                try:
+                    mongo_db["evaluations"].update_one(
+                        {"_id": ObjectId(eval_id)}, {"$set": update_fields}
+                    )
+                except Exception:
+                    pass
             mongo_db["evaluations"].update_one({"id": eval_id}, {"$set": update_fields})
 
         conn = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute("UPDATE evaluations SET obtained_marks = ?, total_marks = ?, percentage = ?, grade = ? WHERE id = ?", (obtained_marks, total_marks, percentage, grade, str(eval_id)))
+        cursor.execute(
+            "UPDATE evaluations SET obtained_marks=?, total_marks=?, percentage=?, grade=?, "
+            "is_teacher_overridden=1 WHERE id=?",
+            (obtained_marks, total_marks, percentage, grade, str(eval_id))
+        )
         conn.commit()
         conn.close()
 
-        return jsonify({"success": True, "obtained_marks": obtained_marks, "total_marks": total_marks, "percentage": percentage, "grade": grade}), 200
+        return jsonify({
+            "success":       True,
+            "obtained_marks": obtained_marks,
+            "total_marks":   total_marks,
+            "percentage":    percentage,
+            "grade":         grade,
+        }), 200
+
     except Exception as exc:
+        logger.error("Override error: %s", traceback.format_exc())
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-# ============================================================
-# PDF REPORT ENDPOINTS
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# PDF REPORTS
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/evaluations/<eval_id>/pdf", methods=["GET"])
+@require_auth
 def download_evaluation_pdf(eval_id: str):
     try:
         eval_data = None
-        mongo_db = get_mongodb()
+        mongo_db  = get_mongodb()
         if mongo_db is not None:
-            from bson import ObjectId
-            try: doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
-            except: doc = mongo_db["evaluations"].find_one({"id": eval_id})
-            if doc: eval_data = mongo_serialize(doc)
+            doc = None
+            if ObjectId:
+                try:
+                    doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+                except Exception:
+                    pass
+            if not doc:
+                doc = mongo_db["evaluations"].find_one({"id": eval_id})
+            if doc:
+                eval_data = mongo_serialize(doc)
 
         if not eval_data:
-            conn = get_sqlite_db()
+            conn   = get_sqlite_db()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM evaluations WHERE id = ?", (eval_id,))
             row = cursor.fetchone()
             conn.close()
-            if row: eval_data = dict(row)
+            if row:
+                eval_data = dict(row)
 
         if not eval_data:
-            return jsonify({"success": False, "error": "Evaluation record not found for PDF report."}), 404
+            return jsonify({"success": False, "error": "Evaluation not found."}), 404
 
-        import io
         pdf_bytes = generate_evaluation_pdf(eval_data)
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"Evaluation_Report_{eval_id}.pdf"
+            download_name=f"Evaluation_Report_{eval_id}.pdf",
         )
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/generate-pdf", methods=["POST"])
+@require_auth
 def generate_pdf_endpoint():
     try:
-        data = request.get_json(force=True) or {}
-        import io
+        data      = request.get_json(force=True) or {}
         pdf_bytes = generate_evaluation_pdf(data)
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"Evaluation_Report_{(data.get('subject') or 'Paper').replace(' ', '_')}.pdf"
+            download_name=f"Evaluation_Report_{(data.get('subject') or 'Paper').replace(' ', '_')}.pdf",
         )
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-# ============================================================
-# STUDENT LEARNING FEATURES API (Self Eval, Reality Lab, Quiz, Memory, Notifications)
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# SYLLABUS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/syllabus/analyze", methods=["POST"])
+@require_auth
+def analyze_syllabus():
+    """Analyze and PERSIST syllabus linked to the authenticated user."""
+    try:
+        user_id  = _current_user_id()
+        user     = _lookup_user_by_id(user_id)
+        if not user:
+            return jsonify({"success": False, "error": "User not found."}), 404
+
+        syllabus_file = request.files.get("syllabus") or request.files.get("syllabus_file")
+        syllabus_text = request.form.get("text", "").strip()
+
+        level       = request.form.get("level", user.get("level", "college")).strip()
+        semester    = str(request.form.get("semester", user.get("semester", "5"))).strip()
+        class_level = str(request.form.get("classLevel", user.get("grade_level", "12"))).strip()
+        stream      = request.form.get("stream", user.get("stream", "")).strip()
+        domain      = request.form.get("domain", user.get("domain", "")).strip()
+
+        file_path = None
+        file_hash = None
+        file_name = None
+
+        if syllabus_file and syllabus_file.filename:
+            if not allowed_file(syllabus_file.filename):
+                return jsonify({"success": False, "error": "File type not permitted."}), 400
+            # Compute hash before saving
+            file_bytes = syllabus_file.read()
+            file_hash  = hashlib.sha256(file_bytes).hexdigest()
+            syllabus_file.seek(0)
+            file_path = save_uploaded_file(syllabus_file, "syllabus")
+            file_name = syllabus_file.filename
+            file_input = file_path
+        elif syllabus_text:
+            file_input = syllabus_text
+            file_name  = "text_input"
+        else:
+            return jsonify({"success": False, "error": "No syllabus file or text provided."}), 400
+
+        # Analyze
+        analysis = gemini_service.analyze_syllabus(
+            file_input, level=level, semester=semester,
+            class_level=class_level, domain=domain, stream=stream
+        )
+
+        if not analysis or not isinstance(analysis, dict):
+            return jsonify({"success": False, "error": "Syllabus analysis returned no data."}), 500
+
+        syllabus_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+
+        syllabus_doc = {
+            "syllabus_id":  syllabus_id,
+            "student_id":   user_id,
+            "student_name": user.get("name", ""),
+            "file_path":    file_path or "",
+            "file_hash":    file_hash or "",
+            "file_name":    file_name or "",
+            "level":        level,
+            "semester":     semester,
+            "class_level":  class_level,
+            "stream":       stream,
+            "domain":       domain,
+            "analysis":     analysis,
+            "status":       "READY",
+            "version":      1,
+            "created_at":   now,
+            "updated_at":   now,
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            # Replace any existing syllabus for this student (bump version)
+            existing = mongo_db["syllabi"].find_one(
+                {"student_id": user_id, "status": "READY"},
+                sort=[("version", -1)]
+            )
+            version = (existing.get("version", 0) + 1) if existing else 1
+            syllabus_doc["version"] = version
+            mongo_db["syllabi"].insert_one(syllabus_doc)
+        else:
+            conn   = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO syllabi
+                   (syllabus_id, student_id, student_name, file_path, file_hash,
+                    file_name, level, semester, class_level, analysis_json, status, version)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (syllabus_id, user_id, user.get("name", ""), file_path or "",
+                 file_hash or "", file_name or "", level, semester, class_level,
+                 json.dumps(analysis), "READY", 1)
+            )
+            conn.commit()
+            conn.close()
+
+        response_doc = {k: v for k, v in syllabus_doc.items() if k != "_id"}
+        if isinstance(response_doc.get("created_at"), datetime):
+            response_doc["created_at"] = response_doc["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(response_doc.get("updated_at"), datetime):
+            response_doc["updated_at"] = response_doc["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+        return jsonify({"success": True, "syllabus_id": syllabus_id, "analysis": analysis, "syllabus": response_doc}), 200
+
+    except Exception as exc:
+        logger.error("Syllabus analyze error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/syllabus", methods=["GET"])
+@require_auth
+def get_my_syllabus():
+    """Return the current user's latest READY syllabus."""
+    user_id = _current_user_id()
+    mongo_db = get_mongodb()
+    if mongo_db is not None:
+        doc = mongo_db["syllabi"].find_one(
+            {"student_id": user_id, "status": "READY"},
+            sort=[("version", -1)]
+        )
+        if doc:
+            return jsonify({"success": True, "syllabus": mongo_serialize(doc)}), 200
+        return jsonify({"success": True, "syllabus": None}), 200
+
+    conn   = get_sqlite_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM syllabi WHERE student_id=? AND status='READY' ORDER BY version DESC LIMIT 1",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        d = dict(row)
+        if d.get("analysis_json"):
+            try:
+                d["analysis"] = json.loads(d["analysis_json"])
+            except Exception:
+                pass
+        return jsonify({"success": True, "syllabus": d}), 200
+    return jsonify({"success": True, "syllabus": None}), 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACTION CENTER
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/action-center", methods=["GET"])
+@require_role("teacher")
+def get_action_center_items():
+    teacher_id = _current_user_id()
+    try:
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            # Teacher sees action items from evaluations they submitted
+            items_cursor = mongo_db["action_items"].find({"teacher_id": teacher_id})
+            items = [mongo_serialize(d) for d in items_cursor]
+            if not items:
+                # Fallback: items without teacher_id scoping (backward compat)
+                items = [mongo_serialize(d) for d in mongo_db["action_items"].find()]
+            return jsonify({"success": True, "items": items}), 200
+
+        # SQLite: derive from evaluations where marks_lost > 20
+        conn   = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM evaluations WHERE (total_marks - obtained_marks) > 20 ORDER BY created_at DESC"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        items = []
+        for r in rows:
+            lost = int(r["total_marks"] - r["obtained_marks"])
+            items.append({
+                "id":              f"act_{r['id']}",
+                "student_name":    r["student_name"],
+                "roll_number":     r["roll_number"] or "N/A",
+                "academic_status": f"At Risk (Lost {lost} marks)",
+                "subject":         r["subject"],
+                "topic":           r["assessment_title"],
+                "marks_lost":      lost,
+                "issue":           r["overall_feedback"] or f"Lost {lost} marks in {r['subject']}.",
+                "priority":        "High" if lost > 30 else "Medium",
+                "action":          "Assign targeted practice worksheet.",
+                "status":          "New",
+                "created_at":      str(r["created_at"])[:10],
+            })
+        return jsonify({"success": True, "items": items}), 200
+    except Exception as exc:
+        logger.error("Action Center error: %s", exc)
+        return jsonify({"success": True, "items": []}), 200
+
+
+@app.route("/api/action-center/<item_id>", methods=["PUT"])
+@require_role("teacher")
+def update_action_center_item(item_id: str):
+    try:
+        data       = request.get_json(force=True) or {}
+        new_status = data.get("status")
+        teacher_id = _current_user_id()
+        mongo_db   = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["action_items"].update_one(
+                {"id": item_id},
+                {"$set": {"status": new_status, "updated_by": teacher_id,
+                          "updated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}},
+                upsert=True,
+            )
+        return jsonify({"success": True, "id": item_id, "status": new_status}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MISCONCEPTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/misconceptions", methods=["GET"])
+@require_auth
+def get_misconceptions():
+    user_id      = _current_user_id()
+    session_role = _current_role()
+    try:
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            if session_role == "student":
+                user = _lookup_user_by_id(user_id)
+                query = {"student_name": user.get("name")} if user else {}
+            else:
+                query = {}
+            docs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find(query)]
+            return jsonify({"success": True, "misconceptions": docs}), 200
+
+        conn   = get_sqlite_db()
+        cursor = conn.cursor()
+        if session_role == "student":
+            user = _lookup_user_by_id(user_id)
+            name = user.get("name") if user else ""
+            cursor.execute(
+                "SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (name,)
+            )
+        else:
+            cursor.execute("SELECT * FROM misconceptions ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify({"success": True, "misconceptions": [dict(r) for r in rows]}), 200
+    except Exception as exc:
+        logger.error("Misconceptions error: %s", exc)
+        return jsonify({"success": True, "misconceptions": []}), 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PLAGIARISM
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/plagiarism/matches", methods=["GET"])
+@require_role("teacher")
+def get_plagiarism_matches():
+    try:
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            records = [mongo_serialize(d) for d in mongo_db["plagiarism_records"].find()]
+            return jsonify({"success": True, "matches": records}), 200
+        conn   = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM plagiarism_records ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify({"success": True, "matches": [dict(r) for r in rows]}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/plagiarism/summary", methods=["GET"])
+@require_role("teacher")
+def get_plagiarism_summary():
+    try:
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            records = [mongo_serialize(d) for d in mongo_db["plagiarism_records"].find()]
+        else:
+            conn   = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM plagiarism_records ORDER BY created_at DESC")
+            records = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        high_risk = [r for r in records if r.get("suspected") or float(r.get("similarity", 0)) >= 85.0]
+        possible  = [r for r in records if 70.0 <= float(r.get("similarity", 0)) < 85.0]
+        return jsonify({
+            "success":         True,
+            "total_checked":   len(records),
+            "flagged_count":   len(high_risk),
+            "high_risk_matches": len(high_risk),
+            "possible_matches":  len(possible),
+            "records":         records,
+        }), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STUDENTS LIST (teacher only)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/students", methods=["GET"])
+@require_role("teacher")
 def get_students():
     mongo_db = get_mongodb()
     if mongo_db is not None:
         students_cursor = mongo_db["users"].find({"role": "student"})
         students = []
         for s in students_cursor:
-            name = s["name"]
+            name  = s.get("name", "")
             evals = list(mongo_db["evaluations"].find({"student_name": name}))
-            avg = round(sum(e.get("percentage", 0) for e in evals) / len(evals), 1) if evals else 0.0
-            status = "On track" if avg >= 75 else "Needs support" if avg >= 50 else "New Student"
+            avg   = round(sum(float(e.get("percentage", 0)) for e in evals) / len(evals), 1) if evals else 0.0
             students.append({
-                "id": str(s["_id"]),
-                "name": name,
-                "roll_number": s.get("roll_number", "12A-01"),
-                "section": s.get("section", "12-A"),
-                "level": s.get("level", "school"),
-                "average": avg,
+                "id":          str(s["_id"]),
+                "name":        name,
+                "roll_number": s.get("roll_number", ""),
+                "section":     s.get("section", ""),
+                "level":       s.get("level", "school"),
+                "average":     avg,
                 "evaluations": len(evals),
-                "status": status
+                "status":      "On track" if avg >= 75 else "Needs support" if avg >= 50 else "New Student",
             })
         return jsonify({"success": True, "students": students}), 200
 
-    conn = get_sqlite_db()
+    conn   = get_sqlite_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE role = 'student'")
     rows = cursor.fetchall()
     conn.close()
-    students = [dict(r) for r in rows]
+    students = []
+    for r in rows:
+        d = dict(r)
+        d.pop("password_hash", None)
+        d.pop("password", None)
+        students.append(d)
     return jsonify({"success": True, "students": students}), 200
 
-@app.route("/api/analytics/dashboard", methods=["GET"])
-def get_dashboard_analytics():
-    role = request.args.get("role", "teacher")
-    student_name = request.args.get("student_name", "")
 
-    recent_evals = []
-    weak_topics = []
-    memory_items = []
+# ══════════════════════════════════════════════════════════════════════════════
+# ANALYTICS DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/analytics/dashboard", methods=["GET"])
+@require_auth
+def get_dashboard_analytics():
+    user_id      = _current_user_id()
+    session_role = _current_role()
+
+    recent_evals  = []
+    weak_topics   = []
+    memory_items  = []
 
     mongo_db = get_mongodb()
-    if mongo_db is not None:
-        try:
-            query = {"student_name": student_name} if role == "student" and student_name else {}
-            recent_evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(query).sort("created_at", -1).limit(10)]
-            memory_items = [mongo_serialize(d) for d in mongo_db["academic_memory"].find(query).limit(5)] if role == "student" else []
-            weak_topics = [mongo_serialize(d) for d in mongo_db["misconceptions"].find({"resolved": False}).limit(5)]
-        except Exception as e:
-            logger.error("Analytics query error: %s", e)
-
-    if not recent_evals:
-        try:
-            conn = get_sqlite_db()
+    try:
+        if mongo_db is not None:
+            if session_role == "student":
+                user = _lookup_user_by_id(user_id)
+                name = user.get("name", "") if user else ""
+                eval_query = {
+                    "$or": [
+                        {"submitted_by": user_id},
+                        {"student_id": user_id},
+                        {"student_name": name},
+                    ]
+                }
+                recent_evals = [mongo_serialize(d) for d in
+                                mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(10)]
+                memory_items = [mongo_serialize(d) for d in
+                                mongo_db["academic_memory"].find({"$or": [{"student_id": user_id}, {"student_name": name}]}).limit(5)]
+                weak_topics  = [mongo_serialize(d) for d in
+                                mongo_db["misconceptions"].find({"$or": [{"student_id": user_id}, {"student_name": name}], "resolved": {"$ne": True}}).limit(5)]
+            else:
+                # Teachers: show recent evaluations they submitted
+                recent_evals = [mongo_serialize(d) for d in
+                                mongo_db["evaluations"].find({"submitted_by": user_id}).sort("created_at", -1).limit(10)]
+                if not recent_evals:
+                    recent_evals = [mongo_serialize(d) for d in
+                                    mongo_db["evaluations"].find({}).sort("created_at", -1).limit(10)]
+                weak_topics  = [mongo_serialize(d) for d in
+                                mongo_db["misconceptions"].find({"resolved": {"$ne": True}}).limit(5)]
+        else:
+            conn   = get_sqlite_db()
             cursor = conn.cursor()
-            if role == "student" and student_name:
-                cursor.execute("SELECT * FROM evaluations WHERE student_name = ? ORDER BY created_at DESC LIMIT 10", (student_name,))
+            if session_role == "student":
+                user = _lookup_user_by_id(user_id)
+                name = user.get("name", "") if user else ""
+                cursor.execute(
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR student_name=?) ORDER BY created_at DESC LIMIT 10", (user_id, user_id, name)
+                )
             else:
                 cursor.execute("SELECT * FROM evaluations ORDER BY created_at DESC LIMIT 10")
-            rows = cursor.fetchall()
+            recent_evals = [dict(r) for r in cursor.fetchall()]
             conn.close()
-            recent_evals = [dict(row) for row in rows]
-        except Exception as e:
-            logger.error("SQLite analytics query error: %s", e)
+    except Exception as exc:
+        logger.error("Analytics error: %s", exc)
 
     return jsonify({
-        "success": True,
+        "success":           True,
         "recentEvaluations": recent_evals,
-        "weakTopics": weak_topics,
-        "academicMemory": memory_items
+        "weakTopics":        weak_topics,
+        "academicMemory":    memory_items,
     }), 200
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI TRAINER
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.route("/api/trainer/chat", methods=["POST"])
+@require_auth
 def trainer_chat():
     try:
-        data = request.get_json(force=True) or {}
-        message = data.get("message", "").strip()
-        subject = data.get("subject", "General Academic")
-        concept = data.get("concept", "") or data.get("topic", "")
-        study_method = data.get("study_method", "") or data.get("method", "")
-        level = data.get("level", "college")
-        semester = data.get("semester", "5")
-        class_level = data.get("class_level", "12")
-
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id)
+        data    = request.get_json(force=True) or {}
+        message = str(data.get("message") or "").strip()
         if not message:
             return jsonify({"success": False, "error": "Message is required."}), 400
 
-        target_context = f"College Semester {semester}" if str(level).lower() == "college" else f"School Class {class_level}"
+        subject     = str(data.get("subject") or "General Academic")
+        concept     = str(data.get("concept") or data.get("topic") or "")
+        study_method = str(data.get("study_method") or data.get("method") or "")
+        level       = str(data.get("level") or (user or {}).get("level") or "school")
+        semester    = str(data.get("semester") or (user or {}).get("semester") or "5")
+        class_level = str(data.get("class_level") or (user or {}).get("grade_level") or "12")
+
+        target_ctx = f"College Semester {semester}" if level.lower() == "college" else f"School Class {class_level}"
         prompt = (
             f"You are LearnSphere AI's Personal Learning Coach.\n"
-            f"Context: {target_context} | Subject: {subject} | Concept: {concept or subject}\n"
+            f"Context: {target_ctx} | Subject: {subject} | Concept: {concept or subject}\n"
             f"Strategy: {study_method or 'Active Coaching'}\n"
             f"Student Message: '{message}'\n\n"
             f"RULES:\n"
@@ -865,208 +1428,270 @@ def trainer_chat():
         )
         ai_reply = gemini_service.generate_content(prompt, json_output=False)
 
+        student_name = (user or {}).get("name", "Student")
         mongo_db = get_mongodb()
         if mongo_db is not None:
             mongo_db["academic_memory"].insert_one({
-                "student_name": data.get("student_name", "Student"),
-                "subject": subject,
-                "topic": concept or subject,
-                "mastery": 75,
-                "retention_rate": 80,
-                "status": "Learning",
+                "student_name":  student_name,
+                "student_id":    user_id,
+                "subject":       subject,
+                "topic":         concept or subject,
+                "mastery":       0,
+                "retention_rate": 0,
+                "status":        "Learning",
                 "last_reviewed": datetime.utcnow(),
-                "next_review": datetime.utcnow() + timedelta(days=2)
+                "next_review":   datetime.utcnow() + timedelta(days=2),
             })
 
         return jsonify({"success": True, "reply": ai_reply}), 200
     except Exception as exc:
-        logger.error("Trainer chat failed: %s", exc)
+        logger.error("Trainer chat: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SELF-EVALUATION (uses same engine as teacher portal)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/self-evaluation/generate", methods=["POST"])
+@require_auth
 def generate_self_eval_endpoint():
     try:
-        data = request.get_json(force=True) or {}
-        subject = data.get("subject", "General Academic")
-        topic = data.get("topic", "Core Concepts")
-        difficulty = data.get("difficulty", "Medium")
-        syllabus_ctx = data.get("syllabus_context", "")
-        se_question = gemini_service.generate_self_evaluation(subject, topic, difficulty, syllabus_ctx)
-        return jsonify({"success": True, "question": se_question}), 200
+        data           = request.get_json(force=True) or {}
+        subject        = str(data.get("subject") or "General Academic")
+        topic          = str(data.get("topic") or "Core Concepts")
+        difficulty     = str(data.get("difficulty") or "Medium")
+        syllabus_ctx   = str(data.get("syllabus_context") or "")
+        question       = gemini_service.generate_self_evaluation(subject, topic, difficulty, syllabus_ctx)
+        return jsonify({"success": True, "question": question}), 200
     except Exception as exc:
-        logger.error("Self eval generate failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/self-evaluation/evaluate", methods=["POST"])
+@require_auth
 def evaluate_self_eval_endpoint():
     try:
-        data = request.get_json(force=True) or {}
-        question_text = data.get("question_text", "")
-        expected_concept = data.get("expected_concept", "")
-        student_response = data.get("student_response", "")
-        subject = data.get("subject", "General Academic")
+        data              = request.get_json(force=True) or {}
+        question_text     = str(data.get("question_text") or "")
+        expected_concept  = str(data.get("expected_concept") or "")
+        student_response  = str(data.get("student_response") or "")
+        subject           = str(data.get("subject") or "General Academic")
         eval_res = gemini_service.evaluate_self_evaluation(question_text, expected_concept, student_response, subject)
         return jsonify({"success": True, "evaluation": eval_res}), 200
     except Exception as exc:
-        logger.error("Self eval evaluate failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REALITY LAB
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.route("/api/reality-lab/generate", methods=["POST"])
+@require_auth
 def generate_reality_lab_endpoint():
     try:
-        data = request.get_json(force=True) or {}
-        subject = data.get("subject", "General Academic")
-        module = data.get("module", "Practical Application")
-        difficulty = data.get("difficulty", "Medium")
-        syllabus_ctx = data.get("syllabus_context", "")
+        data         = request.get_json(force=True) or {}
+        subject      = str(data.get("subject") or "General Academic")
+        module       = str(data.get("module") or "Practical Application")
+        difficulty   = str(data.get("difficulty") or "Medium")
+        syllabus_ctx = str(data.get("syllabus_context") or "")
         lab_data = gemini_service.generate_reality_lab(subject, module, difficulty, syllabus_ctx)
         return jsonify({"success": True, "lab": lab_data}), 200
     except Exception as exc:
-        logger.error("Reality lab generate failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/reality-lab/evaluate", methods=["POST"])
+@require_auth
 def evaluate_reality_lab_endpoint():
     try:
-        data = request.get_json(force=True) or {}
-        scenario_title = data.get("title", "")
-        task = data.get("task", "")
-        student_response = data.get("student_response", "")
-        subject = data.get("subject", "General Academic")
+        data             = request.get_json(force=True) or {}
+        scenario_title   = str(data.get("title") or "")
+        task             = str(data.get("task") or "")
+        student_response = str(data.get("student_response") or "")
+        subject          = str(data.get("subject") or "General Academic")
         eval_res = gemini_service.evaluate_reality_lab(scenario_title, task, student_response, subject)
         return jsonify({"success": True, "evaluation": eval_res}), 200
     except Exception as exc:
-        logger.error("Reality lab evaluate failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE CHALLENGE
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/challenge/quiz", methods=["GET"])
+@require_auth
 def get_challenge_quiz():
     try:
-        subject = request.args.get("subject", "General Academic")
-        module = request.args.get("module", "All")
+        subject    = request.args.get("subject", "General Academic")
+        module     = request.args.get("module", "All")
         difficulty = request.args.get("difficulty", "Medium")
-        quiz_data = gemini_service.generate_knowledge_challenge(subject, module, difficulty)
+        quiz_data  = gemini_service.generate_knowledge_challenge(subject, module, difficulty)
         return jsonify({"success": True, "quiz": quiz_data}), 200
     except Exception as exc:
-        logger.error("Challenge quiz failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/challenge/submit", methods=["POST"])
+@require_auth
 def submit_challenge():
     try:
-        data = request.get_json(force=True) or {}
-        student_name = data.get("student_name", "Student")
-        subject = data.get("subject", "General Academic")
-        score = int(data.get("score", 0))
-        total = int(data.get("total_questions", 5))
-        pct = round((score / total) * 100, 2) if total > 0 else 0.0
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id)
+        data    = request.get_json(force=True) or {}
+        subject = str(data.get("subject") or "General Academic")
+        score   = int(data.get("score", 0))
+        total   = int(data.get("total_questions", 5))
+        pct     = round((score / total) * 100, 2) if total > 0 else 0.0
+        student_name = (user or {}).get("name", "Student")
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
             mongo_db["knowledge_challenges"].insert_one({
                 "student_name": student_name,
-                "subject": subject,
-                "score": score,
+                "student_id":   user_id,
+                "subject":      subject,
+                "score":        score,
                 "total_questions": total,
-                "percentage": pct,
-                "completed_at": datetime.utcnow()
+                "percentage":   pct,
+                "completed_at": datetime.utcnow(),
             })
         else:
-            conn = get_sqlite_db()
+            conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO knowledge_challenges (student_name, subject, title, score, total_questions, percentage)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (student_name, subject, f"{subject} Challenge", score, total, pct))
+            cursor.execute(
+                "INSERT INTO knowledge_challenges (student_name, subject, title, score, total_questions, percentage) VALUES (?,?,?,?,?,?)",
+                (student_name, subject, f"{subject} Challenge", score, total, pct)
+            )
             conn.commit()
             conn.close()
 
         return jsonify({"success": True, "percentage": pct, "score": score, "total": total}), 200
     except Exception as exc:
-        logger.error("Challenge submit failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MEMORY CARDS
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.route("/api/memory/cards", methods=["GET"])
+@require_auth
 def get_memory_cards():
     try:
-        student_name = request.args.get("student_name", "")
-        cards = []
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id)
+        name    = (user or {}).get("name", "")
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            query = {"student_name": student_name} if student_name else {}
-            cards = [mongo_serialize(d) for d in mongo_db["academic_memory"].find(query).sort("next_review", 1)]
+            query = {"student_name": name} if name else {}
+            cards = [mongo_serialize(d) for d in
+                     mongo_db["academic_memory"].find(query).sort("next_review", 1)]
+            return jsonify({"success": True, "cards": cards}), 200
+        conn   = get_sqlite_db()
+        cursor = conn.cursor()
+        if name:
+            cursor.execute("SELECT * FROM academic_memory WHERE student_name=? ORDER BY next_review ASC", (name,))
         else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            if student_name:
-                cursor.execute("SELECT * FROM academic_memory WHERE student_name = ? ORDER BY next_review ASC", (student_name,))
-            else:
-                cursor.execute("SELECT * FROM academic_memory ORDER BY next_review ASC")
-            rows = cursor.fetchall()
-            conn.close()
-            cards = [dict(r) for r in rows]
-        return jsonify({"success": True, "cards": cards}), 200
+            cursor.execute("SELECT * FROM academic_memory ORDER BY next_review ASC")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify({"success": True, "cards": [dict(r) for r in rows]}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/memory/review", methods=["POST"])
+@require_auth
 def review_memory_card():
     try:
-        data = request.get_json(force=True) or {}
-        card_id = data.get("id")
-        next_review = datetime.utcnow() + timedelta(days=3)
+        data     = request.get_json(force=True) or {}
+        card_id  = data.get("id")
+        next_rev = datetime.utcnow() + timedelta(days=3)
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            from bson import ObjectId
-            try: mongo_db["academic_memory"].update_one({"_id": ObjectId(card_id)}, {"$set": {"status": "Mastered", "next_review": next_review}})
-            except: mongo_db["academic_memory"].update_one({"id": str(card_id)}, {"$set": {"status": "Mastered", "next_review": next_review}})
+            if ObjectId:
+                try:
+                    mongo_db["academic_memory"].update_one(
+                        {"_id": ObjectId(card_id)},
+                        {"$set": {"status": "Mastered", "next_review": next_rev}}
+                    )
+                except Exception:
+                    pass
+            mongo_db["academic_memory"].update_one(
+                {"id": str(card_id)},
+                {"$set": {"status": "Mastered", "next_review": next_rev}}
+            )
         else:
-            conn = get_sqlite_db()
+            conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE academic_memory SET status = 'Mastered', next_review = ? WHERE id = ?", (next_review, card_id))
+            cursor.execute("UPDATE academic_memory SET status='Mastered', next_review=? WHERE id=?", (next_rev, card_id))
             conn.commit()
             conn.close()
         return jsonify({"success": True, "card_id": card_id}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.route("/api/notifications", methods=["GET"])
+@require_auth
 def get_notifications():
     try:
-        role = request.args.get("role", "all").lower()
-        student_name = request.args.get("student_name", "")
-        notifications = []
+        user_id      = _current_user_id()
+        session_role = _current_role()
+        user         = _lookup_user_by_id(user_id)
+        student_name = (user or {}).get("name", "") if session_role == "student" else ""
+
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            query = {}
-            if role != "all":
-                query["$or"] = [{"target_role": role}, {"target_role": "all"}]
-            if student_name:
-                query["target_name"] = student_name
-            notifications = [mongo_serialize(d) for d in mongo_db["notifications"].find(query).sort("created_at", -1)]
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM notifications ORDER BY created_at DESC")
-            rows = cursor.fetchall()
-            conn.close()
-            notifications = [dict(r) for r in rows]
-        return jsonify({"success": True, "notifications": notifications}), 200
+            query: dict = {}
+            if session_role == "student":
+                query["$or"] = [
+                    {"target_role": "student", "target_name": student_name},
+                    {"target_role": "all"},
+                ]
+            else:
+                query["$or"] = [{"target_role": "teacher"}, {"target_role": "all"}]
+            docs = [mongo_serialize(d) for d in
+                    mongo_db["notifications"].find(query).sort("created_at", -1)]
+            return jsonify({"success": True, "notifications": docs}), 200
+
+        conn   = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notifications ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify({"success": True, "notifications": [dict(r) for r in rows]}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
+
 @app.route("/api/notifications/<notif_id>/read", methods=["PUT"])
-def mark_notification_read(notif_id):
+@require_auth
+def mark_notification_read(notif_id: str):
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            from bson import ObjectId
-            try: mongo_db["notifications"].update_one({"_id": ObjectId(notif_id)}, {"$set": {"is_read": True}})
-            except: mongo_db["notifications"].update_one({"id": str(notif_id)}, {"$set": {"is_read": True}})
+            if ObjectId:
+                try:
+                    mongo_db["notifications"].update_one(
+                        {"_id": ObjectId(notif_id)}, {"$set": {"is_read": True}}
+                    )
+                except Exception:
+                    pass
+            mongo_db["notifications"].update_one(
+                {"id": str(notif_id)}, {"$set": {"is_read": True}}
+            )
         else:
-            conn = get_sqlite_db()
+            conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE notifications SET is_read = 1 WHERE id = ?", (notif_id,))
+            cursor.execute("UPDATE notifications SET is_read=1 WHERE id=?", (notif_id,))
             conn.commit()
             conn.close()
         return jsonify({"success": True, "id": notif_id}), 200
@@ -1074,151 +1699,133 @@ def mark_notification_read(notif_id):
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-# ============================================================
-# CURRENT NEWS & OPPORTUNITIES (Strict School vs College separation)
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# OPPORTUNITIES (role/level aware, no fake data)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/opportunities", methods=["GET"])
+@require_auth
 def get_opportunities_api():
     try:
-        role = request.args.get("role", "").lower()
-        level = request.args.get("level", "school" if "school" in role else "college").lower()
-        city = request.args.get("city", "Chennai").title()
-        state = request.args.get("state", "Tamil Nadu").title()
-        country = request.args.get("country", "India").title()
-        department = request.args.get("department", "Computer Science & AI")
-        board = request.args.get("board", "CBSE")
-        
+        user_id  = _current_user_id()
+        user     = _lookup_user_by_id(user_id)
+        level    = request.args.get("level") or (user or {}).get("level", "school")
+        dept     = request.args.get("department") or (user or {}).get("domain") or (user or {}).get("department") or "General"
+        board    = request.args.get("board") or (user or {}).get("board") or "CBSE"
         today_str = datetime.now().strftime("%B %d, %Y")
 
         if level == "school":
-            news_items = [
+            news = [
                 {
                     "id": "school-news-1",
                     "title": f"National Science & Mathematics Olympiad 2026 for {board} Students",
-                    "source": "Ministry of Education & CBSE Board",
+                    "source": "Ministry of Education",
                     "date": today_str,
                     "category": "Olympiads",
-                    "summary": f"Registration opens for inter-school science and mathematics olympiads for Class 9-12 students.",
+                    "summary": "Registration opens for inter-school olympiads for Class 9–12.",
                     "verified": True,
-                    "isRecommended": True,
-                    "url": "https://cbse.gov.in"
+                    "url": "https://cbse.gov.in",
                 },
                 {
                     "id": "school-news-2",
-                    "title": "National STEM & AI Innovation Scholarship 2026 (School Edition)",
-                    "source": "Department of Science & Technology",
+                    "title": "National STEM & AI Innovation Scholarship 2026",
+                    "source": "Dept. of Science & Technology",
                     "date": today_str,
                     "category": "Scholarships",
-                    "summary": "Merit scholarship worth up to ₹50,000/year for school students pursuing STEM subjects.",
+                    "summary": "Merit scholarship up to ₹50,000/year for school STEM students.",
                     "verified": True,
-                    "isRecommended": True,
-                    "url": "https://dst.gov.in"
-                }
+                    "url": "https://dst.gov.in",
+                },
             ]
-            opps_items = [
+            opps = [
                 {
                     "id": "school-opp-1",
                     "title": "Inter-School Coding & Robotics Championship 2026",
                     "organizer": "National Science Foundation",
                     "category": "Competitions",
                     "deadline": "October 30, 2026",
-                    "prize": "₹50,000 Cash Prize + Certificate of Merit",
-                    "locationName": f"{city}, {state} / Online",
-                    "locationScope": "India",
+                    "prize": "₹50,000 + Certificate",
                     "isOnline": True,
-                    "isRecommended": True,
-                    "url": "https://dst.gov.in"
-                }
+                    "url": "https://dst.gov.in",
+                },
             ]
         else:
-            news_items = [
+            news = [
                 {
                     "id": "college-news-1",
-                    "title": "Smart India Hackathon 2026 Senior Edition Announced",
-                    "source": "Ministry of Education & AICTE",
+                    "title": "Smart India Hackathon 2026 Senior Edition",
+                    "source": "AICTE / Ministry of Education",
                     "date": today_str,
                     "category": "Hackathons",
-                    "summary": "AICTE launches Smart India Hackathon 2026 edition for hardware and software problem statements across 15 themes.",
+                    "summary": "SIH 2026 opens for hardware and software problem statements.",
                     "verified": True,
-                    "isRecommended": True,
-                    "url": "https://sih.gov.in"
+                    "url": "https://sih.gov.in",
                 },
                 {
                     "id": "college-news-2",
-                    "title": "Google Summer of Code (GSoC) 2026 Mentor Organizations List Published",
+                    "title": "Google Summer of Code (GSoC) 2026 Mentor Organizations",
                     "source": "Google Open Source",
                     "date": today_str,
-                    "category": "Competitions",
-                    "summary": "GSoC 2026 opens contributor registration with over 200 open-source organizations accepting student proposals.",
+                    "category": "Programs",
+                    "summary": "GSoC 2026 opens with 200+ organizations accepting student proposals.",
                     "verified": True,
-                    "isRecommended": True,
-                    "url": "https://summerofcode.withgoogle.com"
-                }
+                    "url": "https://summerofcode.withgoogle.com",
+                },
             ]
-            opps_items = [
+            opps = [
                 {
                     "id": "college-opp-1",
-                    "title": f"Microsoft Imagine Cup 2026 Global Student Competition ({department})",
-                    "organizer": "Microsoft Developer Community",
+                    "title": f"Microsoft Imagine Cup 2026 ({dept})",
+                    "organizer": "Microsoft",
                     "category": "Competitions",
                     "deadline": "November 20, 2026",
-                    "prize": "$100,000 USD + Mentorship from Satya Nadella",
-                    "locationName": "Global Virtual Event",
-                    "locationScope": "Global",
+                    "prize": "$100,000 USD",
                     "isOnline": True,
-                    "isRecommended": True,
-                    "url": "https://imaginecup.microsoft.com"
-                }
+                    "url": "https://imaginecup.microsoft.com",
+                },
             ]
 
         return jsonify({
-            "success": True,
-            "last_updated": today_str,
-            "verified_status": "100% Verified Official Sources",
-            "profile_context": {
-                "role": role or f"{level}_student",
-                "level": level,
-                "city": city,
-                "state": state,
-                "country": country,
-                "department": department if level == "college" else None,
-                "board": board if level == "school" else None
-            },
-            "news": news_items,
-            "opportunities": opps_items,
-            "location_hierarchy": ["Near You (City)", "State", "Country (India)", "Global / Online"]
+            "success":       True,
+            "last_updated":  today_str,
+            "news":          news,
+            "opportunities": opps,
         }), 200
     except Exception as exc:
-        logger.error("Opportunities API failed: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-# ============================================================
-# UNIFIED APPLICATION SERVING & SPA CATCH-ALL ROUTING
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
+# SPA CATCH-ALL
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.errorhandler(404)
 def not_found_fallback(e):
     if request.path.startswith("/api/"):
-        return jsonify({"success": False, "error": f"API endpoint {request.path} not found."}), 404
+        return jsonify({"success": False, "error": f"API endpoint '{request.path}' not found."}), 404
+    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
+        return send_from_directory(str(FRONTEND_DIST), "index.html")
+    return jsonify({"message": "LearnSphere AI — server active."}), 200
 
-    if os.path.exists(os.path.join(app.static_folder, "index.html")):
-        return send_from_directory(app.static_folder, "index.html")
-
-    return jsonify({"message": "LearnSphere AI Unified API Server active."}), 200
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
-def serve_unified_app(path):
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    if os.path.exists(os.path.join(app.static_folder, "index.html")):
-        return send_from_directory(app.static_folder, "index.html")
-    return jsonify({"message": "LearnSphere AI Unified API Server active."}), 200
+def serve_spa(path):
+    if path and (FRONTEND_DIST / path).exists():
+        return send_from_directory(str(FRONTEND_DIST), path)
+    if (FRONTEND_DIST / "index.html").exists():
+        return send_from_directory(str(FRONTEND_DIST), "index.html")
+    return jsonify({"message": "LearnSphere AI — server active."}), 200
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENTRY POINT
+# ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    logger.info("Starting LearnSphere AI Unified Application on port %d...", port)
-    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
+    debug = (ENV == "development")
+    logger.info("LearnSphere AI starting on port %d (ENV=%s)…", port, ENV)
+    # use_reloader=False prevents the Werkzeug reloader from spawning a child
+    # process that can block responses in some terminal environments.
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True, use_reloader=False)

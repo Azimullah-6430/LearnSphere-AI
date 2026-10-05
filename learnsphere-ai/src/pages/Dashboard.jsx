@@ -113,7 +113,7 @@ function StudentDashboard() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">Welcome back, {user?.name || 'Student'}.</h1>
         <p className="text-[var(--text-soft)] text-sm">
-          Student Portal · {isCollege ? `College Student (${user?.stream || 'Engineering'} - ${user?.domain || 'Branch'})` : `School Student (${user?.board || 'School'} - Class ${user?.grade_level || '12'})`}
+          Student Portal · {isCollege ? `College Student (${[user?.stream, user?.domain].filter(Boolean).join(' - ') || 'Higher Education'})` : `School Student (${[user?.board, user?.grade_level ? `Class ${user.grade_level}` : null].filter(Boolean).join(' - ') || 'General Education'})`}
         </p>
       </div>
 
@@ -126,7 +126,7 @@ function StudentDashboard() {
         />
         <StatCard label="Evaluations Graded" value={recentEvals.length} delta="stored in Database" />
         <StatCard label="Registered Email" value={user?.email || 'Student'} delta="Permanent ID" />
-        <StatCard label="Academic Program" value={isCollege ? (user?.domain || user?.stream || 'College') : `Class ${user?.grade_level || '12'}`} />
+        <StatCard label="Academic Program" value={isCollege ? (user?.domain || user?.stream || user?.department || 'College Program') : (user?.grade_level ? `Class ${user.grade_level}` : (user?.board ? `${user.board} School` : 'School Program'))} />
       </div>
 
       {!hasEvaluations ? (

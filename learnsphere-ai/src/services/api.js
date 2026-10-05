@@ -1,258 +1,252 @@
 /**
- * LearnSphere AI - Production API Service Client
- * Connects React Frontend to Flask/Render Backend.
+ * LearnSphere AI - Production API Service
+ *
+ * Fixes applied:
+ *   - credentials: 'include' on every request (required for session cookies)
+ *   - authMe() added — used by AppContext on startup
+ *   - logout() added
+ *   - getMySyllabus() added — fetches server-persisted syllabus
+ *   - evaluate() FormData field 'rubric' corrected to 'rubrics' to match backend
+ *   - No localhost hardcoding in production — uses VITE_API_BASE_URL or same-origin
  */
 
-const isLocalhost = typeof window !== 'undefined' && 
+const isLocalhost = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
+// In production on Render, frontend and backend share the same origin,
+// so relative paths work. In local dev the backend runs on :5000.
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
   (isLocalhost && window.location.port !== '5000' ? 'http://localhost:5000' : '')
 
-async function request(endpoint, options = {}, customBaseUrl = null) {
+async function request(endpoint, options = {}) {
   try {
-    const baseUrl = customBaseUrl !== null ? customBaseUrl : API_BASE_URL
-    const url = `${baseUrl}${endpoint}`
-    const headers = options.headers || {}
-    
+    const url     = `${API_BASE_URL}${endpoint}`
+    const headers = { ...(options.headers || {}) }
+
     let body = options.body
     if (body && !(body instanceof FormData) && typeof body !== 'string') {
       body = JSON.stringify(body)
       headers['Content-Type'] = 'application/json'
     }
 
-    const res = await fetch(url, { ...options, headers, body })
+    const res = await fetch(url, {
+      ...options,
+      headers,
+      body,
+      credentials: 'include',   // always send session cookie
+    })
+
     const text = await res.text()
     let data = {}
-    try {
-      data = text ? JSON.parse(text) : {}
-    } catch {
-      // Response text was not JSON
-    }
+    try { data = text ? JSON.parse(text) : {} } catch { /* non-JSON response */ }
 
     if (!res.ok) {
       if (!data.error) {
-        let friendlyError = `Server error (${res.status}).`
-        if (res.status === 413) friendlyError = 'Uploaded files exceed server size limit. Please upload smaller files or compressed PDFs.'
-        else if (res.status === 520 || res.status === 502 || res.status === 504) {
-          friendlyError = `Backend server gateway error (${res.status}). The evaluation service took too long to respond.`
-        } else if (text && text.length > 0 && text.length < 250 && !text.includes('<html')) {
-          friendlyError = text
-        }
-        data = { success: false, error: friendlyError, status: res.status }
+        let msg = `Server error (${res.status}).`
+        if (res.status === 401) msg = data.error || 'Not authenticated. Please sign in.'
+        else if (res.status === 403) msg = data.error || 'Access denied.'
+        else if (res.status === 413) msg = 'Files exceed server size limit. Please upload smaller files.'
+        else if (res.status === 409) msg = data.error || 'Conflict — record already exists.'
+        else if ([502, 503, 504, 520].includes(res.status)) msg = `Server temporarily unavailable (${res.status}). Please try again.`
+        else if (text && text.length < 250 && !text.includes('<html')) msg = text
+        data = { success: false, error: msg, status: res.status }
       }
     }
 
     return data
   } catch (err) {
-    console.warn(`[LearnSphere API Notice] Endpoint ${endpoint}:`, err.message)
+    console.warn(`[API] ${endpoint}:`, err.message)
     return { success: false, error: err.message, isOffline: true }
   }
 }
 
 export const api = {
-  // Auth & Permanent User Profile
-  login: async (credentials) => {
-    return request('/api/auth/login', {
-      method: 'POST',
-      body: credentials,
-    })
-  },
 
-  register: async (formDataOrObj) => {
-    return request('/api/auth/register', {
-      method: 'POST',
-      body: formDataOrObj,
-    })
-  },
+  // ── Auth ──────────────────────────────────────────────────────────────────
 
-  // Evaluation Pipeline
+  /** Validate current session. Called by AppContext on every app load. */
+  authMe: () => request('/api/auth/me'),
+
+  login: (credentials) => request('/api/auth/login', {
+    method: 'POST',
+    body: credentials,
+  }),
+
+  register: (payload) => request('/api/auth/register', {
+    method: 'POST',
+    body: payload,
+  }),
+
+  /** Invalidate server session and clear cookie. */
+  logout: () => request('/api/auth/logout', { method: 'POST' }),
+
+  /** Update authenticated user profile in MongoDB. */
+  updateProfile: (payload) => request('/api/user/profile', {
+    method: 'PUT',
+    body: payload,
+  }),
+
+  // ── Evaluation ────────────────────────────────────────────────────────────
+
+  /**
+   * Run evaluation pipeline (teacher or student portal — same engine).
+   * FormData must include: question_paper, answer_script, role, subject,
+   *   student_name, roll_number, assessment_title, level, board, stream, semester.
+   * Optional: rubrics, syllabus.
+   */
   evaluate: async (formData) => {
-    const res = await request('/api/evaluate', {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (res && res.success && res.result) {
-      return res
-    }
-    if (res && res.error) {
-      throw new Error(res.error)
-    }
-    throw new Error('Paper evaluation failed on server. Please check your uploaded files.')
+    const res = await request('/api/evaluate', { method: 'POST', body: formData })
+    if (res && res.success && res.result) return res
+    throw new Error(res?.error || 'Evaluation failed on server. Please check uploaded files.')
   },
 
-  getEvaluations: async (params = {}) => {
-    const query = new URLSearchParams(params).toString()
-    return request(`/api/evaluations${query ? '?' + query : ''}`)
+  getEvaluations: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/evaluations${qs ? '?' + qs : ''}`)
   },
 
-  getEvaluationDetail: async (id) => {
-    return request(`/api/evaluations/${id}`)
-  },
+  getEvaluationDetail: (id) => request(`/api/evaluations/${id}`),
 
-  deleteEvaluation: async (id) => {
-    return request(`/api/evaluations/${id}`, {
-      method: 'DELETE'
-    })
-  },
+  deleteEvaluation: (id) => request(`/api/evaluations/${id}`, { method: 'DELETE' }),
 
-  overrideEvaluationMarks: async (id, payload) => {
-    return request(`/api/evaluations/${id}/override`, {
-      method: 'PUT',
-      body: payload
-    })
-  },
+  overrideEvaluationMarks: (id, payload) => request(`/api/evaluations/${id}/override`, {
+    method: 'PUT',
+    body: payload,
+  }),
 
   downloadEvaluationPdf: (evalId) => {
-    const url = `${API_BASE_URL}/api/evaluations/${evalId}/pdf`
-    window.open(url, '_blank')
+    window.open(`${API_BASE_URL}/api/evaluations/${evalId}/pdf`, '_blank')
   },
 
   generatePdfReport: async (evalData) => {
     try {
-      const url = `${API_BASE_URL}/api/generate-pdf`
-      const res = await fetch(url, {
+      const res = await fetch(`${API_BASE_URL}/api/generate-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(evalData)
+        credentials: 'include',
+        body: JSON.stringify(evalData),
       })
       if (!res.ok) throw new Error('PDF generation failed.')
       const blob = await res.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = downloadUrl
+      const url  = window.URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url
       a.download = `Evaluation_Report_${(evalData?.subject || 'Paper').replace(/\s+/g, '_')}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
-      window.URL.revokeObjectURL(downloadUrl)
+      window.URL.revokeObjectURL(url)
     } catch (err) {
-      console.error('PDF Report error:', err)
+      console.error('[API] PDF report:', err)
       alert('Could not download PDF report.')
     }
   },
 
-  // Plagiarism
-  getPlagiarismMatches: async () => {
-    return request('/api/plagiarism/matches')
-  },
+  // ── Syllabus ──────────────────────────────────────────────────────────────
 
-  getPlagiarismSummary: async () => {
-    return request('/api/plagiarism/summary')
-  },
+  /**
+   * Analyze and PERSIST a syllabus. Returns { analysis, syllabus_id, syllabus }.
+   * Backend stores it against the authenticated user.
+   */
+  analyzeSyllabus: (formData) => request('/api/syllabus/analyze', {
+    method: 'POST',
+    body: formData,
+  }),
 
-  // Students & Portfolio
-  getStudents: async () => {
-    return request('/api/students')
-  },
+  /** Return the authenticated user's latest READY syllabus from the server. */
+  getMySyllabus: () => request('/api/syllabus'),
 
-  // Analytics & Dashboard
-  getDashboardAnalytics: async (role = 'teacher', studentName = '') => {
-    return request(`/api/analytics/dashboard?role=${role}&student_name=${encodeURIComponent(studentName)}`)
-  },
+  // ── Plagiarism ────────────────────────────────────────────────────────────
 
-  // AI Trainer & Tutor
-  trainerChat: async (message, subject = 'Physics') => {
-    return request('/api/trainer/chat', {
+  getPlagiarismMatches:  () => request('/api/plagiarism/matches'),
+  getPlagiarismSummary:  () => request('/api/plagiarism/summary'),
+
+  // ── Students ──────────────────────────────────────────────────────────────
+
+  getStudents: () => request('/api/students'),
+
+  // ── Analytics ────────────────────────────────────────────────────────────
+
+  getDashboardAnalytics: (role = 'teacher', studentName = '') =>
+    request(`/api/analytics/dashboard?role=${role}&student_name=${encodeURIComponent(studentName)}`),
+
+  // ── AI Trainer ────────────────────────────────────────────────────────────
+
+  trainerChat: (payload) => request('/api/trainer/chat', { method: 'POST', body: payload }),
+
+  // ── Knowledge Challenge ───────────────────────────────────────────────────
+
+  getChallengeQuiz: (subject = 'General', module = 'All', difficulty = 'Medium') =>
+    request(`/api/challenge/quiz?subject=${encodeURIComponent(subject)}&module=${encodeURIComponent(module)}&difficulty=${encodeURIComponent(difficulty)}`),
+
+  submitChallenge: (payload) => request('/api/challenge/submit', { method: 'POST', body: payload }),
+
+  // ── Self Evaluation (uses same backend engine as teacher portal) ──────────
+
+  generateSelfEval: (subject, topic, difficulty, syllabusContext) =>
+    request('/api/self-evaluation/generate', {
       method: 'POST',
-      body: { message, subject },
-    })
-  },
+      body: { subject, topic, difficulty, syllabus_context: syllabusContext },
+    }),
 
-  // Knowledge Challenge
-  getChallengeQuiz: async (subject = 'Physics', module = 'All', difficulty = 'Medium') => {
-    return request(`/api/challenge/quiz?subject=${encodeURIComponent(subject)}&module=${encodeURIComponent(module)}&difficulty=${encodeURIComponent(difficulty)}`)
-  },
-
-  submitChallenge: async (payload) => {
-    return request('/api/challenge/submit', {
+  evaluateSelfEval: (questionText, expectedConcept, studentResponse, subject) =>
+    request('/api/self-evaluation/evaluate', {
       method: 'POST',
-      body: payload,
-    })
-  },
+      body: {
+        question_text: questionText,
+        expected_concept: expectedConcept,
+        student_response: studentResponse,
+        subject,
+      },
+    }),
 
-  // Self Evaluation API
-  generateSelfEval: async (subject, topic, difficulty, syllabusContext) => {
-    return request('/api/self-evaluation/generate', {
+  // ── Reality Lab ───────────────────────────────────────────────────────────
+
+  generateRealityLab: (subject, module, difficulty, syllabusContext) =>
+    request('/api/reality-lab/generate', {
       method: 'POST',
-      body: { subject, topic, difficulty, syllabus_context: syllabusContext }
-    })
-  },
+      body: { subject, module, difficulty, syllabus_context: syllabusContext },
+    }),
 
-  evaluateSelfEval: async (questionText, expectedConcept, studentResponse, subject) => {
-    return request('/api/self-evaluation/evaluate', {
+  evaluateRealityLab: (title, task, studentResponse, subject) =>
+    request('/api/reality-lab/evaluate', {
       method: 'POST',
-      body: { question_text: questionText, expected_concept: expectedConcept, student_response: studentResponse, subject }
-    })
+      body: { title, task, student_response: studentResponse, subject },
+    }),
+
+  // ── Misconceptions ────────────────────────────────────────────────────────
+
+  getMisconceptions: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/misconceptions${qs ? '?' + qs : ''}`)
   },
 
-  // Reality Lab API
-  generateRealityLab: async (subject, module, difficulty, syllabusContext) => {
-    return request('/api/reality-lab/generate', {
-      method: 'POST',
-      body: { subject, module, difficulty, syllabus_context: syllabusContext }
-    })
+  // ── Memory Cards ──────────────────────────────────────────────────────────
+
+  getMemoryCards:   (studentName = '') =>
+    request(`/api/memory/cards?student_name=${encodeURIComponent(studentName)}`),
+  reviewMemoryCard: (cardId) =>
+    request('/api/memory/review', { method: 'POST', body: { id: cardId } }),
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  getNotifications: (role = 'all', studentName = '') =>
+    request(`/api/notifications?role=${role}&student_name=${encodeURIComponent(studentName)}`),
+  markNotificationRead: (id) =>
+    request(`/api/notifications/${id}/read`, { method: 'PUT' }),
+
+  // ── Opportunities ─────────────────────────────────────────────────────────
+
+  getOpportunities: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/opportunities${qs ? '?' + qs : ''}`)
   },
 
-  evaluateRealityLab: async (title, task, studentResponse, subject) => {
-    return request('/api/reality-lab/evaluate', {
-      method: 'POST',
-      body: { title, task, student_response: studentResponse, subject }
-    })
-  },
+  // ── Action Center ─────────────────────────────────────────────────────────
 
-  // Misconceptions & Memory
-  getMisconceptions: async (params = {}) => {
-    const query = new URLSearchParams(params).toString()
-    return request(`/api/misconceptions${query ? '?' + query : ''}`)
-  },
+  getActionCenterItems: () => request('/api/action-center'),
 
-  getMemoryCards: async (studentName = '') => {
-    return request(`/api/memory/cards?student_name=${encodeURIComponent(studentName)}`)
-  },
-
-  reviewMemoryCard: async (cardId) => {
-    return request('/api/memory/review', {
-      method: 'POST',
-      body: { id: cardId },
-    })
-  },
-
-  // Notifications
-  getNotifications: async (role = 'all', studentName = '') => {
-    return request(`/api/notifications?role=${role}&student_name=${encodeURIComponent(studentName)}`)
-  },
-
-  markNotificationRead: async (id) => {
-    return request(`/api/notifications/${id}/read`, {
-      method: 'PUT',
-    })
-  },
-
-  // Syllabus AI Analyzer
-  analyzeSyllabus: async (formData) => {
-    return request('/api/syllabus/analyze', {
-      method: 'POST',
-      body: formData,
-    })
-  },
-
-  // Daily Fact-Checked Current Updates & Opportunities Feed
-  getOpportunities: async (params = {}) => {
-    const query = new URLSearchParams(params).toString()
-    return request(`/api/opportunities${query ? '?' + query : ''}`)
-  },
-
-  // Teacher Action Center API
-  getActionCenterItems: async () => {
-    return request('/api/action-center')
-  },
-
-  updateActionCenterStatus: async (itemId, status) => {
-    return request(`/api/action-center/${itemId}`, {
-      method: 'PUT',
-      body: { status }
-    })
-  }
+  updateActionCenterStatus: (itemId, status) =>
+    request(`/api/action-center/${itemId}`, { method: 'PUT', body: { status } }),
 }

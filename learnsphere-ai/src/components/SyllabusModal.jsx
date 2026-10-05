@@ -37,11 +37,10 @@ export default function SyllabusModal({ isOpen, onClose }) {
       const res = await api.analyzeSyllabus(formData)
       if (res && res.success && res.analysis) {
         setResult(res.analysis)
-        if (setSyllabusData) {
-          setSyllabusData(res.analysis)
-        }
+        // Update in-memory context; server has already persisted the full record
+        if (setSyllabusData) setSyllabusData(res.analysis)
       } else {
-        setError(res?.error || 'Failed to analyze syllabus.')
+        setError(res?.error || 'Failed to analyze syllabus. Please try again.')
       }
     } catch (err) {
       setError('Error analyzing syllabus document.')

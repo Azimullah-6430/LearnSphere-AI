@@ -71,9 +71,9 @@ export default function History() {
     }))
   }
 
-  // Filter by search and activeClass if set
+  // Filter by search and activeClass if set (teachers only)
   const filtered = evaluations.filter(e => {
-    if (activeClass && activeClass.subjects && activeClass.subjects.length > 0) {
+    if (role === 'teacher' && activeClass && activeClass.subjects && activeClass.subjects.length > 0) {
       if (e.subject && !activeClass.subjects.some(s => s.toLowerCase() === e.subject.toLowerCase())) {
         // Allow fallback if list is small
       }
@@ -94,8 +94,23 @@ export default function History() {
   const handleSaveModalOverride = async () => {
     if (!selectedEval) return
     const id = selectedEval.id || selectedEval._id
-    const newObtained = parseFloat(customObtainedMarks) || 0
-    const newTotal = parseFloat(selectedEval.total_marks || selectedEval.max_marks || 100)
+    const newObtained = parseFloat(customObtainedMarks)
+    if (isNaN(newObtained) || newObtained < 0) {
+      alert('Please enter a valid marks value.')
+      setSavingOverride(false)
+      return
+    }
+    const newTotal = parseFloat(selectedEval.total_marks)
+    if (!newTotal || newTotal <= 0) {
+      alert('Cannot override: total marks for this evaluation are not available.')
+      setSavingOverride(false)
+      return
+    }
+    if (newObtained > newTotal) {
+      alert(`Obtained marks (${newObtained}) cannot exceed total marks (${newTotal}).`)
+      setSavingOverride(false)
+      return
+    }
     const newPct = Math.round((newObtained / newTotal) * 10000) / 100
 
     function calcGrade(p) {
@@ -194,9 +209,15 @@ export default function History() {
                         {r.assessment_title || 'Evaluation'}
                       </td>
                       <td className="py-3 px-3 font-bold">
-                        <span className={r.percentage >= 75 ? 'text-[var(--success)]' : r.percentage >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'}>
-                          {r.percentage !== undefined ? `${r.percentage}% (${r.obtained_marks || r.total_marks}/${r.total_marks || r.max_marks || 100})` : `${r.total_marks || 0} Marks`}
-                        </span>
+                        {r.evaluation_status === 'NEEDS_TEACHER_REVIEW' || r.is_unreadable ? (
+                          <span className="text-[var(--warning)] text-xs font-bold">Needs Review</span>
+                        ) : (r.percentage !== null && r.percentage !== undefined) ? (
+                          <span className={r.percentage >= 75 ? 'text-[var(--success)]' : r.percentage >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'}>
+                            {r.percentage}% ({r.obtained_marks}/{r.total_marks})
+                          </span>
+                        ) : (
+                          <span className="text-[var(--text-faint)] text-xs">No score</span>
+                        )}
                       </td>
                       <td className="py-3 px-3">
                         <button
@@ -265,10 +286,15 @@ export default function History() {
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-[13px] bg-[var(--surface-alt)] p-3 rounded-xl border border-[var(--border)]">
-              <div><strong>Score:</strong> {selectedEval.percentage}% ({selectedEval.obtained_marks || selectedEval.total_marks}/{selectedEval.total_marks || selectedEval.max_marks || 100})</div>
+              <div>
+                <strong>Score:</strong>{' '}
+                {(selectedEval.percentage !== null && selectedEval.percentage !== undefined)
+                  ? `${selectedEval.percentage}% (${selectedEval.obtained_marks}/${selectedEval.total_marks})`
+                  : (selectedEval.is_unreadable ? 'Needs teacher review' : 'Not yet scored')}
+              </div>
               <div><strong>Evaluated On:</strong> {selectedEval.created_at || 'Today'}</div>
-              <div><strong>Grader Model:</strong> {selectedEval.is_teacher_overridden ? 'Teacher Allotted Marks' : 'Strict Rubric AI'}</div>
-              <div><strong>Status:</strong> {selectedEval.review_status || 'Evaluated'}</div>
+              <div><strong>Grader:</strong> {selectedEval.is_teacher_overridden ? 'Teacher Allotted Marks' : 'AI Evaluation'}</div>
+              <div><strong>Status:</strong> {selectedEval.evaluation_status || selectedEval.review_status || 'Evaluated'}</div>
             </div>
 
             {/* Teacher Mark Override Controls */}

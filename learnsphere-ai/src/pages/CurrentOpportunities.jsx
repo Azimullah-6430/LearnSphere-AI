@@ -28,15 +28,15 @@ import {
 } from 'lucide-react'
 
 export default function CurrentOpportunities() {
-  const { user, profile, recordActivity } = useApp()
-  const activeProfile = { ...user, ...profile }
+  const { user, recordActivity } = useApp()
+  const activeProfile = user
   // HARD SEPARATION: If role is school_student or level is school, isCollege MUST be false
   const isSchool = activeProfile?.role === 'school_student' || activeProfile?.level === 'school'
   const isCollege = !isSchool && (activeProfile?.role === 'college_student' || activeProfile?.level === 'college')
 
   // Credentials / Location state derived from user account creation
-  const [userCity, setUserCity] = useState(activeProfile?.city || 'Chennai')
-  const [userState, setUserState] = useState(activeProfile?.state || 'Tamil Nadu')
+  const [userCity, setUserCity] = useState(activeProfile?.city || '')
+  const [userState, setUserState] = useState(activeProfile?.state || '')
   const [userCountry, setUserCountry] = useState(activeProfile?.country || 'India')
   const [showLocationEditor, setShowLocationEditor] = useState(false)
 
@@ -155,8 +155,8 @@ export default function CurrentOpportunities() {
   const savedItems = allCombined.filter((item) => savedIds.includes(item.id))
 
   const departmentName = isCollege
-    ? activeProfile?.domain || activeProfile?.department || 'Computer Science & AI'
-    : `Class ${activeProfile?.grade_level || activeProfile?.classLevel || '12'} (${activeProfile?.board || 'CBSE'})`
+    ? activeProfile?.domain || activeProfile?.department || 'College Program'
+    : (activeProfile?.grade_level ? `Class ${activeProfile.grade_level}` : (activeProfile?.board ? `${activeProfile.board} Board` : 'School Program'))
 
   return (
     <>

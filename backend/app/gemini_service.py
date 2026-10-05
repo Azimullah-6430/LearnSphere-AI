@@ -424,3 +424,54 @@ Return ONLY JSON:
 """
         raw = self.generate_content(prompt, json_output=True)
         return self.parse_json_response(raw)
+
+    def generate_self_evaluation(self, subject: str, topic: str, difficulty: str = "Medium", syllabus_context: str = "") -> Dict[str, Any]:
+        prompt = f"""
+Generate a single self-evaluation question for a student using gemini-3.6-flash.
+Subject: {subject}
+Topic: {topic}
+Difficulty: {difficulty}
+Syllabus Context: {syllabus_context[:1000]}
+
+Return ONLY JSON:
+{{
+  "question_id": "se_1",
+  "subject": "{subject}",
+  "topic": "{topic}",
+  "difficulty": "{difficulty}",
+  "question_text": "Detailed question text",
+  "question_type": "descriptive",
+  "expected_key_points": ["Key point 1", "Key point 2"],
+  "marks": 10
+}}
+"""
+        raw = self.generate_content(prompt, json_output=True)
+        return self.parse_json_response(raw)
+
+    def evaluate_self_evaluation(self, question_text: str, expected_concept: str, student_response: str, subject: str) -> Dict[str, Any]:
+        prompt = f"""
+Evaluate student's self-evaluation response using gemini-3.6-flash.
+Subject: {subject}
+Question: {question_text}
+Expected Concept: {expected_concept}
+Student Response: {student_response}
+
+Return ONLY JSON:
+{{
+  "awarded_marks": 7,
+  "max_marks": 10,
+  "percentage": 70,
+  "feedback": "Detailed specific feedback referencing student's actual response",
+  "what_was_done_correctly": ["Correctly identified X"],
+  "what_is_missing": ["Missing explanation of Y"],
+  "expected_answer": "Model answer with key points",
+  "misconception_detected": false,
+  "misconception": ""
+}}
+"""
+        raw = self.generate_content(prompt, json_output=True)
+        return self.parse_json_response(raw)
+
+    @property
+    def primary_model(self) -> str:
+        return self.model

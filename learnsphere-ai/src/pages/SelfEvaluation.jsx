@@ -19,8 +19,8 @@ const STAGES = [
 ]
 
 export default function SelfEvaluation() {
-  const { user, profile, syllabusData, recordActivity } = useApp()
-  const activeProfile = { ...user, ...profile }
+  const { user, syllabusData, recordActivity } = useApp()
+  const activeProfile = user
 
   const subjects = getDynamicSubjects(activeProfile, syllabusData)
   const hasSubjects = subjects.length > 0
@@ -104,7 +104,7 @@ export default function SelfEvaluation() {
       formData.append('question_paper', qpRawFile)
       formData.append('answer_script', ansRawFile)
       if (rubricRawFile) {
-        formData.append('rubric', rubricRawFile)
+        formData.append('rubrics', rubricRawFile)
       }
 
       const response = await api.evaluate(formData)
@@ -113,7 +113,11 @@ export default function SelfEvaluation() {
       if (response && response.success) {
         setEvalResult(response.result)
         setEvalId(response.evaluation_id)
-        recordActivity('self-eval', `Self-evaluated paper: Score ${response.result?.total_awarded}/${response.result?.total_max} (${response.result?.percentage}%)`)
+        const r = response.result
+        recordActivity(
+          'self-eval',
+          `Self-evaluated: ${r?.obtained_marks ?? '?'}/${r?.total_marks ?? '?'} (${r?.percentage ?? '?'}%)`
+        )
       } else {
         setErrorMsg(response?.error || 'Self-evaluation failed. Please verify files and try again.')
       }
@@ -313,13 +317,20 @@ export default function SelfEvaluation() {
               <Card className="border-2 border-[var(--accent)] bg-gradient-to-br from-[var(--surface)] to-[var(--surface-alt)]">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-[var(--border)]">
                   <div>
-                    <Badge tone="accent">{evalResult.subject || selectedSubject || 'Self Evaluation'}</Badge>
-                    <h2 className="text-2xl font-black text-[var(--text)] mt-1">
-                      {evalResult.total_awarded} / {evalResult.total_max} Marks ({evalResult.percentage}%)
-                    </h2>
+                    <Badge tone="accent">{evalResult.student?.subject || selectedSubject || 'Self Evaluation'}</Badge>
+                    {evalResult.evaluation_status === 'NEEDS_TEACHER_REVIEW' ? (
+                      <div className="mt-2">
+                        <h2 className="text-lg font-black text-[var(--warning)]">Needs Review</h2>
+                        <p className="text-xs text-[var(--text-soft)] mt-0.5">{evalResult.overall_feedback || evalResult.unreadable_reason}</p>
+                      </div>
+                    ) : (
+                      <h2 className="text-2xl font-black text-[var(--text)] mt-1">
+                        {evalResult.obtained_marks} / {evalResult.total_marks} Marks ({evalResult.percentage}%)
+                      </h2>
+                    )}
                     <p className="text-xs text-[var(--text-soft)] mt-0.5">
-                      Status: <strong className="text-emerald-500">{evalResult.status || 'COMPLETED'}</strong>
-                      {evalResult.grade && ` • Grade: ${evalResult.grade}`}
+                      Status: <strong className={evalResult.evaluation_status === 'COMPLETED' ? 'text-emerald-500' : 'text-amber-500'}>{evalResult.evaluation_status || 'COMPLETED'}</strong>
+                      {evalResult.grade && evalResult.grade !== 'NEEDS_REVIEW' && ` • Grade: ${evalResult.grade}`}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -329,10 +340,10 @@ export default function SelfEvaluation() {
                   </div>
                 </div>
 
-                {evalResult.summary && (
+                {evalResult.overall_feedback && evalResult.evaluation_status !== 'NEEDS_TEACHER_REVIEW' && (
                   <div className="mt-4 p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed">
                     <strong className="text-[var(--text)] block mb-1">Academic Summary:</strong>
-                    {evalResult.summary}
+                    {evalResult.overall_feedback}
                   </div>
                 )}
               </Card>
@@ -343,8 +354,8 @@ export default function SelfEvaluation() {
                   Question-by-Question Marking & Feedback
                 </h3>
 
-                {evalResult.evaluations && evalResult.evaluations.length > 0 ? (
-                  evalResult.evaluations.map((q, idx) => (
+                {(evalResult.evaluations || evalResult.questions || []).length > 0 ? (
+                  (evalResult.evaluations || evalResult.questions).map((q, idx) => (
                     <Card key={q.question_id || idx} className="space-y-3">
                       <div className="flex items-center justify-between border-b border-[var(--border)] pb-2.5">
                         <div className="flex items-center gap-2">
@@ -352,11 +363,14 @@ export default function SelfEvaluation() {
                             Q{q.question_number || idx + 1}
                           </span>
                           <span className="text-xs font-semibold text-[var(--text-soft)]">
-                            (Max Marks: {q.max_marks})
+                            (Max: {q.maximum_marks ?? q.max_marks ?? '?'} marks)
                           </span>
                         </div>
-                        <Badge tone={q.awarded_marks === q.max_marks ? 'success' : q.awarded_marks > 0 ? 'warning' : 'error'}>
-                          {q.awarded_marks} / {q.max_marks} Marks
+                        <Badge tone={
+                          q.awarded_marks === (q.maximum_marks ?? q.max_marks) ? 'success'
+                          : q.awarded_marks > 0 ? 'warning' : 'error'
+                        }>
+                          {q.awarded_marks} / {q.maximum_marks ?? q.max_marks ?? '?'} Marks
                         </Badge>
                       </div>
 
@@ -375,26 +389,35 @@ export default function SelfEvaluation() {
                         </div>
                       )}
 
-                      {q.feedback && (
+                      {q.question_feedback && (
                         <div className="text-xs text-[var(--text-soft)]">
                           <span className="font-semibold text-[var(--text-faint)] block mb-1">Feedback:</span>
                           <p className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] leading-relaxed">
-                            {q.feedback}
+                            {q.question_feedback}
                           </p>
                         </div>
                       )}
 
-                      {q.misconception && (
+                      {q.misconception_detected && q.misconception && (
                         <div className="text-xs text-red-400 bg-red-500/10 p-2.5 rounded-lg border border-red-500/20">
                           <span className="font-bold block mb-0.5">Misconception Identified:</span>
                           {q.misconception}
                         </div>
                       )}
 
-                      {q.expected_points && (
+                      {q.correct_answer_or_expected_points && (
                         <div className="text-xs text-emerald-400 bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/20">
                           <span className="font-bold block mb-0.5">Expected Key Points:</span>
-                          {Array.isArray(q.expected_points) ? q.expected_points.join(', ') : q.expected_points}
+                          {q.correct_answer_or_expected_points}
+                        </div>
+                      )}
+
+                      {q.what_is_missing && q.what_is_missing.length > 0 && (
+                        <div className="text-xs text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                          <span className="font-bold block mb-0.5">Missing Points:</span>
+                          <ul className="list-disc pl-4 space-y-0.5">
+                            {q.what_is_missing.map((m, i) => <li key={i}>{m}</li>)}
+                          </ul>
                         </div>
                       )}
                     </Card>

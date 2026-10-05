@@ -34,8 +34,8 @@ function QualityMeter({ pct }) {
 }
 
 export default function RealityLab() {
-  const { user, profile, syllabusData, recordActivity } = useApp()
-  const activeProfile = { ...user, ...profile }
+  const { user, syllabusData, recordActivity } = useApp()
+  const activeProfile = user
   const isCollege = activeProfile?.level === 'college'
 
   const subjects = getDynamicSubjects(activeProfile, syllabusData)

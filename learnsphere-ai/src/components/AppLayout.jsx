@@ -63,11 +63,18 @@ function FocusHeader() {
 }
 
 export default function AppLayout() {
-  const { authenticated } = useApp()
+  const { authenticated, authLoading } = useApp()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [syllabusModalOpen, setSyllabusModalOpen] = useState(false)
   const [classModalOpen, setClassModalOpen] = useState(false)
+
+  // While the /api/auth/me call is in flight, show nothing (avoids flash redirect)
+  if (authLoading) return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
+      <div className="text-[var(--text-soft)] text-sm">Verifying session…</div>
+    </div>
+  )
 
   if (!authenticated) return <Navigate to="/" replace />
 

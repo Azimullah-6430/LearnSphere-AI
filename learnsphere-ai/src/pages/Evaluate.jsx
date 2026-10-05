@@ -306,35 +306,20 @@ export default function Evaluate() {
   }
 
   const rawQs = (
-    (Array.isArray(evalData?.questions) && evalData.questions.length > 0 && evalData.questions) ||
+    (Array.isArray(evalData?.questions)   && evalData.questions.length   > 0 && evalData.questions)   ||
     (Array.isArray(evalData?.evaluations) && evalData.evaluations.length > 0 && evalData.evaluations) ||
-    (Array.isArray(evalData?.result?.questions) && evalData.result.questions.length > 0 && evalData.result.questions) ||
-    (Array.isArray(evalData?.result?.evaluations) && evalData.result.evaluations.length > 0 && evalData.result.evaluations) ||
-    (Array.isArray(evalData?.question_paper?.questions) && evalData.question_paper.questions.length > 0 && evalData.question_paper.questions) ||
     []
   )
 
-  const questionsList = rawQs.length > 0 ? rawQs : (evalData ? [
-    {
-      question_number: 'Q1',
-      question_type: 'overall_assessment',
-      maximum_marks: evalData.total_marks ?? evalData.summary?.total_marks ?? 10,
-      awarded_marks: evalData.obtained_marks ?? evalData.awarded_marks ?? evalData.summary?.awarded_marks ?? 8,
-      answer_present: true,
-      answer_summary: evalData.overall_feedback || 'Multimodal AI evaluated handwritten script and verified overall performance.',
-      feedback: {
-        what_was_done_well: ['Script attempted and answers extracted correctly.', 'Calculations and conceptual steps evaluated.'],
-        missing_points: evalData.is_unreadable ? ['Handwriting flagged for teacher review due to visual ambiguity.'] : [],
-        expected_answer: 'Complete standard solution according to Question Paper rubrics.',
-        improvement: 'Review flagged conceptual areas for full credit.'
-      }
-    }
-  ] : [])
+  // NEVER fabricate questions. If the backend returned no questions, show
+  // an empty state — do not invent a fake Q1 with invented marks.
+  const questionsList = rawQs
 
-  const totalMarks = evalData ? (evalData.obtained_marks ?? evalData.awarded_marks ?? evalData.summary?.awarded_marks ?? 0) : 0
-  const totalMax = evalData ? (evalData.total_marks ?? evalData.summary?.total_marks ?? 0) : 0
-  const percentage = evalData ? (evalData.percentage ?? evalData.summary?.percentage ?? 0) : 0
-  const grade = evalData ? (evalData.grade ?? evalData.summary?.grade ?? 'A') : 'A'
+  // Only read marks that are actually present. null/undefined means unknown — do not default to 0 or 100.
+  const totalMarks  = (evalData?.obtained_marks  !== undefined && evalData?.obtained_marks  !== null) ? evalData.obtained_marks  : null
+  const totalMax    = (evalData?.total_marks      !== undefined && evalData?.total_marks     !== null) ? evalData.total_marks     : null
+  const percentage  = (evalData?.percentage       !== undefined && evalData?.percentage      !== null) ? evalData.percentage      : null
+  const grade       = evalData?.grade ?? null
 
   const eq = questionsList[activeQ] || questionsList[0]
   const eqMaxMarks = eq ? (eq.maximum_marks ?? eq.max_marks ?? 0) : 0
@@ -498,10 +483,18 @@ export default function Evaluate() {
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="text-right">
-                  <div className="text-[34px] font-extrabold text-[var(--accent)] leading-tight">
-                    {totalMarks} <span className="text-base font-normal text-[var(--text-faint)]">/ {totalMax}</span>
-                  </div>
-                  <div className="text-[var(--text-faint)] text-xs font-semibold">{percentage}% · Grade {grade}</div>
+                  {totalMarks !== null && totalMax !== null ? (
+                    <>
+                      <div className="text-[34px] font-extrabold text-[var(--accent)] leading-tight">
+                        {totalMarks} <span className="text-base font-normal text-[var(--text-faint)]">/ {totalMax}</span>
+                      </div>
+                      <div className="text-[var(--text-faint)] text-xs font-semibold">{percentage}% · Grade {grade}</div>
+                    </>
+                  ) : (
+                    <div className="text-sm font-bold text-[var(--warning)] py-2">
+                      {evalData?.evaluation_status === 'NEEDS_TEACHER_REVIEW' ? 'Awaiting teacher review' : 'Evaluation in progress'}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {role === 'teacher' && (

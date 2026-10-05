@@ -26,16 +26,16 @@ function StepDots({ steps, current }) {
 }
 
 export default function Onboarding() {
-  const { setProfile } = useApp()
+  const { user, updateProfile } = useApp()
   const navigate = useNavigate()
 
   const [step, setStep] = useState(0)
-  const [level, setLevel] = useState(null) // 'school' | 'college'
-  const [board, setBoard] = useState('CBSE')
-  const [classLevel, setClassLevel] = useState(12)
-  const [stream, setStream] = useState('Science')
-  const [subjects, setSubjects] = useState(['Physics', 'Chemistry', 'Mathematics', 'Biology'])
-  const [semester, setSemester] = useState(3)
+  const [level, setLevel] = useState(user?.level || null) // 'school' | 'college'
+  const [board, setBoard] = useState(user?.board || 'CBSE')
+  const [classLevel, setClassLevel] = useState(user?.grade_level || 12)
+  const [stream, setStream] = useState(user?.stream || 'Science')
+  const [subjects, setSubjects] = useState(user?.subjects || ['Physics', 'Chemistry', 'Mathematics', 'Biology'])
+  const [semester, setSemester] = useState(user?.semester || 3)
   const [syllabusFile, setSyllabusFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [analysing, setAnalysing] = useState(false)
@@ -67,17 +67,20 @@ export default function Onboarding() {
     }, 120)
   }
 
-  const finish = () => {
+  const finish = async () => {
     const profileData = {
       level,
       board: level === 'school' ? board : null,
       classLevel: level === 'school' ? classLevel : null,
       stream: level === 'school' ? stream : null,
-      subjects: level === 'school' ? subjects : ['Engineering Mathematics', 'Physics', 'Data Structures', 'Electronics'],
+      subjects: level === 'school' ? subjects : ['Mathematics', 'Physics', 'Computer Science'],
       semester: level === 'college' ? semester : null,
-      syllabusFile: level === 'college' ? syllabusFile : null,
     }
-    setProfile(profileData)
+    try {
+      if (updateProfile) await updateProfile(profileData)
+    } catch (err) {
+      console.warn('Profile update notice:', err)
+    }
     navigate('/app/dashboard')
   }
 
