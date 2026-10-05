@@ -268,8 +268,9 @@ Return ONLY a valid JSON object matching this schema:
         """
         qp_json = json.dumps(qp_structure, ensure_ascii=False, indent=2)
         prompt = f"""
-You are LearnSphere AI's STRICT, HIGHLY EXPERIENCED HUMAN TEACHER AND EXAMINER.
+You are LearnSphere AI's STRICT, HIGHLY EXPERIENCED HUMAN TEACHER AND HEAD EXAMINER.
 You are evaluating a student's answer script against the official Question Paper and marking criteria.
+EVERY SINGLE QUESTION in the Question Paper must receive individual, granular, evidence-based feedback. Never return only a final total.
 
 SUBJECT: {subject}
 ACADEMIC LEVEL: {level}
@@ -277,42 +278,46 @@ ACADEMIC LEVEL: {level}
 OFFICIAL QUESTION PAPER STRUCTURE:
 {qp_json}
 
-EXAMINATION & GRADING PRINCIPLES:
+STRICT HUMAN TEACHER EVALUATION RULES:
 1. DYNAMIC MAPPING & COMPLETE SCRIPT SCAN:
    - Inspect EVERY page of the uploaded answer script.
-   - Answers may be in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
+   - Answers may be written in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
    - Question numbers may be written in margins, underlined, or circled.
    - Answers may span across multiple pages or continue later.
    - Map each written answer to its corresponding question in the Question Paper structure.
-   - If student explicitly skipped or did NOT attempt a question, set attempted: false, awarded_marks: 0.0, student_answer: "Not attempted in script".
+   - If student explicitly skipped or did NOT attempt a question, set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
 
-2. EVIDENCE-BASED ASSESSMENT (NEVER HALLUCINATE OR INVENT):
+2. EVIDENCE-BASED ASSESSMENT (NEVER FABRICATE OR HALLUCINATE):
    - Evaluate ONLY what the student actually wrote or drew.
    - Transcribe/summarize what the student wrote accurately under 'student_answer'.
-   - Cite the location under 'evidence_reference' (e.g. "Script Page 2, lines 1-15").
+   - Cite the exact location under 'evidence_reference' (e.g. "Script Page 2, lines 1-15").
 
-3. MATHEMATICS, SCIENCE & NUMERICAL PROBLEMS:
-   - Check formula selection, value substitution, intermediate derivations, calculation accuracy, and final units.
-   - Award PARTIAL MARKS when the method, law, or formula is correct but an arithmetic slip occurred in later steps.
-   - Penalize incorrect formulas, missing SI units, or unverified leaps in logic.
+3. UNACCEPTABLE GENERIC FEEDBACK BAN:
+   - NEVER output generic placeholder phrases like "Good answer.", "Needs improvement.", "Try harder.", "Correct.", "Incorrect."
+   - Explain the EXACT reason for mark allocation. Example:
+     "Your formula selection (Ohm's law) is correct, but the substitution of resistance R=50Ω instead of R=5Ω leads to an incorrect current I=0.2A instead of I=2A. Awarded 3/5 marks for correct method with an arithmetic substitution error."
 
-4. THEORY, DESCRIPTIVE & CONCEPTUAL QUESTIONS:
-   - Check key terminology, depth of explanation, logical arguments, and necessary examples.
-   - Do not deduct marks for extraneous correct information unless it introduces a direct contradiction.
+4. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
+   - "wrong_concept"
+   - "partially_correct_concept"
+   - "correct_concept_with_calculation_error"
+   - "correct_answer_with_insufficient_explanation"
+   - "incomplete_answer"
+   - "irrelevant_answer"
+   - "contradictory_answer"
+   - "correct_answer"
+   - "unanswered_question"
 
-5. MCQs & OBJECTIVE QUESTIONS:
-   - Grade strictly against the options provided in the Question Paper.
+5. MATHEMATICS, NUMERICAL PROBLEMS & ENGINEERING:
+   - Evaluate formula selection, substitution, arithmetic calculations, intermediate steps, units, and final answer.
+   - Award appropriate partial credit when the method is sound but an arithmetic slip occurs.
 
-6. DIAGRAMS & CODE:
-   - Inspect student's drawn diagrams, axes, labels, circuit components, or code syntax.
+6. THEORY, DESCRIPTIVE & ESSAY QUESTIONS:
+   - Evaluate terminology, logical coherence, core principles, required diagrams, and relevant examples.
 
 7. STRICT MARK BOUNDS:
    - For every question: 0.0 <= awarded_marks <= maximum_marks.
    - Calculate percentage_of_question = round((awarded_marks / maximum_marks) * 100, 2).
-
-8. MISTAKE vs. MISCONCEPTION DISTINCTION:
-   - A calculation error or forgotten unit is a regular error (misconception_detected = false).
-   - A fundamental flaw in physical/mathematical reasoning (e.g. treating force as proportional to velocity instead of acceleration) is a misconception (misconception_detected = true with detailed diagnostic).
 
 Return ONLY a valid JSON object matching this schema:
 {{
@@ -324,27 +329,32 @@ Return ONLY a valid JSON object matching this schema:
       "question_number": "1(a)",
       "attempted": true,
       "maximum_marks": 5.0,
-      "awarded_marks": 4.0,
-      "percentage_of_question": 80.0,
-      "student_answer": "Student applied F = m*a, substituted m=10kg and a=2m/s^2 to calculate F=20, but omitted final unit N.",
-      "evidence_reference": "Script Page 1, Section A",
-      "evaluation_reason": "Correct physical formula and arithmetic execution; 1 mark deducted for missing SI unit of force (Newtons).",
-      "strengths": ["Correctly identified Newton's Second Law", "Accurate arithmetic substitution"],
-      "errors": ["Missing standard SI unit (N)"],
-      "missing_points": ["State final answer with unit: 20 N"],
-      "what_student_should_have_written": "F = m * a = 10 kg * 2 m/s^2 = 20 N.",
-      "feedback": "Great conceptual start. Remember to always append proper SI units to final numerical results.",
+      "awarded_marks": 3.0,
+      "percentage_of_question": 60.0,
+      "answer_classification": "correct_concept_with_calculation_error",
+      "student_answer": "Student wrote: F = m*a, m=10, a=2.5, calculated F = 20 N.",
+      "evidence_reference": "Script Page 1, Section A, lines 4-10",
+      "evaluation_reason": "Correct physical formula selected and correct SI unit used; 2 marks deducted because 10 * 2.5 was miscalculated as 20 instead of 25.",
+      "what_was_done_correctly": ["Correct selection of Newton's second law F = m*a", "Correct SI unit Newton (N) appended"],
+      "what_is_incorrect": ["Arithmetic product of 10 * 2.5 written as 20"],
+      "what_is_missing": ["Accurate calculation step yielding 25 N"],
+      "conceptual_mistake": "",
+      "step_or_calculation_mistake": "Arithmetic multiplication error in final step: 10 * 2.5 = 20 instead of 25.",
+      "what_student_should_have_written": "Formula: F = m * a\\nSubstitution: F = 10 kg * 2.5 m/s² = 25 N\\nFinal Answer: 25 N",
+      "how_to_improve": "Double-check basic multiplication before writing down the final numerical value.",
+      "teacher_feedback": "Your formula selection is correct and unit is proper, but 10 * 2.5 was computed as 20 instead of 25. You receive 3/5 because the correct method is demonstrated but the arithmetic calculation is flawed.",
       "concepts_tested": ["Newton's Second Law", "Force and Acceleration"],
       "misconception_detected": false,
       "misconception": "",
       "confidence": 0.95
     }}
   ],
-  "overall_feedback": "Comprehensive examination summary assessing overall accuracy, pacing, and conceptual depth.",
-  "strengths": ["Strong foundational understanding of mechanics", "Clear step-by-step formula derivations"],
-  "weaknesses": ["Inconsistent inclusion of final dimensional units", "Skipped question 4(b)"],
-  "major_conceptual_errors": [],
-  "improvement_recommendations": ["Practice appending units at each calculation step", "Review thermodynamics definitions in Chapter 4"]
+  "overall_teacher_comment": "Detailed examination summary assessing student's overall mastery, systematic workings, and recurring weaknesses across the paper.",
+  "strongest_areas": ["Newtonian mechanics formula applications", "Definitions of core thermodynamic terms"],
+  "weakest_areas": ["Arithmetic accuracy in multi-step calculations", "Omission of subparts in Question 4"],
+  "most_important_misconceptions": [],
+  "priority_topics_to_revise": ["Electric Circuits and Ohm's Law", "Dimensional analysis and units"],
+  "practical_improvement_advice": ["Show all intermediate multiplication steps", "Review circuit reduction techniques before the next exam"]
 }}
 """
         files = [qp_file, ans_file]

@@ -589,6 +589,19 @@ export default function Evaluate() {
                     )}
                   </div>
 
+                  {eq.answer_classification && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Diagnosis:</span>
+                      <Badge tone={
+                        eq.answer_classification === 'correct_answer' ? 'success' :
+                        eq.answer_classification.includes('calculation_error') ? 'warning' :
+                        eq.answer_classification.includes('concept') ? 'error' : 'neutral'
+                      }>
+                        {eq.answer_classification.replace(/_/g, ' ').toUpperCase()}
+                      </Badge>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between p-3.5 px-4 bg-[var(--accent-soft)] rounded-lg mb-4">
                     <div className="flex items-center gap-3">
                       <div className="text-2xl font-extrabold text-[var(--accent)]">{eq.awarded_marks}</div>
@@ -604,54 +617,70 @@ export default function Evaluate() {
                     </Badge>
                   </div>
 
-                  {eq.evaluation_reason && (
-                    <div className="mb-3 p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">Evaluation Rationale</div>
-                      <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">{eq.evaluation_reason}</div>
+                  {(eq.teacher_feedback || eq.evaluation_reason) && (
+                    <div className="mb-3 p-3.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent)] mb-1">Teacher Evaluation & Mark Breakdown</div>
+                      <div className="text-[13px] font-medium text-[var(--text)] leading-relaxed">
+                        {eq.teacher_feedback || eq.evaluation_reason}
+                      </div>
                     </div>
                   )}
 
-                  {(eq.strengths?.length > 0 || eq.feedback?.what_was_done_well?.length > 0) && (
-                    <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--success)] mb-1">Demonstrated Knowledge / Strengths</div>
+                  {(eq.what_was_done_correctly?.length > 0 || eq.strengths?.length > 0) && (
+                    <div className="mb-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-500 mb-1">What was done correctly</div>
                       <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--text)]">
-                        {(eq.strengths || eq.feedback?.what_was_done_well || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
+                        {(eq.what_was_done_correctly || eq.strengths || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
                       </ul>
                     </div>
                   )}
 
-                  {eq.errors?.length > 0 && (
-                    <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--error)] mb-1">Identified Errors</div>
-                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--error)]">
-                        {eq.errors.map((pt, idx) => <li key={idx}>{pt}</li>)}
+                  {(eq.what_is_incorrect?.length > 0 || eq.errors?.length > 0) && (
+                    <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-red-500 mb-1">What is incorrect</div>
+                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-red-500">
+                        {(eq.what_is_incorrect || eq.errors || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
                       </ul>
                     </div>
                   )}
 
-                  {(eq.missing_points?.length > 0 || eq.feedback?.missing_points?.length > 0) && (
-                    <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--warning)] mb-1">Missing Key Concepts / Steps</div>
-                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--warning)]">
-                        {(eq.missing_points || eq.feedback?.missing_points || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
+                  {eq.step_or_calculation_mistake && (
+                    <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-amber-500 mb-1">Step / Calculation Mistake</div>
+                      <div className="text-[12.5px] text-[var(--text)] leading-relaxed">{eq.step_or_calculation_mistake}</div>
+                    </div>
+                  )}
+
+                  {(eq.conceptual_mistake || (eq.misconception_detected && eq.misconception)) && (
+                    <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-red-500 mb-1">Conceptual Flaw / Misunderstanding</div>
+                      <div className="text-[12.5px] text-red-400 leading-relaxed">{eq.conceptual_mistake || eq.misconception}</div>
+                    </div>
+                  )}
+
+                  {(eq.what_is_missing?.length > 0 || eq.missing_points?.length > 0) && (
+                    <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-amber-500 mb-1">Missing Key Concepts / Steps</div>
+                      <ul className="list-disc pl-5 text-[12.5px] space-y-1 text-[var(--text)]">
+                        {(eq.what_is_missing || eq.missing_points || []).map((pt, idx) => <li key={idx}>{pt}</li>)}
                       </ul>
                     </div>
                   )}
 
                   {(eq.what_student_should_have_written || eq.feedback?.expected_answer) && (
-                    <div className="mb-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-faint)] mb-1">What Student Should Have Written</div>
-                      <div className="text-[12.5px] p-2.5 bg-[var(--surface)] border border-[var(--border)] rounded text-[var(--text)] leading-relaxed">
+                    <div className="mb-3 p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent)] mb-1">What Student Should Have Written</div>
+                      <div className="text-[12.5px] text-[var(--text)] whitespace-pre-line leading-relaxed font-mono">
                         {eq.what_student_should_have_written || eq.feedback?.expected_answer}
                       </div>
                     </div>
                   )}
 
-                  {(eq.feedback_text || eq.feedback?.improvement || eq.improvement_advice) && (
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent-dim)] mb-1">Improvement Guidance</div>
-                      <div className="text-[12.5px] leading-relaxed text-[var(--accent-dim)]">
-                        {eq.feedback_text || eq.feedback?.improvement || eq.improvement_advice}
+                  {(eq.how_to_improve || eq.feedback_text || eq.feedback?.improvement) && (
+                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent-dim)] mb-1">How to Improve This Specific Answer</div>
+                      <div className="text-[12.5px] leading-relaxed text-[var(--text-soft)]">
+                        {eq.how_to_improve || eq.feedback_text || eq.feedback?.improvement}
                       </div>
                     </div>
                   )}
@@ -663,11 +692,40 @@ export default function Evaluate() {
 
             <div className="flex flex-col gap-4">
               <Card>
-                <CardHeader title="Overall Summary" />
-                <div className="text-[13.5px] leading-relaxed mb-4">{evalData.overall_feedback}</div>
+                <CardHeader title="Overall Teacher Assessment" />
+                <div className="text-[13.5px] leading-relaxed mb-4 text-[var(--text)]">
+                  {evalData.overall_teacher_comment || evalData.overall_feedback}
+                </div>
                 <hr className="hairline my-3" />
                 <RowItem title="Overall Grade" right={<Badge tone="success">Grade {grade}</Badge>} />
                 <RowItem title="Percentage" right={<Badge tone="info">{percentage}%</Badge>} />
+
+                {evalData.strongest_areas?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-500 block mb-1">Strongest Areas</span>
+                    <ul className="list-disc pl-4 text-xs text-[var(--text-soft)] space-y-0.5">
+                      {evalData.strongest_areas.map((s, i) => <li key={i}>{s}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {evalData.weakest_areas?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-amber-500 block mb-1">Weakest Areas</span>
+                    <ul className="list-disc pl-4 text-xs text-[var(--text-soft)] space-y-0.5">
+                      {evalData.weakest_areas.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {evalData.priority_topics_to_revise?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent)] block mb-1">Priority Topics to Revise</span>
+                    <ul className="list-disc pl-4 text-xs text-[var(--text-soft)] space-y-0.5">
+                      {evalData.priority_topics_to_revise.map((p, i) => <li key={i}>{p}</li>)}
+                    </ul>
+                  </div>
+                )}
               </Card>
 
               <Card>

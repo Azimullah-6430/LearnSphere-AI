@@ -241,15 +241,20 @@ class EvaluationAgent:
                 student_ans = str(item.get("student_answer") or item.get("answer_summary") or "")
                 evidence_ref = str(item.get("evidence_reference") or "")
                 eval_reason = str(item.get("evaluation_reason") or item.get("question_feedback") or "")
-                feedback_str = str(item.get("feedback") or item.get("question_feedback") or "")
-                strengths = item.get("strengths") or item.get("what_was_done_correctly") or []
-                errors = item.get("errors") or []
-                missing_points = item.get("missing_points") or item.get("what_is_missing") or []
+                teacher_fb = str(item.get("teacher_feedback") or item.get("feedback") or item.get("question_feedback") or "")
+                feedback_str = teacher_fb
+                strengths = item.get("what_was_done_correctly") or item.get("strengths") or []
+                errors = item.get("what_is_incorrect") or item.get("errors") or []
+                missing_points = item.get("what_is_missing") or item.get("missing_points") or []
+                concept_mistake = str(item.get("conceptual_mistake") or "")
+                step_mistake = str(item.get("step_or_calculation_mistake") or "")
+                how_to_improve = str(item.get("how_to_improve") or item.get("improvement_advice") or "")
+                classification = str(item.get("answer_classification") or ("correct_answer" if awarded >= max_m and max_m > 0 else "partially_correct_concept" if awarded > 0 else "wrong_concept"))
                 should_have_written = str(item.get("what_student_should_have_written") or item.get("what_student_should_write") or "")
                 expected_ans = str(item.get("correct_answer_or_expected_points") or item.get("expected_answer") or "")
                 concepts = item.get("concepts_tested") or []
-                misconception = str(item.get("misconception") or "")
-                misconception_det = bool(item.get("misconception_detected", False))
+                misconception = str(item.get("misconception") or concept_mistake or "")
+                misconception_det = bool(item.get("misconception_detected", False) or (concept_mistake and len(concept_mistake) > 3))
                 conf = float(item.get("confidence") or 0.95)
                 is_unc = bool(item.get("is_uncertain", False))
             else:
@@ -259,10 +264,15 @@ class EvaluationAgent:
                 student_ans = "Question not attempted in student script."
                 evidence_ref = "Not present in script"
                 eval_reason = "This question was omitted or not attempted in the uploaded answer script."
-                feedback_str = "Question was skipped. Attempt this question for credit."
+                teacher_fb = "Question was skipped. Attempt this question for credit."
+                feedback_str = teacher_fb
                 strengths = []
                 errors = ["Question not attempted"]
                 missing_points = ["Complete response required for credit"]
+                concept_mistake = ""
+                step_mistake = ""
+                how_to_improve = "Review this syllabus topic and attempt all mandatory questions systematically."
+                classification = "unanswered_question"
                 should_have_written = "Review this concept and provide a full step-by-step response."
                 expected_ans = ""
                 concepts = []
@@ -285,14 +295,22 @@ class EvaluationAgent:
                 "percentage_of_question": pct_of_q,
                 "attempted": attempted,
                 "is_uncertain": is_unc,
+                "answer_classification": classification,
                 "student_answer": student_ans,
                 "evidence_reference": evidence_ref,
                 "evaluation_reason": eval_reason,
-                "strengths": strengths if isinstance(strengths, list) else [strengths],
-                "errors": errors if isinstance(errors, list) else [errors],
-                "missing_points": missing_points if isinstance(missing_points, list) else [missing_points],
-                "what_student_should_have_written": should_have_written,
+                "teacher_feedback": teacher_fb,
                 "feedback": feedback_str,
+                "what_was_done_correctly": strengths if isinstance(strengths, list) else [strengths],
+                "strengths": strengths if isinstance(strengths, list) else [strengths],
+                "what_is_incorrect": errors if isinstance(errors, list) else [errors],
+                "errors": errors if isinstance(errors, list) else [errors],
+                "what_is_missing": missing_points if isinstance(missing_points, list) else [missing_points],
+                "missing_points": missing_points if isinstance(missing_points, list) else [missing_points],
+                "conceptual_mistake": concept_mistake,
+                "step_or_calculation_mistake": step_mistake,
+                "what_student_should_have_written": should_have_written,
+                "how_to_improve": how_to_improve,
                 "correct_answer_or_expected_points": expected_ans,
                 "concepts_tested": concepts if isinstance(concepts, list) else [concepts],
                 "misconception_detected": misconception_det,
@@ -339,21 +357,27 @@ class EvaluationAgent:
         percentage = round((total_obtained / total_max_marks) * 100, 2) if total_max_marks > 0 else 0.0
 
         # Exam-wide qualitative feedback extraction
-        strengths_list = ai_eval.get("strengths") or []
+        overall_comment = ai_eval.get("overall_teacher_comment") or ai_eval.get("overall_feedback") or f"Evaluation finalized. Awarded {total_obtained}/{total_max_marks} ({percentage}%)."
+
+        strengths_list = ai_eval.get("strongest_areas") or ai_eval.get("strengths") or []
         if not isinstance(strengths_list, list) or not strengths_list:
             strengths_list = [s for q in all_final_questions for s in q.get("strengths", []) if s][:5]
 
-        weaknesses_list = ai_eval.get("weaknesses") or []
+        weaknesses_list = ai_eval.get("weakest_areas") or ai_eval.get("weaknesses") or []
         if not isinstance(weaknesses_list, list) or not weaknesses_list:
             weaknesses_list = [m for q in all_final_questions for m in q.get("missing_points", []) if m][:5]
 
-        major_misc = ai_eval.get("major_conceptual_errors") or []
+        major_misc = ai_eval.get("most_important_misconceptions") or ai_eval.get("major_conceptual_errors") or []
         if not isinstance(major_misc, list) or not major_misc:
             major_misc = [q["misconception"] for q in all_final_questions if q.get("misconception_detected") and q.get("misconception")]
 
-        recs = ai_eval.get("improvement_recommendations") or []
+        priority_topics = ai_eval.get("priority_topics_to_revise") or []
+        if not isinstance(priority_topics, list) or not priority_topics:
+            priority_topics = [c for q in all_final_questions if q.get("marks_lost", 0) > 0 for c in q.get("concepts_tested", []) if c][:4]
+
+        recs = ai_eval.get("practical_improvement_advice") or ai_eval.get("improvement_recommendations") or []
         if not isinstance(recs, list) or not recs:
-            recs = [q["what_student_should_have_written"] for q in all_final_questions if q.get("marks_lost", 0) > 0 and q.get("what_student_should_have_written")][:4]
+            recs = [q["how_to_improve"] for q in all_final_questions if q.get("marks_lost", 0) > 0 and q.get("how_to_improve")][:4]
 
         return {
             "obtained_marks": total_obtained,
@@ -365,10 +389,16 @@ class EvaluationAgent:
             "teacher_review_required": False,
             "questions": all_final_questions,
             "evaluations": all_final_questions,
-            "overall_feedback": ai_eval.get("overall_feedback") or f"Evaluation finalized. Awarded {total_obtained}/{total_max_marks} ({percentage}%).",
+            "overall_teacher_comment": overall_comment,
+            "overall_feedback": overall_comment,
+            "strongest_areas": strengths_list,
             "strengths": strengths_list,
+            "weakest_areas": weaknesses_list,
             "weaknesses": weaknesses_list,
+            "most_important_misconceptions": major_misc,
             "major_conceptual_errors": major_misc,
+            "priority_topics_to_revise": priority_topics,
+            "practical_improvement_advice": recs,
             "improvement_recommendations": recs,
             "summary": {
                 "total_questions": len(all_final_questions),

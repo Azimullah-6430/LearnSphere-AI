@@ -340,10 +340,37 @@ export default function SelfEvaluation() {
                   </div>
                 </div>
 
-                {evalResult.overall_feedback && evalResult.evaluation_status !== 'NEEDS_TEACHER_REVIEW' && (
-                  <div className="mt-4 p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed">
-                    <strong className="text-[var(--text)] block mb-1">Academic Summary:</strong>
-                    {evalResult.overall_feedback}
+                {(evalResult.overall_teacher_comment || evalResult.overall_feedback) && evalResult.evaluation_status !== 'NEEDS_TEACHER_REVIEW' && (
+                  <div className="mt-4 p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text)] leading-relaxed space-y-2">
+                    <strong className="text-[var(--accent)] block text-xs uppercase tracking-wider">Teacher Executive Assessment:</strong>
+                    <p>{evalResult.overall_teacher_comment || evalResult.overall_feedback}</p>
+                    
+                    {evalResult.strongest_areas?.length > 0 && (
+                      <div className="pt-2 border-t border-[var(--border)]">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-500 block mb-0.5">Strongest Areas:</span>
+                        <ul className="list-disc pl-4 space-y-0.5 text-[var(--text-soft)]">
+                          {evalResult.strongest_areas.map((s, i) => <li key={i}>{s}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {evalResult.weakest_areas?.length > 0 && (
+                      <div className="pt-2 border-t border-[var(--border)]">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-amber-500 block mb-0.5">Weakest Areas:</span>
+                        <ul className="list-disc pl-4 space-y-0.5 text-[var(--text-soft)]">
+                          {evalResult.weakest_areas.map((w, i) => <li key={i}>{w}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {evalResult.priority_topics_to_revise?.length > 0 && (
+                      <div className="pt-2 border-t border-[var(--border)]">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--accent)] block mb-0.5">Priority Topics to Revise:</span>
+                        <ul className="list-disc pl-4 space-y-0.5 text-[var(--text-soft)]">
+                          {evalResult.priority_topics_to_revise.map((p, i) => <li key={i}>{p}</li>)}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>
@@ -357,7 +384,7 @@ export default function SelfEvaluation() {
                 {(evalResult.evaluations || evalResult.questions || []).length > 0 ? (
                   (evalResult.evaluations || evalResult.questions).map((q, idx) => (
                     <Card key={q.question_id || idx} className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-[var(--border)] pb-2.5">
+                      <div className="flex items-center justify-between border-b border-[var(--border)] pb-2.5 flex-wrap gap-2">
                         <div className="flex items-center gap-2">
                           <span className="font-black text-sm text-[var(--accent)]">
                             Q{q.question_number || idx + 1}
@@ -371,12 +398,23 @@ export default function SelfEvaluation() {
                             </span>
                           )}
                         </div>
-                        <Badge tone={
-                          q.awarded_marks === (q.maximum_marks ?? q.max_marks) && (q.maximum_marks ?? q.max_marks) > 0 ? 'success'
-                          : q.awarded_marks > 0 ? 'warning' : 'error'
-                        }>
-                          {q.awarded_marks} / {q.maximum_marks ?? q.max_marks ?? '?'} Marks
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          {q.answer_classification && (
+                            <Badge tone={
+                              q.answer_classification === 'correct_answer' ? 'success' :
+                              q.answer_classification.includes('calculation_error') ? 'warning' :
+                              q.answer_classification.includes('concept') ? 'error' : 'neutral'
+                            }>
+                              {q.answer_classification.replace(/_/g, ' ').toUpperCase()}
+                            </Badge>
+                          )}
+                          <Badge tone={
+                            q.awarded_marks === (q.maximum_marks ?? q.max_marks) && (q.maximum_marks ?? q.max_marks) > 0 ? 'success'
+                            : q.awarded_marks > 0 ? 'warning' : 'error'
+                          }>
+                            {q.awarded_marks} / {q.maximum_marks ?? q.max_marks ?? '?'} Marks
+                          </Badge>
+                        </div>
                       </div>
 
                       {q.question_text && (
@@ -387,7 +425,7 @@ export default function SelfEvaluation() {
 
                       {(q.student_answer || q.answer_summary) && (
                         <div className="text-xs text-[var(--text-soft)]">
-                          <span className="font-semibold text-[var(--text-faint)] block mb-1">Your Answer:</span>
+                          <span className="font-semibold text-[var(--text-faint)] block mb-1">Your Answer Extracted:</span>
                           <p className="p-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] leading-relaxed italic">
                             {q.student_answer || q.answer_summary}
                           </p>
@@ -399,36 +437,50 @@ export default function SelfEvaluation() {
                         </div>
                       )}
 
-                      {q.evaluation_reason && (
-                        <div className="text-xs text-[var(--text-soft)] bg-[var(--surface-alt)] p-2.5 rounded-lg border border-[var(--border)]">
-                          <span className="font-semibold text-[var(--text-faint)] block mb-0.5">Evaluation Rationale:</span>
-                          {q.evaluation_reason}
+                      {(q.teacher_feedback || q.evaluation_reason) && (
+                        <div className="text-xs p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                          <span className="font-bold text-[var(--accent)] block text-[11px] uppercase tracking-wider">Teacher Mark Allocation Breakdown:</span>
+                          <p className="text-[var(--text)] leading-relaxed">{q.teacher_feedback || q.evaluation_reason}</p>
                         </div>
                       )}
 
-                      {(q.strengths?.length > 0 || q.feedback?.what_was_done_well?.length > 0) && (
+                      {(q.what_was_done_correctly?.length > 0 || q.strengths?.length > 0) && (
                         <div className="text-xs text-emerald-500 bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/20">
-                          <span className="font-bold block mb-0.5">Demonstrated Knowledge / Strengths:</span>
+                          <span className="font-bold block mb-0.5">What You Did Correctly:</span>
                           <ul className="list-disc pl-4 space-y-0.5 text-[var(--text)]">
-                            {(q.strengths || q.feedback?.what_was_done_well || []).map((s, i) => <li key={i}>{s}</li>)}
+                            {(q.what_was_done_correctly || q.strengths || []).map((s, i) => <li key={i}>{s}</li>)}
                           </ul>
                         </div>
                       )}
 
-                      {q.errors?.length > 0 && (
+                      {(q.what_is_incorrect?.length > 0 || q.errors?.length > 0) && (
                         <div className="text-xs text-red-400 bg-red-500/10 p-2.5 rounded-lg border border-red-500/20">
-                          <span className="font-bold block mb-0.5">Identified Errors:</span>
+                          <span className="font-bold block mb-0.5">What Is Incorrect:</span>
                           <ul className="list-disc pl-4 space-y-0.5">
-                            {q.errors.map((err, i) => <li key={i}>{err}</li>)}
+                            {(q.what_is_incorrect || q.errors || []).map((err, i) => <li key={i}>{err}</li>)}
                           </ul>
                         </div>
                       )}
 
-                      {(q.missing_points?.length > 0 || q.what_is_missing?.length > 0 || q.feedback?.missing_points?.length > 0) && (
+                      {q.step_or_calculation_mistake && (
+                        <div className="text-xs text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                          <span className="font-bold block mb-0.5">Step / Calculation Mistake:</span>
+                          <p>{q.step_or_calculation_mistake}</p>
+                        </div>
+                      )}
+
+                      {(q.conceptual_mistake || (q.misconception_detected && q.misconception)) && (
+                        <div className="text-xs text-red-400 bg-red-500/10 p-2.5 rounded-lg border border-red-500/20">
+                          <span className="font-bold block mb-0.5">Conceptual Flaw Identified:</span>
+                          <p>{q.conceptual_mistake || q.misconception}</p>
+                        </div>
+                      )}
+
+                      {(q.what_is_missing?.length > 0 || q.missing_points?.length > 0) && (
                         <div className="text-xs text-amber-400 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
                           <span className="font-bold block mb-0.5">Missing Key Points / Steps:</span>
                           <ul className="list-disc pl-4 space-y-0.5">
-                            {(q.missing_points || q.what_is_missing || q.feedback?.missing_points || []).map((m, i) => <li key={i}>{m}</li>)}
+                            {(q.what_is_missing || q.missing_points || []).map((m, i) => <li key={i}>{m}</li>)}
                           </ul>
                         </div>
                       )}
@@ -436,25 +488,18 @@ export default function SelfEvaluation() {
                       {(q.what_student_should_have_written || q.correct_answer_or_expected_points || q.feedback?.expected_answer) && (
                         <div className="text-xs text-[var(--text)] bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
                           <span className="font-bold text-[var(--accent)] block mb-0.5">What You Should Have Written:</span>
-                          <p className="leading-relaxed">
+                          <div className="leading-relaxed font-mono whitespace-pre-line text-[11.5px]">
                             {q.what_student_should_have_written || q.correct_answer_or_expected_points || q.feedback?.expected_answer}
-                          </p>
+                          </div>
                         </div>
                       )}
 
-                      {(q.feedback_text || q.question_feedback || q.feedback?.improvement) && (
-                        <div className="text-xs text-[var(--text-soft)]">
-                          <span className="font-semibold text-[var(--text-faint)] block mb-1">Feedback & Improvement:</span>
-                          <p className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] leading-relaxed">
-                            {q.feedback_text || q.question_feedback || q.feedback?.improvement}
+                      {(q.how_to_improve || q.feedback_text || q.feedback?.improvement) && (
+                        <div className="text-xs text-[var(--text-soft)] p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
+                          <span className="font-semibold text-[var(--accent-dim)] block mb-1">How to Improve:</span>
+                          <p className="leading-relaxed">
+                            {q.how_to_improve || q.feedback_text || q.feedback?.improvement}
                           </p>
-                        </div>
-                      )}
-
-                      {q.misconception_detected && q.misconception && (
-                        <div className="text-xs text-red-400 bg-red-500/10 p-2.5 rounded-lg border border-red-500/20">
-                          <span className="font-bold block mb-0.5">Misconception Identified:</span>
-                          {q.misconception}
                         </div>
                       )}
                     </Card>
