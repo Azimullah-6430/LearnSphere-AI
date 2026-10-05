@@ -118,7 +118,7 @@ export default function Trainer() {
 
   useEffect(() => {
     if (!subjects.includes(selectedSubject)) {
-      setSelectedSubject(subjects[0] || 'Physics')
+      setSelectedSubject(subjects[0] || '')
     }
   }, [subjects, selectedSubject])
 

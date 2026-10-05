@@ -159,11 +159,11 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
       <div className="px-[22px] py-4 border-t border-[var(--border)]">
         <div className="flex items-center gap-2.5">
           <div className="w-[34px] h-[34px] rounded-full bg-[var(--accent)] text-white font-bold text-[13px] flex items-center justify-center shrink-0">
-            {user.initials}
+            {user?.initials || 'US'}
           </div>
           <div>
-            <div className="text-[13px] font-bold">{user.name}</div>
-            <div className="text-[11.5px] text-[var(--text-faint)]">{user.role}</div>
+            <div className="text-[13px] font-bold">{user?.name || 'User'}</div>
+            <div className="text-[11.5px] text-[var(--text-faint)] capitalize">{user?.role || 'Portal'}</div>
           </div>
         </div>
       </div>
