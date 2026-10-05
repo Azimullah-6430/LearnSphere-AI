@@ -126,7 +126,7 @@ class GeminiService:
 
         last_error = ""
         models_to_try = [self.model]
-        for candidate in ("gemini-3.6-flash", "gemini-3.8-flash"):
+        for candidate in ("gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.8-flash"):
             if candidate not in models_to_try:
                 models_to_try.append(candidate)
 
@@ -160,14 +160,17 @@ class GeminiService:
                             last_error = f"HTTP {response.status_code} on {model_name}: {err_msg}"
                             logger.warning(f"[GeminiService] {model_name} returned {response.status_code}: {err_msg}")
                             if response.status_code in (429, 503):
-                                time.sleep(2 ** attempt)
+                                # Transient traffic spike or rate limit: short wait and try next candidate
+                                time.sleep(1 + attempt)
                                 continue
                             break
                     except requests.Timeout:
                         last_error = f"Request timed out on {model_name} after {self.timeout}s"
+                        logger.warning(f"[GeminiService] {model_name} timed out after {self.timeout}s")
                         time.sleep(1)
                     except Exception as exc:
                         last_error = f"Network/API error on {model_name}: {exc}"
+                        logger.warning(f"[GeminiService] {model_name} encountered error: {exc}")
                         time.sleep(1)
 
         raise RuntimeError(f"Gemini API processing failed: {last_error}")
