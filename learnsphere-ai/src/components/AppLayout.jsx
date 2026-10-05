@@ -5,6 +5,7 @@ import Sidebar from './Sidebar.jsx'
 import Topbar from './Topbar.jsx'
 import SyllabusModal from './SyllabusModal.jsx'
 import ClassManagerModal from './ClassManagerModal.jsx'
+import ErrorBoundary from './ErrorBoundary.jsx'
 import { useApp } from '../context/AppContext.jsx'
 
 const TITLES = {
@@ -87,7 +88,9 @@ export default function AppLayout() {
       <div className="min-h-screen flex flex-col bg-[var(--bg)]">
         <FocusHeader />
         <main className="flex-1 px-[18px]">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     )
@@ -106,7 +109,9 @@ export default function AppLayout() {
           onOpenClassModal={() => setClassModalOpen(true)}
         />
         <main className="px-3.5 sm:px-6 md:px-[34px] pt-5 sm:pt-[30px] pb-12 sm:pb-[60px] w-full max-w-content mx-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
       <SyllabusModal isOpen={syllabusModalOpen} onClose={() => setSyllabusModalOpen(false)} />

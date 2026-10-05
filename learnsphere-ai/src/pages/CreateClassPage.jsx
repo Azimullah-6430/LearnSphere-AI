@@ -10,6 +10,7 @@ export default function CreateClassPage() {
     teacherClasses,
     addClass,
     deleteClass,
+    activeClassId,
     setActiveClassId,
     uploadStudentRoster,
     logout,

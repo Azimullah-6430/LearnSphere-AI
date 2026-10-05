@@ -5,6 +5,7 @@ import { School, GraduationCap, Plus, Trash2, CheckCircle2, Layers, BookOpen, Bu
 
 export default function ClassManagerModal({ isOpen, onClose }) {
   const {
+    user,
     teacherClasses,
     addClass,
     deleteClass,

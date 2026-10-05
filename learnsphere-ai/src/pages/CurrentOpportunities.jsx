@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getFactCheckedFeed, currentUpdatesData, opportunitiesData } from '../data/opportunitiesData.js'
 import { useApp } from '../context/AppContext.jsx'

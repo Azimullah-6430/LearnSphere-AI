@@ -50,7 +50,7 @@ function UnauthenticatedState() {
       <p className="text-sm text-[var(--text-soft)] mb-6">
         Please log in with your credentials to access your personalized learning dashboard.
       </p>
-      <Button onClick={() => navigate('/login')} className="w-full">
+      <Button onClick={() => navigate('/')} className="w-full">
         Sign In to LearnSphere
       </Button>
     </Card>
@@ -261,7 +261,7 @@ function StudentDashboard() {
                   <div className="text-[11px] text-[var(--text-soft)]">Real scenarios</div>
                 </button>
                 <button
-                  onClick={() => navigate('/app/challenge')}
+                  onClick={() => navigate('/app/knowledge-challenge')}
                   className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group"
                 >
                   <Trophy size={18} className="text-[var(--warning)] mb-1 group-hover:scale-110 transition-transform" />
