@@ -429,7 +429,7 @@ export default function SelectClass() {
               rows={2}
               value={rosterText}
               onChange={(e) => setRosterText(e.target.value)}
-              placeholder={`12B-01, Aarav R. Sharma\n12B-02, Vignesh B.`}
+              placeholder={`ROLL-01, Student Name\nROLL-02, Student Name`}
               className="w-full p-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[12px] font-mono text-[var(--text)] outline-none"
             />
           </div>

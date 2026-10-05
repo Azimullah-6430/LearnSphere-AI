@@ -30,8 +30,7 @@ class GeminiService:
     """Centralized service for Gemini 3.6 Flash AI calls across LearnSphere AI."""
 
     def __init__(self):
-        # RULE 2: STRICTLY gemini-3.6-flash ONLY. No fallback models allowed.
-        self.model = "gemini-3.6-flash"
+        self.model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
         self.timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
         self.max_retries = 2
 
@@ -123,46 +122,52 @@ class GeminiService:
         }
 
         last_error = ""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        models_to_try = [self.model]
+        for candidate in ("gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"):
+            if candidate not in models_to_try:
+                models_to_try.append(candidate)
 
-        for key in keys:
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": key
-            }
+        for model_name in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
 
-            for attempt in range(self.max_retries):
-                try:
-                    response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-                    if response.status_code == 200:
-                        data = response.json()
-                        candidates = data.get("candidates") or []
-                        if candidates:
-                            text_parts = []
-                            for part in candidates[0].get("content", {}).get("parts", []):
-                                if isinstance(part, dict) and part.get("text"):
-                                    text_parts.append(part["text"])
-                            if text_parts:
-                                return "\n".join(text_parts)
-                    else:
-                        try:
-                            err_msg = response.json().get("error", {}).get("message", response.text[:200])
-                        except Exception:
-                            err_msg = response.text[:200]
-                        last_error = f"HTTP {response.status_code} on {self.model}: {err_msg}"
-                        logger.warning(f"[GeminiService] gemini-3.6-flash returned {response.status_code}: {err_msg}")
-                        if response.status_code in (429, 503):
-                            time.sleep(2 ** attempt)
-                            continue
-                        break
-                except requests.Timeout:
-                    last_error = f"Request timed out on {self.model} after {self.timeout}s"
-                    time.sleep(1)
-                except Exception as exc:
-                    last_error = f"Network/API error on {self.model}: {exc}"
-                    time.sleep(1)
+            for key in keys:
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": key
+                }
 
-        raise RuntimeError(f"Gemini 3.6 Flash API processing failed: {last_error}")
+                for attempt in range(self.max_retries):
+                    try:
+                        response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                        if response.status_code == 200:
+                            data = response.json()
+                            candidates = data.get("candidates") or []
+                            if candidates:
+                                text_parts = []
+                                for part in candidates[0].get("content", {}).get("parts", []):
+                                    if isinstance(part, dict) and part.get("text"):
+                                        text_parts.append(part["text"])
+                                if text_parts:
+                                    return "\n".join(text_parts)
+                        else:
+                            try:
+                                err_msg = response.json().get("error", {}).get("message", response.text[:200])
+                            except Exception:
+                                err_msg = response.text[:200]
+                            last_error = f"HTTP {response.status_code} on {model_name}: {err_msg}"
+                            logger.warning(f"[GeminiService] {model_name} returned {response.status_code}: {err_msg}")
+                            if response.status_code in (429, 503):
+                                time.sleep(2 ** attempt)
+                                continue
+                            break
+                    except requests.Timeout:
+                        last_error = f"Request timed out on {model_name} after {self.timeout}s"
+                        time.sleep(1)
+                    except Exception as exc:
+                        last_error = f"Network/API error on {model_name}: {exc}"
+                        time.sleep(1)
+
+        raise RuntimeError(f"Gemini API processing failed: {last_error}")
 
     def parse_json_response(self, raw_text: str) -> Dict[str, Any]:
         cleaned = raw_text.strip()
