@@ -1348,42 +1348,40 @@ def get_dashboard_analytics():
     mongo_db = get_mongodb()
     try:
         if mongo_db is not None:
+            user = _lookup_user_by_id(user_id)
+            user_email = user.get("email", "") if user else ""
+            
             if session_role == "student":
-                user = _lookup_user_by_id(user_id)
-                name = user.get("name", "") if user else ""
                 eval_query = {
                     "$or": [
                         {"submitted_by": user_id},
                         {"student_id": user_id},
-                        {"student_name": name},
+                        {"submitted_by": user_email},
                     ]
                 }
                 recent_evals = [mongo_serialize(d) for d in
                                 mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(10)]
                 memory_items = [mongo_serialize(d) for d in
-                                mongo_db["academic_memory"].find({"$or": [{"student_id": user_id}, {"student_name": name}]}).limit(5)]
+                                mongo_db["academic_memory"].find({"$or": [{"student_id": user_id}, {"student_id": user_email}]}).limit(5)]
                 weak_topics  = [mongo_serialize(d) for d in
-                                mongo_db["misconceptions"].find({"$or": [{"student_id": user_id}, {"student_name": name}], "resolved": {"$ne": True}}).limit(5)]
+                                mongo_db["misconceptions"].find({"$or": [{"student_id": user_id}, {"student_id": user_email}], "resolved": {"$ne": True}}).limit(5)]
             else:
                 # Teachers: show recent evaluations they submitted
                 recent_evals = [mongo_serialize(d) for d in
                                 mongo_db["evaluations"].find({"submitted_by": user_id}).sort("created_at", -1).limit(10)]
-                if not recent_evals:
-                    recent_evals = [mongo_serialize(d) for d in
-                                    mongo_db["evaluations"].find({}).sort("created_at", -1).limit(10)]
                 weak_topics  = [mongo_serialize(d) for d in
-                                mongo_db["misconceptions"].find({"resolved": {"$ne": True}}).limit(5)]
+                                mongo_db["misconceptions"].find({"teacher_id": user_id, "resolved": {"$ne": True}}).limit(5)]
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
+            user = _lookup_user_by_id(user_id)
+            user_email = user.get("email", "") if user else ""
             if session_role == "student":
-                user = _lookup_user_by_id(user_id)
-                name = user.get("name", "") if user else ""
                 cursor.execute(
-                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR student_name=?) ORDER BY created_at DESC LIMIT 10", (user_id, user_id, name)
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR submitted_by=?) ORDER BY created_at DESC LIMIT 10", (user_id, user_id, user_email)
                 )
             else:
-                cursor.execute("SELECT * FROM evaluations ORDER BY created_at DESC LIMIT 10")
+                cursor.execute("SELECT * FROM evaluations WHERE submitted_by=? ORDER BY created_at DESC LIMIT 10", (user_id,))
             recent_evals = [dict(r) for r in cursor.fetchall()]
             conn.close()
     except Exception as exc:
