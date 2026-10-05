@@ -121,10 +121,16 @@ export default function CreateClassPage() {
         }
       }
 
-      showToastMsg(`${isSchool ? 'Class' : 'Department'} "${created.name}" created and stored successfully!`)
+      setActiveClassId(created.id)
+      showToastMsg(`${isSchool ? 'Class' : 'Department'} "${created.name}" created! Entering portal...`)
       setSchoolClassName('')
       setCollegeDept('')
       setRosterText('')
+
+      // Seamlessly transition directly into the educator portal dashboard
+      setTimeout(() => {
+        navigate('/app/dashboard')
+      }, 500)
     }
   }
 
@@ -207,11 +213,27 @@ export default function CreateClassPage() {
             </p>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center min-w-[200px]">
-            <div className="text-3xl font-extrabold text-white mb-0.5">{teacherClasses.length}</div>
-            <div className="text-xs font-bold text-white/80 uppercase tracking-wider">
-              {isSchool ? 'Stored Classes' : 'Stored Departments'}
+          <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center min-w-[200px] flex flex-col items-center justify-center gap-2">
+            <div>
+              <div className="text-3xl font-extrabold text-white mb-0.5">{teacherClasses.length}</div>
+              <div className="text-xs font-bold text-white/80 uppercase tracking-wider">
+                {isSchool ? 'Stored Classes' : 'Stored Departments'}
+              </div>
             </div>
+            {teacherClasses.length > 0 && (
+              <button
+                onClick={() => {
+                  if (!activeClassId && teacherClasses[0]) {
+                    setActiveClassId(teacherClasses[0].id)
+                  }
+                  navigate('/app/dashboard')
+                }}
+                className="mt-1 px-3 py-1.5 rounded-lg bg-white text-[var(--accent)] font-extrabold text-xs hover:bg-white/90 transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Enter Portal</span>
+                <ArrowRight size={14} />
+              </button>
+            )}
           </div>
         </div>
 
