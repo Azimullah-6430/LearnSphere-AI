@@ -74,11 +74,21 @@ class GeminiService:
                 except ImportError:
                     import fitz
                 doc = fitz.open(str(p))
-                # Process ALL pages without silent truncation
+                # Process ALL pages with high-fidelity visual rendering and text extraction
                 total_pages = len(doc)
                 for page_idx in range(total_pages):
                     page = doc[page_idx]
-                    pix = page.get_pixmap(dpi=150)
+                    
+                    # Extract raw text layer if present
+                    try:
+                        raw_text = page.get_text("text")
+                        if raw_text and len(raw_text.strip()) > 10:
+                            parts.append({"text": f"--- PAGE {page_idx + 1} OF {total_pages} (EMBEDDED TEXT) ---\n{raw_text}\n"})
+                    except Exception:
+                        pass
+
+                    # High-resolution visual rendering (dpi=200) for sharp handwriting and diagram OCR
+                    pix = page.get_pixmap(dpi=200)
                     png_bytes = pix.tobytes("png")
                     b64_data = base64.b64encode(png_bytes).decode("utf-8")
                     parts.append({"inline_data": {"mime_type": "image/png", "data": b64_data}})
@@ -296,17 +306,19 @@ OFFICIAL QUESTION PAPER STRUCTURE:
 {qp_json}
 
 STRICT HUMAN TEACHER EVALUATION RULES:
-1. DYNAMIC MAPPING & COMPLETE SCRIPT SCAN:
-   - Inspect EVERY page of the uploaded answer script.
+1. DYNAMIC MAPPING & THOROUGH SCRIPT SCAN (DO NOT MISS ANY ANSWER):
+   - Inspect EVERY single page and line of the uploaded answer script with extreme care.
    - Answers may be written in ANY order (e.g. student answered Q5 first, then Q1, then Q3).
-   - Question numbers may be written in margins, underlined, or circled.
-   - Answers may span across multiple pages or continue later.
-   - Map each written answer to its corresponding question in the Question Paper structure.
-   - If student explicitly skipped or did NOT attempt a question, set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
+   - Question numbers may be written in margins, underlined, circled, abbreviated (e.g. "Ans 1", "1 a", "Q3 (i)"), or implicit.
+   - Answers may continue across page boundaries or be completed later in the script.
+   - You MUST thoroughly scan the handwritten text and diagrams to locate the student's attempt for EVERY question.
+   - DO NOT mark a question as unattempted if the student wrote an answer anywhere in the script!
+   - You MUST include an evaluation item for EVERY SINGLE QUESTION in the Question Paper structure above, using the exact 'question_id' and 'question_number'.
+   - If a question was genuinely omitted/skipped by the student, set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question", student_answer: "Not attempted in script".
 
 2. EVIDENCE-BASED ASSESSMENT (NEVER FABRICATE OR HALLUCINATE):
    - Evaluate ONLY what the student actually wrote or drew.
-   - Transcribe/summarize what the student wrote accurately under 'student_answer'.
+   - Transcribe what the student wrote accurately under 'student_answer'.
    - Cite the exact location under 'evidence_reference' (e.g. "Script Page 2, lines 1-15").
 
 3. UNACCEPTABLE GENERIC FEEDBACK BAN:

@@ -551,6 +551,38 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertTrue(q1_a.get("is_extra_choice"))
         self.assertEqual(q1_a["marks_lost"], 0.0)
 
+    def test_32_robust_question_number_format_matching(self):
+        """32. Multi-format matching: QP has '1(a)' and '1(b)', evaluated answers return 'q1_a' and '1.b'. Must match 100%."""
+        qp_struct = {
+            "subject": "Chemistry",
+            "total_marks": 10.0,
+            "questions": [
+                {"question_id": "q1_a", "question_number": "1(a)", "question_text": "Define molarity.", "maximum_marks": 5.0},
+                {"question_id": "q1_b", "question_number": "1(b)", "question_text": "Define molality.", "maximum_marks": 5.0},
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                # First answer returned with question_id only
+                {"question_id": "q1_a", "question_number": "Q.1 a", "attempted": True, "maximum_marks": 5.0, "awarded_marks": 5.0, "teacher_feedback": "Perfect definition."},
+                # Second answer returned with dot notation
+                {"question_id": "q_sub_2", "question_number": "1.b", "attempted": True, "maximum_marks": 5.0, "awarded_marks": 4.5, "teacher_feedback": "Accurate definition."}
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 10.0)
+        self.assertEqual(result["obtained_marks"], 9.5)
+        self.assertEqual(result["percentage"], 95.0)
+
+        q1_a = next(q for q in result["evaluations"] if q["question_number"] == "1(a)")
+        q1_b = next(q for q in result["evaluations"] if q["question_number"] == "1(b)")
+
+        self.assertTrue(q1_a["attempted"])
+        self.assertEqual(q1_a["awarded_marks"], 5.0)
+
+        self.assertTrue(q1_b["attempted"])
+        self.assertEqual(q1_b["awarded_marks"], 4.5)
+
 
 if __name__ == "__main__":
     unittest.main()

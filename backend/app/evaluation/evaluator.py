@@ -206,11 +206,88 @@ class EvaluationAgent:
         if not isinstance(eval_items, list):
             eval_items = []
 
-        by_qno: Dict[str, Dict[str, Any]] = {}
-        for item in eval_items:
-            qno = str(item.get("question_number") or item.get("question_id") or "").strip()
-            if qno:
-                by_qno[self._norm_qno(qno)] = item
+        # Exhaustive multi-strategy question matcher
+        used_item_indices = set()
+
+        def find_matching_eval_item(q_spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            target_id = str(q_spec.get("question_id") or "").strip()
+            target_no = str(q_spec.get("question_number") or "").strip()
+            target_norm_id = self._norm_qno(target_id)
+            target_norm_no = self._norm_qno(target_no)
+            target_text = str(q_spec.get("question_text") or "").strip().lower()
+
+            # Pass 1: Exact question_id match
+            for idx, item in enumerate(eval_items):
+                if idx in used_item_indices: continue
+                item_id = str(item.get("question_id") or "").strip()
+                if item_id and target_id and item_id.lower() == target_id.lower():
+                    used_item_indices.add(idx)
+                    return item
+
+            # Pass 2: Exact question_number match
+            for idx, item in enumerate(eval_items):
+                if idx in used_item_indices: continue
+                item_no = str(item.get("question_number") or "").strip()
+                if item_no and target_no and item_no.lower() == target_no.lower():
+                    used_item_indices.add(idx)
+                    return item
+
+            # Pass 3: Normalized question_id match
+            for idx, item in enumerate(eval_items):
+                if idx in used_item_indices: continue
+                item_id = str(item.get("question_id") or "").strip()
+                if item_id and target_norm_id and self._norm_qno(item_id) == target_norm_id:
+                    used_item_indices.add(idx)
+                    return item
+
+            # Pass 4: Normalized question_number match
+            for idx, item in enumerate(eval_items):
+                if idx in used_item_indices: continue
+                item_no = str(item.get("question_number") or "").strip()
+                if item_no and target_norm_no and self._norm_qno(item_no) == target_norm_no:
+                    used_item_indices.add(idx)
+                    return item
+
+            # Pass 5: Cross-match normalized question_number with item question_id
+            for idx, item in enumerate(eval_items):
+                if idx in used_item_indices: continue
+                item_id = str(item.get("question_id") or "").strip()
+                item_no = str(item.get("question_number") or "").strip()
+                if target_norm_no and self._norm_qno(item_id) == target_norm_no:
+                    used_item_indices.add(idx)
+                    return item
+                if target_norm_id and self._norm_qno(item_no) == target_norm_id:
+                    used_item_indices.add(idx)
+                    return item
+
+            # Pass 6: Alphanumeric core match (e.g. "q1_a" <-> "1a", "q2_b" <-> "2(b)")
+            target_clean = re.sub(r"[^0-9a-z]", "", target_no.lower())
+            if target_clean:
+                for idx, item in enumerate(eval_items):
+                    if idx in used_item_indices: continue
+                    item_id = str(item.get("question_id") or "").strip()
+                    item_no = str(item.get("question_number") or "").strip()
+                    item_cleans = {
+                        re.sub(r"[^0-9a-z]", "", item_id.lower()),
+                        re.sub(r"[^0-9a-z]", "", item_no.lower())
+                    }
+                    if target_clean in item_cleans:
+                        used_item_indices.add(idx)
+                        return item
+
+            # Pass 7: Substring keyword alignment if question text exists
+            if target_text and len(target_text) > 12:
+                target_words = {w for w in re.findall(r"\w{4,}", target_text) if w not in {"what", "explain", "describe", "define", "calculate", "prove", "following"}}
+                if target_words:
+                    for idx, item in enumerate(eval_items):
+                        if idx in used_item_indices: continue
+                        item_text = str(item.get("question_text") or item.get("student_answer") or item.get("teacher_feedback") or "").lower()
+                        item_words = set(re.findall(r"\w{4,}", item_text))
+                        if len(target_words.intersection(item_words)) >= min(2, len(target_words)):
+                            used_item_indices.add(idx)
+                            return item
+
+            return None
 
         choice_groups: Dict[str, List[Dict[str, Any]]] = {}
         processed_questions: List[Dict[str, Any]] = []
@@ -223,7 +300,7 @@ class EvaluationAgent:
         for q in qp["questions"]:
             qno = str(q.get("question_number") or "").strip()
             norm_qno = self._norm_qno(qno)
-            item = by_qno.get(norm_qno)
+            item = find_matching_eval_item(q)
 
             max_m = float(q.get("maximum_marks") or 0.0)
 
