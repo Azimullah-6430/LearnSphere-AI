@@ -212,6 +212,13 @@ def _init_mongodb_indexes(db) -> None:
 
         # misconceptions
         db["misconceptions"].create_index("student_name", background=True)
+        db["misconceptions"].create_index("evaluation_id", background=True)
+
+        # action_items
+        db["action_items"].create_index("teacher_id", background=True)
+        db["action_items"].create_index("student_id", background=True)
+        db["action_items"].create_index("evaluation_id", background=True)
+        db["action_items"].create_index([("created_at", -1)], background=True)
 
         # plagiarism
         db["plagiarism_records"].create_index("file_hash", sparse=True, background=True)
@@ -375,6 +382,38 @@ def _init_sqlite_schema() -> None:
         version INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS action_items (
+        id TEXT PRIMARY KEY,
+        teacher_id TEXT,
+        student_id TEXT,
+        evaluation_id TEXT,
+        student_name TEXT NOT NULL,
+        roll_number TEXT,
+        academic_status TEXT,
+        subject TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        question_num TEXT,
+        total_marks REAL DEFAULT 0,
+        maximum_marks REAL DEFAULT 0,
+        marks_lost REAL DEFAULT 0,
+        affected_questions TEXT,
+        marks_lost_per_question TEXT,
+        exact_question TEXT,
+        student_answer TEXT,
+        misconception TEXT,
+        evidence TEXT,
+        correct_understanding TEXT,
+        issue TEXT,
+        priority TEXT DEFAULT 'Medium',
+        severity TEXT DEFAULT 'Medium',
+        action TEXT,
+        recommended_action TEXT,
+        category TEXT DEFAULT 'general',
+        status TEXT DEFAULT 'New',
+        is_unreadable BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 

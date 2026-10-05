@@ -1190,39 +1190,34 @@ def get_action_center_items():
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            # Teacher sees action items from evaluations they submitted
+            # Teacher sees action items from evaluations they submitted or unassigned
             items_cursor = mongo_db["action_items"].find({
-                "$or": [{"teacher_id": teacher_id}, {"teacher_id": None}]
-            })
+                "$or": [{"teacher_id": teacher_id}, {"teacher_id": None}, {"teacher_id": ""}]
+            }).sort("created_at", -1)
             items = [mongo_serialize(d) for d in items_cursor]
             return jsonify({"success": True, "items": items}), 200
 
-        # SQLite: derive from evaluations where marks_lost > 20 and submitted_by = teacher_id
-        conn   = get_sqlite_db()
+        # SQLite: query action_items table
+        conn = get_sqlite_db()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM evaluations WHERE (total_marks - obtained_marks) > 20 AND submitted_by = ? ORDER BY created_at DESC",
+            """SELECT * FROM action_items 
+               WHERE teacher_id = ? OR teacher_id IS NULL OR teacher_id = '' 
+               ORDER BY created_at DESC""",
             (teacher_id,)
         )
         rows = cursor.fetchall()
-        conn.close()
         items = []
         for r in rows:
-            lost = int(r["total_marks"] - r["obtained_marks"])
-            items.append({
-                "id":              f"act_{r['id']}",
-                "student_name":    r["student_name"],
-                "roll_number":     r["roll_number"] or "N/A",
-                "academic_status": f"At Risk (Lost {lost} marks)",
-                "subject":         r["subject"],
-                "topic":           r["assessment_title"],
-                "marks_lost":      lost,
-                "issue":           r["overall_feedback"] or f"Lost {lost} marks in {r['subject']}.",
-                "priority":        "High" if lost > 30 else "Medium",
-                "action":          "Assign targeted practice worksheet.",
-                "status":          "New",
-                "created_at":      str(r["created_at"])[:10],
-            })
+            d = dict(r)
+            for json_field in ["affected_questions", "marks_lost_per_question"]:
+                if d.get(json_field) and isinstance(d[json_field], str):
+                    try:
+                        d[json_field] = json.loads(d[json_field])
+                    except Exception:
+                        pass
+            items.append(d)
+        conn.close()
         return jsonify({"success": True, "items": items}), 200
     except Exception as exc:
         logger.error("Action Center error: %s", exc)
@@ -1244,6 +1239,12 @@ def update_action_center_item(item_id: str):
                           "updated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}},
                 upsert=True,
             )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE action_items SET status = ? WHERE id = ?", (new_status, item_id))
+            conn.commit()
+            conn.close()
         return jsonify({"success": True, "id": item_id, "status": new_status}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500

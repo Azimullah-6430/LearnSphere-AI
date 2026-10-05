@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PageHead, Card, CardHeader, Badge, Button } from '../components/ui/Primitives.jsx'
+import { PageHead, Card, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 import {
@@ -18,12 +18,15 @@ import {
   ShieldAlert,
   Flame,
   CheckSquare,
-  RefreshCcw,
   MessageSquare,
   FileText,
-  UserX,
   TrendingDown,
-  Trash2
+  Trash2,
+  Sparkles,
+  ChevronRight,
+  Layers,
+  HelpCircle,
+  X
 } from 'lucide-react'
 
 export default function ActionCenter() {
@@ -39,9 +42,10 @@ export default function ActionCenter() {
   const [statusFilter, setStatusFilter] = useState('All') // 'All' | 'New' | 'In Progress' | 'Completed' | 'Follow-up Required'
   const [priorityFilter, setPriorityFilter] = useState('All')
   const [subjectFilter, setSubjectFilter] = useState('All')
+  const [categoryFilter, setCategoryFilter] = useState('All')
 
   // Modals
-  const [detailModalItem, setDetailModalItem] = useState(null)
+  const [traceModalItem, setTraceModalItem] = useState(null)
   const [interventionModalItem, setInterventionModalItem] = useState(null)
   const [interventionNote, setInterventionNote] = useState('')
   const [interventionType, setInterventionType] = useState('worksheet')
@@ -53,9 +57,7 @@ export default function ActionCenter() {
       try {
         const res = await api.getActionCenterItems()
         if (res && res.success && Array.isArray(res.items)) {
-          // Strictly filter out toppers and students with <= 20 marks lost
-          const atRiskOnly = res.items.filter(i => (i.marks_lost || 0) >= 20 || (i.academic_status && !i.academic_status.includes('On track')))
-          setItems(atRiskOnly)
+          setItems(res.items)
         } else {
           setItems([])
         }
@@ -95,34 +97,61 @@ export default function ActionCenter() {
     setInterventionNote('')
   }
 
+  const handleMasterInTrainer = (item) => {
+    navigate('/app/trainer', {
+      state: {
+        subject: item.subject,
+        concept: item.misconception || item.topic
+      }
+    })
+  }
+
   const filteredItems = items.filter((item) => {
     if (statusFilter !== 'All' && item.status !== statusFilter) return false
-    if (priorityFilter !== 'All' && item.priority !== priorityFilter) return false
+    if (priorityFilter !== 'All' && (item.priority || item.severity) !== priorityFilter) return false
     if (subjectFilter !== 'All' && item.subject !== subjectFilter) return false
+    if (categoryFilter !== 'All' && item.category !== categoryFilter) return false
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      const matchText = (item.student_name + item.subject + item.topic + item.issue + item.misconception).toLowerCase()
+      const matchText = (
+        (item.student_name || '') +
+        (item.student_id || '') +
+        (item.evaluation_id || '') +
+        (item.subject || '') +
+        (item.topic || '') +
+        (item.issue || '') +
+        (item.misconception || '') +
+        (item.student_answer || '')
+      ).toLowerCase()
       if (!matchText.includes(q)) return false
     }
 
     return true
   })
 
+  // Summary Metrics
+  const atRiskCount = items.filter(i => (i.marks_lost || 0) > 20 || i.category === 'excessive_marks_lost').length
+  const misconceptionCount = items.filter(i => i.category === 'severe_misconception' || i.category === 'repeated_concept_loss' || i.misconception).length
+  const inProgressCount = items.filter(i => i.status === 'In Progress').length
+  const completedCount = items.filter(i => i.status === 'Completed').length
+
   return (
     <>
       <PageHead
-        title="Teacher Action Center (At-Risk & Failing Students Only)"
-        subtitle="Targets exclusively students who lost > 20 marks and are at high risk of failing. Toppers and above-average students are automatically excluded."
+        title="Teacher Action Center"
+        subtitle="Identifies students requiring teacher intervention derived directly from completed evaluations, question-level marks, and identified conceptual misconceptions."
       />
 
       {/* Target Filtering Rule Banner */}
-      <div className="mb-6 p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-[13px] text-[var(--text)] flex items-start gap-3">
+      <div className="mb-6 p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-[13px] text-[var(--text)] flex items-start gap-3 shadow-sm">
         <TrendingDown size={22} className="text-[var(--error)] shrink-0 mt-0.5" />
         <div>
-          <div className="font-extrabold text-[var(--error)] mb-0.5">Strict Targeting Filter: Marks Lost &gt; 20 & At-Risk Status</div>
-          <div className="text-[12.5px] text-[var(--text-soft)]">
-            Action Center automatically excludes toppers (Priya Sharma 91%, Sneha Iyer 88%, Arun Kumar 85%). Only students who <strong>lost more than 20 marks</strong> and have a <strong>high chance of failing terminal exams</strong> are gathered below for teacher intervention.
+          <div className="font-extrabold text-[var(--error)] text-[14px] mb-0.5">
+            Evaluation-Driven Intervention Pipeline
+          </div>
+          <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">
+            Consumes <strong>real question-level evaluation records</strong>. Flags students who lost &gt;20 marks in an assessment (calculated directly as <code>maximum marks &minus; marks obtained</code>), repeatedly miss questions on the same concept, have severe conceptual misconceptions, or submit incomplete multi-question scripts.
           </div>
         </div>
       </div>
@@ -141,35 +170,35 @@ export default function ActionCenter() {
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Card className="p-4 border-l-4 border-l-[var(--error)]">
-          <div className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-            At-Risk Students (&gt;20 Marks Lost)
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            &gt;20 Marks Lost Deficit
           </div>
           <div className="text-[26px] font-extrabold text-[var(--error)]">
-            {items.length}
+            {atRiskCount}
           </div>
           <div className="text-[11.5px] text-[var(--error)] font-semibold mt-1">
-            Requires immediate teacher intervention
-          </div>
-        </Card>
-
-        <Card className="p-4 border-l-4 border-l-[var(--warning)]">
-          <div className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-            Excluded Toppers
-          </div>
-          <div className="text-[26px] font-extrabold text-[var(--success)]">
-            Filtered Out
-          </div>
-          <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
-            Above-average students omitted
+            Max marks &minus; Obtained &gt; 20
           </div>
         </Card>
 
         <Card className="p-4 border-l-4 border-l-[var(--gold)]">
-          <div className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-            Interventions Active
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            Conceptual Misconceptions
           </div>
           <div className="text-[26px] font-extrabold text-[var(--gold)]">
-            {items.filter(i => i.status === 'In Progress').length}
+            {misconceptionCount}
+          </div>
+          <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+            Linked to Misconception Map
+          </div>
+        </Card>
+
+        <Card className="p-4 border-l-4 border-l-[var(--accent)]">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            Active Interventions
+          </div>
+          <div className="text-[26px] font-extrabold text-[var(--accent)]">
+            {inProgressCount}
           </div>
           <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
             In Progress status
@@ -177,11 +206,11 @@ export default function ActionCenter() {
         </Card>
 
         <Card className="p-4 border-l-4 border-l-[var(--success)]">
-          <div className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-            Resolved At-Risk Gaps
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            Resolved Deficits
           </div>
           <div className="text-[26px] font-extrabold text-[var(--success)]">
-            {items.filter(i => i.status === 'Completed').length}
+            {completedCount}
           </div>
           <div className="text-[11.5px] text-[var(--success)] font-semibold mt-1">
             Completed interventions
@@ -190,7 +219,7 @@ export default function ActionCenter() {
       </div>
 
       {/* Search & Filter Toolbar */}
-      <div className="space-y-3 mb-6 p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+      <div className="space-y-3 mb-6 p-3.5 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Status Tabs */}
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -223,13 +252,13 @@ export default function ActionCenter() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search student, topic, error..."
+              placeholder="Search student, evaluation, question, concept..."
               className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border-strong)] text-[12.5px] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
         </div>
 
-        {/* Priority & Subject Selectors */}
+        {/* Priority, Subject & Category Selectors */}
         <div className="flex items-center gap-4 pt-2 border-t border-[var(--border)] text-[12px] flex-wrap">
           <div className="flex items-center gap-2">
             <Filter size={13} className="text-[var(--accent)]" />
@@ -240,6 +269,7 @@ export default function ActionCenter() {
               className="px-2 py-1 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] font-semibold"
             >
               <option value="All">All Priorities</option>
+              <option value="Critical">Critical</option>
               <option value="High">High Priority</option>
               <option value="Medium">Medium Priority</option>
             </select>
@@ -257,6 +287,24 @@ export default function ActionCenter() {
               <option value="Mathematics">Mathematics</option>
               <option value="Physics">Physics</option>
               <option value="Chemistry">Chemistry</option>
+              <option value="Computer Science">Computer Science</option>
+              <option value="General">General</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Layers size={13} className="text-[var(--accent)]" />
+            <span className="font-bold text-[var(--text-faint)]">Deficit Type:</span>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] font-semibold"
+            >
+              <option value="All">All Deficit Types</option>
+              <option value="excessive_marks_lost">&gt;20 Marks Lost</option>
+              <option value="severe_misconception">Severe Misconception</option>
+              <option value="repeated_concept_loss">Repeated Concept Loss</option>
+              <option value="incomplete_answers">Incomplete Answers</option>
             </select>
           </div>
         </div>
@@ -264,43 +312,76 @@ export default function ActionCenter() {
 
       {/* Action Items List */}
       <div className="space-y-4">
-        {filteredItems.length === 0 ? (
+        {loading ? (
           <Card className="text-center py-12">
+            <div className="animate-spin text-[var(--accent)] mx-auto mb-2 text-xl">⏳</div>
+            <div className="text-sm font-semibold text-[var(--text-soft)]">Loading evaluation action items...</div>
+          </Card>
+        ) : filteredItems.length === 0 ? (
+          <Card className="text-center py-12 border-dashed border-2">
             <CheckSquare size={40} className="mx-auto text-[var(--text-faint)] mb-3" />
             <div className="font-bold text-[15px]">No action items match your current filter criteria.</div>
-            <p className="text-xs text-[var(--text-soft)] mt-1 mb-4">Try clearing your search query or setting status filter to "All Items".</p>
-            <Button onClick={() => { setSearchQuery(''); setStatusFilter('All'); setPriorityFilter('All'); setSubjectFilter('All'); }}>Reset Filters</Button>
+            <p className="text-xs text-[var(--text-soft)] mt-1 mb-4">When evaluation data shows &gt;20 marks lost or genuine conceptual misunderstandings, they will appear here.</p>
+            <Button onClick={() => { setSearchQuery(''); setStatusFilter('All'); setPriorityFilter('All'); setSubjectFilter('All'); setCategoryFilter('All'); }}>Reset Filters</Button>
           </Card>
         ) : (
-          filteredItems.map((item) => (
-            <Card key={item.id} className="relative transition-all hover:border-[var(--accent-dim)] shadow-sm border-l-4 border-l-[var(--error)]">
-              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                <div className="flex-1 space-y-2.5">
-                  {/* Header */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="w-8 h-8 rounded-full bg-[var(--error)] text-white text-[12px] font-extrabold flex items-center justify-center shrink-0">
-                      {item.student_name.split(' ').map(n=>n[0]).join('')}
+          filteredItems.map((item) => {
+            const isCritical = item.priority === 'Critical' || item.severity === 'Critical'
+            const isHigh = item.priority === 'High' || item.severity === 'High'
+            const marksLost = item.marks_lost !== undefined ? item.marks_lost : ((item.maximum_marks || 0) - (item.total_marks || 0))
+            const affectedQs = Array.isArray(item.affected_questions) ? item.affected_questions : (item.affected_questions ? [item.affected_questions] : [])
+            const marksPerQ = item.marks_lost_per_question && typeof item.marks_lost_per_question === 'object' ? item.marks_lost_per_question : {}
+            const studentId = item.student_id || item.roll_number || 'N/A'
+            const evalId = item.evaluation_id || item.eval_id || 'N/A'
+
+            return (
+              <Card
+                key={item.id}
+                className={`relative transition-all hover:border-[var(--accent-dim)] shadow-md border-l-4 ${
+                  item.status === 'Completed'
+                    ? 'border-l-gray-400 opacity-80'
+                    : isCritical
+                    ? 'border-l-[var(--error)] bg-[var(--surface)]'
+                    : isHigh
+                    ? 'border-l-[var(--gold)] bg-[var(--surface)]'
+                    : 'border-l-[var(--accent)] bg-[var(--surface)]'
+                }`}
+              >
+                <div className="space-y-3.5">
+                  {/* Header: Student Name, ID, Evaluation ID, Subject, Status */}
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 border-b border-[var(--border)] pb-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <div className="w-9 h-9 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-[12.5px] font-extrabold flex items-center justify-center shrink-0">
+                        {item.student_name ? item.student_name.split(' ').map(n => n[0]).join('') : 'S'}
+                      </div>
+
+                      <div>
+                        <div className="text-[16px] font-extrabold text-[var(--text)] flex items-center gap-2 flex-wrap">
+                          <span>{item.student_name}</span>
+                          <span className="text-[12px] font-bold text-[var(--text-faint)]">
+                            [ID: {studentId}]
+                          </span>
+                          <span className="text-[13px] font-bold text-[var(--accent)]">
+                            — {item.subject}
+                          </span>
+                          <Badge tone={isCritical ? 'error' : isHigh ? 'warning' : 'accent'}>
+                            {item.academic_status || (marksLost > 20 ? `At Risk (Lost ${marksLost}m)` : 'Intervention Flag')}
+                          </Badge>
+                        </div>
+                        <div className="text-[11.5px] text-[var(--text-soft)] font-semibold mt-0.5">
+                          Evaluation ID: <span className="font-mono text-[var(--text)]">{evalId}</span> &bull; Assessment: <strong>{item.topic || `${item.subject} Examination`}</strong>
+                        </div>
+                      </div>
                     </div>
 
-                    <span className="text-[16px] font-extrabold text-[var(--text)]">
-                      {item.student_name}
-                    </span>
-                    <span className="text-[12px] font-bold text-[var(--text-faint)]">
-                      ({item.roll_number})
-                    </span>
-                    <span className="text-[13px] font-bold text-[var(--accent)]">
-                      — {item.subject}
-                    </span>
-
-                    <Badge tone="error">
-                      ⚠️ {item.academic_status || 'At Risk'}
-                    </Badge>
-
                     {/* Status Dropdown Picker */}
-                    <div className="ml-auto flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold uppercase text-[var(--text-faint)]">Status:</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge tone={isCritical ? 'error' : isHigh ? 'warning' : 'accent'}>
+                        {item.priority || item.severity || 'Medium'} Priority
+                      </Badge>
+
                       <select
-                        value={item.status}
+                        value={item.status || 'New'}
                         onChange={(e) => handleStatusChange(item.id, e.target.value)}
                         className={`px-2.5 py-1 rounded-lg text-[12px] font-extrabold border transition-colors cursor-pointer ${
                           item.status === 'Completed'
@@ -320,165 +401,247 @@ export default function ActionCenter() {
                     </div>
                   </div>
 
-                  {/* Metadata Bar */}
-                  <div className="flex items-center gap-4 text-[12.5px] font-semibold text-[var(--text-soft)] flex-wrap bg-[var(--surface-alt)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
-                    <span><strong>Topic:</strong> {item.topic}</span>
-                    <span>•</span>
-                    <span className="text-[var(--error)]"><strong>Wrong in:</strong> {item.question_num}</span>
-                    <span>•</span>
-                    <span className="text-[var(--error)] font-extrabold bg-[var(--error-soft)] px-2 py-0.5 rounded-md border border-[var(--error)]">
-                      <strong>Marks Lost: {item.marks_lost} Marks</strong> (&gt;20 Rule)
-                    </span>
-                    <span>•</span>
-                    <span className="text-[var(--text-faint)]"><strong>Prev Failure:</strong> {item.prev_occurrence}</span>
+                  {/* Quantitative Marks Breakdown Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[12.5px] bg-[var(--surface-alt)] p-2.5 rounded-xl border border-[var(--border)]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[var(--text-faint)] font-bold">Obtained / Max:</span>
+                      <strong className="text-[var(--text)]">{item.total_marks || 0} / {item.maximum_marks || 0} marks</strong>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[var(--error)] font-bold">Total Marks Lost:</span>
+                      <strong className="text-[var(--error)] bg-[var(--error-soft)] px-2 py-0.5 rounded-md border border-[var(--error)]">
+                        &minus;{marksLost} Marks {marksLost > 20 ? '(&gt;20 Rule)' : ''}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[var(--text-faint)] font-bold">Affected Questions:</span>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {affectedQs.length > 0 ? (
+                          affectedQs.slice(0, 4).map((q, idx) => (
+                            <span key={idx} className="bg-[var(--surface)] text-[var(--text)] px-1.5 py-0.5 rounded text-[11px] font-mono border border-[var(--border)]">
+                              {q} {marksPerQ[q] ? `(-${marksPerQ[q]}m)` : ''}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[var(--text-soft)]">{item.question_num || 'Overall'}</span>
+                        )}
+                        {affectedQs.length > 4 && (
+                          <span className="text-[11px] text-[var(--text-faint)] font-bold">+{affectedQs.length - 4} more</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Specific Error & Misconception */}
-                  <div className="space-y-1 text-[13px]">
-                    <div>
-                      <strong className="text-[var(--text)]">Exact Issue:</strong>{' '}
-                      <span className="text-[var(--text-soft)]">{item.issue}</span>
-                    </div>
-                    <div className="text-[12.5px] text-[var(--gold)] font-medium flex items-center gap-1.5 pt-0.5">
-                      <AlertTriangle size={14} className="shrink-0" />
-                      <span><strong>Detected Misconception:</strong> {item.misconception}</span>
-                    </div>
+                  {/* Student Answer & Misconception Diagnosis */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12.5px]">
+                    {item.student_answer && (
+                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                          Student's Actual Script Answer:
+                        </span>
+                        <p className="font-mono text-[11.5px] text-[var(--text)] italic bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)] line-clamp-2">
+                          &ldquo;{item.student_answer}&rdquo;
+                        </p>
+                      </div>
+                    )}
+
+                    {item.misconception ? (
+                      <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] space-y-1">
+                        <span className="font-extrabold text-[var(--gold)] text-[11px] uppercase tracking-wider flex items-center gap-1">
+                          <AlertTriangle size={13} />
+                          <span>Diagnosed Misconception:</span>
+                        </span>
+                        <p className="font-semibold text-[var(--text)] text-[12px] leading-snug line-clamp-2">
+                          {item.misconception}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                          Evaluation Diagnosis:
+                        </span>
+                        <p className="text-[12px] text-[var(--text)] font-semibold line-clamp-2">
+                          {item.issue || 'Identified performance gap from completed evaluation.'}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Recommended Action */}
-                  <div className="p-3 rounded-lg bg-[var(--accent-soft)] border border-[var(--accent)] text-[13px] font-medium text-[var(--text)] flex items-start gap-2">
+                  {/* Recommended Teacher Action */}
+                  <div className="p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
                     <Zap size={16} className="text-[var(--accent)] shrink-0 mt-0.5" />
                     <div>
-                      <strong>Recommended Remedial Action:</strong> {item.action}
+                      <strong className="text-[var(--accent)]">Recommended Teacher Action:</strong>{' '}
+                      <span>{item.recommended_action || item.action || 'Assign targeted remediation worksheet and schedule review.'}</span>
+                    </div>
+                  </div>
+
+                  {/* Traceability & Action Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[var(--border)]">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleMasterInTrainer(item)}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[12px] font-extrabold bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white hover:shadow-md transition-all"
+                      >
+                        <Sparkles size={14} />
+                        <span>Launch AI Trainer Practice</span>
+                      </button>
+
+                      <button
+                        onClick={() => setTraceModalItem(item)}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
+                      >
+                        <Eye size={14} />
+                        <span>Trace Evaluation Evidence</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setInterventionModalItem(item)
+                          setInterventionNote(`Assigned remedial revision for ${item.subject}: ${item.topic || item.misconception || 'Key concepts'}.`)
+                        }}
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-[12px] font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] transition-colors shadow-sm"
+                      >
+                        <Send size={14} />
+                        <span>Create Intervention</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Delete action item for ${item.student_name} permanently?`)) {
+                            setItems(prev => prev.filter(i => i.id !== item.id))
+                            showToast(`Action item deleted.`)
+                          }
+                        }}
+                        className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                        title="Delete Action Item"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Footer Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-3 mt-3 border-t border-[var(--border)]">
-                <button
-                  onClick={() => {
-                    if (window.confirm(`Delete action item for ${item.student_name} permanently?`)) {
-                      setItems(prev => prev.filter(i => i.id !== item.id))
-                      showToast(`Action item for ${item.student_name} deleted.`)
-                    }
-                  }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all"
-                  title="Delete Action Item"
-                >
-                  <Trash2 size={13} />
-                  <span>Delete</span>
-                </button>
-
-                <button
-                  onClick={() => setDetailModalItem(item)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-bold border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
-                >
-                  <Eye size={14} />
-                  <span>View Details</span>
-                </button>
-
-                {(item.is_unreadable || item.academic_status?.includes('Unreadable')) && (
-                  <button
-                    onClick={() => navigate('/app/history')}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--gold)] text-white hover:bg-[var(--gold-soft)] hover:text-[var(--gold)] transition-colors shadow-sm"
-                  >
-                    <span>✏️ Allot Marks Now</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => {
-                    setInterventionModalItem(item)
-                    setInterventionNote(`Assigned remedial revision for ${item.topic} (${item.question_num}). Target: restore passing grade.`)
-                  }}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] transition-colors shadow-sm"
-                >
-                  <Send size={14} />
-                  <span>Create Intervention</span>
-                </button>
-              </div>
-            </Card>
-          ))
+              </Card>
+            )
+          })
         )}
       </div>
 
-      {/* MODAL 1: VIEW DETAILS MODAL */}
-      {detailModalItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <Card className="max-w-[620px] w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+      {/* MODAL 1: FULL TRACEABILITY MODAL (Action Center -> Student -> Evaluation -> Question -> Student Answer -> Feedback -> Misconception) */}
+      {traceModalItem && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div>
-                <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
-                  <span>{detailModalItem.student_name}</span>
-                  <span className="text-[13px] text-[var(--text-faint)]">({detailModalItem.roll_number})</span>
-                  <Badge tone="error">{detailModalItem.academic_status}</Badge>
-                </div>
-                <div className="text-[12.5px] text-[var(--text-soft)]">
-                  Subject: <strong>{detailModalItem.subject} — {detailModalItem.topic}</strong> (Wrong in {detailModalItem.question_num})
-                </div>
+                <h3 className="text-base font-extrabold text-[var(--text)] flex items-center gap-2">
+                  <span>Audit Trail & Evidence Trace</span>
+                  <Badge tone="accent">Action Center Trace</Badge>
+                </h3>
+                <p className="text-xs text-[var(--text-soft)]">
+                  Student: <strong>{traceModalItem.student_name}</strong> (ID: {traceModalItem.student_id || traceModalItem.roll_number}) &bull; {traceModalItem.subject}
+                </p>
               </div>
-              <button
-                onClick={() => setDetailModalItem(null)}
-                className="w-8 h-8 rounded-lg bg-[var(--surface-alt)] font-bold text-lg flex items-center justify-center hover:bg-[var(--border)] transition-colors"
-              >
-                ✕
+              <button onClick={() => setTraceModalItem(null)} className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]">
+                <X size={18} />
               </button>
             </div>
 
-            {/* Detailed Question Snippet */}
-            {detailModalItem.details && (
-              <div className="space-y-3 text-[13px]">
-                <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
-                  <div className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider mb-1">
-                    Evaluation Question Snippet
-                  </div>
-                  <div className="font-semibold text-[var(--text)]">{detailModalItem.details.question_text}</div>
-                </div>
+            {/* Trace Step Indicator */}
+            <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] flex items-center justify-between text-[11px] font-bold text-[var(--text-soft)] overflow-x-auto gap-2">
+              <span className="text-[var(--accent)]">Action Center</span>
+              <ChevronRight size={14} />
+              <span>Student</span>
+              <ChevronRight size={14} />
+              <span>Evaluation</span>
+              <ChevronRight size={14} />
+              <span>Question</span>
+              <ChevronRight size={14} />
+              <span>Answer</span>
+              <ChevronRight size={14} />
+              <span className="text-[var(--gold)]">Misconception</span>
+            </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="p-3 rounded-lg bg-[var(--error-soft)] border border-[var(--error)]">
-                    <div className="font-bold text-[var(--error)] text-[11px] uppercase tracking-wider mb-1">
-                      Student's Submitted Answer
-                    </div>
-                    <div className="font-mono text-[12px] text-[var(--text)]">{detailModalItem.details.student_answer}</div>
-                  </div>
+            {/* Evaluation Context */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+                <span className="font-bold text-[var(--text-faint)] block mb-0.5">Evaluation ID:</span>
+                <span className="font-mono text-[var(--text)] font-semibold">{traceModalItem.evaluation_id || traceModalItem.eval_id || 'N/A'}</span>
+              </div>
+              <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+                <span className="font-bold text-[var(--text-faint)] block mb-0.5">Score Impact:</span>
+                <span className="text-[var(--error)] font-bold">
+                  {traceModalItem.total_marks || 0} / {traceModalItem.maximum_marks || 0} marks (&minus;{traceModalItem.marks_lost} marks lost)
+                </span>
+              </div>
+            </div>
 
-                  <div className="p-3 rounded-lg bg-[var(--success-soft)] border border-[var(--success)]">
-                    <div className="font-bold text-[var(--success)] text-[11px] uppercase tracking-wider mb-1">
-                      Correct Academic Solution
-                    </div>
-                    <div className="font-mono text-[12px] text-[var(--text)]">{detailModalItem.details.correct_answer}</div>
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-[var(--gold-soft)] border border-[var(--gold)]">
-                  <div className="font-bold text-[var(--gold)] text-[11px] uppercase tracking-wider mb-1">
-                    AI Examiner Diagnostic Notes
-                  </div>
-                  <div className="text-[12.5px] text-[var(--text)] font-medium">{detailModalItem.details.grader_notes}</div>
-                </div>
+            {/* Official Question */}
+            {traceModalItem.exact_question && (
+              <div className="p-3.5 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
+                <span className="font-bold text-[var(--accent)] uppercase tracking-wider block text-[11px]">
+                  Official Evaluated Question ({traceModalItem.question_num || 'Assessment Scope'}):
+                </span>
+                <p className="text-[var(--text)] font-semibold leading-relaxed">{traceModalItem.exact_question}</p>
               </div>
             )}
 
-            {/* Diagnostic Summary */}
-            <div className="space-y-2 text-[12.5px] bg-[var(--surface-alt)] p-3 rounded-xl border border-[var(--border)]">
-              <div><strong>Root Cause Misconception:</strong> {detailModalItem.misconception}</div>
-              <div><strong>Total Marks Lost in Assessment:</strong> <span className="text-[var(--error)] font-bold">{detailModalItem.marks_lost} marks</span></div>
-              <div><strong>Previous Failure:</strong> {detailModalItem.prev_occurrence}</div>
-              <div><strong>Current Action Status:</strong> <Badge tone="accent">{detailModalItem.status}</Badge></div>
+            {/* Student's Actual Answer */}
+            <div className="p-3.5 bg-[var(--error-soft)] rounded-xl border border-[var(--error)] text-xs space-y-1">
+              <span className="font-bold text-[var(--error)] uppercase tracking-wider block text-[11px]">
+                Student's Actual Answer on Script:
+              </span>
+              <p className="text-[var(--text)] font-mono leading-relaxed italic bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
+                {traceModalItem.student_answer || 'Extracted written answer from uploaded answer script.'}
+              </p>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border)]">
-              <Button variant="secondary" onClick={() => setDetailModalItem(null)}>Close</Button>
-              <Button onClick={() => {
-                const item = detailModalItem
-                setDetailModalItem(null)
-                setInterventionModalItem(item)
-              }}>Create Intervention</Button>
+            {/* Teacher Feedback & Misconception */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 bg-[var(--gold-soft)] rounded-xl border border-[var(--gold)] space-y-1">
+                <span className="font-bold text-[var(--gold)] uppercase tracking-wider block text-[11px]">
+                  Conceptual Misconception:
+                </span>
+                <p className="text-[var(--text)] font-semibold leading-snug">
+                  {traceModalItem.misconception || 'Deficit identified from evaluation mark breakdown.'}
+                </p>
+              </div>
+
+              <div className="p-3 bg-[var(--success-soft)] rounded-xl border border-[var(--success)] space-y-1">
+                <span className="font-bold text-[var(--success)] uppercase tracking-wider block text-[11px]">
+                  Expected Academic Model:
+                </span>
+                <p className="text-[var(--text)] leading-snug">
+                  {traceModalItem.correct_understanding || 'Comprehensive standard curriculum solution.'}
+                </p>
+              </div>
             </div>
-          </Card>
+
+            {/* Teacher Diagnostic Issue */}
+            <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
+              <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block text-[11px]">
+                Diagnostic Examiner Note:
+              </span>
+              <p className="text-[var(--text)] font-medium leading-relaxed">
+                {traceModalItem.issue || traceModalItem.evidence || 'Complete question-level diagnostic available in evaluation history.'}
+              </p>
+            </div>
+
+            {/* Modal Controls */}
+            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+              <Button variant="secondary" onClick={() => setTraceModalItem(null)}>Close Trace</Button>
+              <Button onClick={() => {
+                setTraceModalItem(null)
+                navigate('/app/history')
+              }}>
+                View Full Evaluation History
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -490,10 +653,10 @@ export default function ActionCenter() {
               <div>
                 <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
                   <Zap size={18} className="text-[var(--accent)]" />
-                  <span>Create Remedial Intervention</span>
+                  <span>Dispatch Remedial Intervention</span>
                 </div>
                 <div className="text-[12.5px] text-[var(--text-soft)]">
-                  Target Student: <strong>{interventionModalItem.student_name}</strong> ({interventionModalItem.roll_number}) — {interventionModalItem.subject}
+                  Student: <strong>{interventionModalItem.student_name}</strong> &bull; {interventionModalItem.subject}
                 </div>
               </div>
               <button
@@ -507,14 +670,14 @@ export default function ActionCenter() {
             <div className="space-y-4 text-[13px]">
               <div>
                 <label className="block font-bold text-[var(--text-soft)] mb-1.5 uppercase text-[11px] tracking-wider">
-                  Select Intervention Type:
+                  Select Intervention Action:
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'worksheet', label: 'Remedial Practice Sheet', icon: FileText, desc: 'Assigns targeted revision set' },
-                    { id: '1on1', label: '1-on-1 Remedial Meeting', icon: User, desc: 'Schedules 1-on-1 coaching' },
-                    { id: 'parent_notify', label: 'Notify Parent & Student', icon: MessageSquare, desc: 'Alerts Parent Agent of failure risk' },
-                    { id: 'class_review', label: 'Classroom Tutorial', icon: BookOpen, desc: 'Flags concept in next lecture' }
+                    { id: 'worksheet', label: 'Remedial Practice Sheet', icon: FileText, desc: 'Assign targeted revision set' },
+                    { id: '1on1', label: '1-on-1 Remedial Meeting', icon: User, desc: 'Schedule 1-on-1 coaching' },
+                    { id: 'parent_notify', label: 'Notify Parent & Student', icon: MessageSquare, desc: 'Alert parent agent of risk' },
+                    { id: 'class_review', label: 'Classroom Tutorial', icon: BookOpen, desc: 'Flag concept in next class' }
                   ].map(({ id, label, icon: Icon, desc }) => (
                     <button
                       key={id}
@@ -550,7 +713,7 @@ export default function ActionCenter() {
 
               <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] text-[var(--text-soft)] flex items-center gap-2">
                 <CheckCircle2 size={16} className="text-[var(--success)] shrink-0" />
-                <span>Sending this intervention automatically shifts status to <strong>"In Progress"</strong>.</span>
+                <span>Dispatching this intervention automatically shifts status to <strong>"In Progress"</strong>.</span>
               </div>
             </div>
 
