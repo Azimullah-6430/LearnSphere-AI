@@ -941,28 +941,35 @@ export function getDynamicSubjects(profile, syllabusData) {
 
   // 3. If college student with semester and domain credentials
   if (profile?.level === 'college') {
-    const sem = parseInt(profile?.semester || 5)
-    const domain = profile?.domain || profile?.stream || "Computer Science & AI"
+    const sem = profile?.semester ? parseInt(profile.semester) : null
+    const domain = profile?.domain || profile?.stream || profile?.department
     
-    // Find matching domain from COLLEGE_SEMESTER_DATA
-    const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
-      k.toLowerCase() === domain.toLowerCase() || 
-      k.toLowerCase().includes(domain.toLowerCase()) || 
-      domain.toLowerCase().includes(k.toLowerCase())
-    ) || "Computer Science & AI"
-    
-    const domainData = COLLEGE_SEMESTER_DATA[domainKey]
-    if (domainData) {
-      const semSubjects = domainData[sem] || domainData[5] || domainData[3] || domainData[1]
-      if (semSubjects) {
-        return Object.keys(semSubjects)
+    if (domain && sem) {
+      const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
+        k.toLowerCase() === domain.toLowerCase() || 
+        k.toLowerCase().includes(domain.toLowerCase()) || 
+        domain.toLowerCase().includes(k.toLowerCase())
+      )
+      if (domainKey && COLLEGE_SEMESTER_DATA[domainKey]) {
+        const semSubjects = COLLEGE_SEMESTER_DATA[domainKey][sem]
+        if (semSubjects) {
+          return Object.keys(semSubjects)
+        }
       }
     }
   }
 
-  // 4. If school student with stream credentials
-  if (profile?.level === 'school' && profile?.stream && STREAMS[profile.stream]) {
-    return STREAMS[profile.stream]
+  // 4. If school student with stream credentials or board + grade
+  if (profile?.level === 'school') {
+    if (profile?.stream && STREAMS[profile.stream]) {
+      return STREAMS[profile.stream]
+    }
+    const board = profile?.board
+    const classLevel = profile?.grade_level || profile?.classLevel || profile?.class
+    if (board && classLevel) {
+      const syl = getSyllabus(board, classLevel)
+      if (syl) return Object.keys(syl)
+    }
   }
 
   // 5. If no syllabus uploaded and no profile credentials set, return empty array
@@ -970,6 +977,8 @@ export function getDynamicSubjects(profile, syllabusData) {
 }
 
 export function getDynamicChapters(subject, profile, syllabusData) {
+  if (!subject) return []
+
   // Check if syllabusData has custom extracted chapters for this subject
   if (syllabusData && syllabusData.chapters && syllabusData.chapters[subject]) {
     return syllabusData.chapters[subject]
@@ -980,23 +989,33 @@ export function getDynamicChapters(subject, profile, syllabusData) {
     return SCHOOL_LANGUAGES_DATA[subject]
   }
 
-  // If college student
+  // If college student with explicit domain & sem
   if (profile?.level === 'college') {
-    const sem = parseInt(profile?.semester || 5)
-    const domain = profile?.domain || "Computer Science & AI"
-    const domainData = COLLEGE_SEMESTER_DATA[domain] || COLLEGE_SEMESTER_DATA["Computer Science & AI"]
-    const semSubjects = domainData[sem] || domainData[5] || domainData[3] || domainData[1]
-    if (semSubjects && semSubjects[subject]) {
-      return semSubjects[subject]
+    const sem = profile?.semester ? parseInt(profile.semester) : null
+    const domain = profile?.domain || profile?.stream || profile?.department
+    if (domain && sem) {
+      const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
+        k.toLowerCase() === domain.toLowerCase() || 
+        k.toLowerCase().includes(domain.toLowerCase()) || 
+        domain.toLowerCase().includes(k.toLowerCase())
+      )
+      if (domainKey && COLLEGE_SEMESTER_DATA[domainKey]) {
+        const semSubjects = COLLEGE_SEMESTER_DATA[domainKey][sem]
+        if (semSubjects && semSubjects[subject]) {
+          return semSubjects[subject]
+        }
+      }
     }
   }
 
-  // School board chapters
-  const board = profile?.board || 'CBSE'
-  const classLvl = profile?.classLevel || 12
-  const syllabus = getSyllabus(board, classLvl)
-  if (syllabus && syllabus[subject]) {
-    return syllabus[subject]
+  // School board chapters (only if board and class are explicitly configured)
+  const board = profile?.board
+  const classLvl = profile?.grade_level || profile?.classLevel || profile?.class
+  if (board && classLvl) {
+    const syllabus = getSyllabus(board, classLvl)
+    if (syllabus && syllabus[subject]) {
+      return syllabus[subject]
+    }
   }
 
   // Generic fallback chapters if subject custom

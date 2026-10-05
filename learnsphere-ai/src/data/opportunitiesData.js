@@ -558,19 +558,19 @@ export function getFactCheckedFeed(userProfile = null, overrideLocation = null) 
   // Hard separation: if role is explicitly school_student or level is school, level MUST be 'school'
   const level = (role.includes('school') || userProfile?.level === 'school') ? 'school' : 'college'
   
-  const userCity = (overrideLocation?.city || userProfile?.city || 'Chennai').trim()
-  const userState = (overrideLocation?.state || userProfile?.state || 'Tamil Nadu').trim()
-  const userCountry = (overrideLocation?.country || userProfile?.country || 'India').trim()
-  const userDept = userProfile?.department || userProfile?.stream || 'Computer Science & AI'
+  const userCity = (overrideLocation?.city || userProfile?.city || '').trim()
+  const userState = (overrideLocation?.state || userProfile?.state || '').trim()
+  const userCountry = (overrideLocation?.country || userProfile?.country || '').trim()
+  const userDept = (userProfile?.department || userProfile?.stream || userProfile?.domain || '').trim()
   
   // Filter news ONLY for student's level (HARD separation)
   const news = currentUpdatesData
     .filter(n => n.level === level)
     .map(n => {
-      const isLocationMatch = (
-        n.city?.toLowerCase() === userCity.toLowerCase() ||
-        n.state?.toLowerCase() === userState.toLowerCase() ||
-        n.country?.toLowerCase() === userCountry.toLowerCase() ||
+      const isLocationMatch = Boolean(
+        (userCity && n.city?.toLowerCase() === userCity.toLowerCase()) ||
+        (userState && n.state?.toLowerCase() === userState.toLowerCase()) ||
+        (userCountry && n.country?.toLowerCase() === userCountry.toLowerCase()) ||
         n.scope === 'Global' || n.scope === 'India'
       )
       return {
@@ -586,9 +586,9 @@ export function getFactCheckedFeed(userProfile = null, overrideLocation = null) 
     .filter(o => o.level === level)
     .map(o => {
       let matchedReason = ''
-      const isCityMatch = o.city?.toLowerCase() === userCity.toLowerCase()
-      const isStateMatch = o.state?.toLowerCase() === userState.toLowerCase()
-      const isCountryMatch = o.country?.toLowerCase() === userCountry.toLowerCase()
+      const isCityMatch = Boolean(userCity && o.city?.toLowerCase() === userCity.toLowerCase())
+      const isStateMatch = Boolean(userState && o.state?.toLowerCase() === userState.toLowerCase())
+      const isCountryMatch = Boolean(userCountry && o.country?.toLowerCase() === userCountry.toLowerCase())
 
       if (isCityMatch) matchedReason = `Near You (${userCity})`
       else if (isStateMatch) matchedReason = `In ${userState}`
