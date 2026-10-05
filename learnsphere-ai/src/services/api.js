@@ -13,11 +13,13 @@
 const isLocalhost = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
 
-// In production on Render, frontend and backend share the same origin,
-// so relative paths work. In local dev the backend runs on :5000.
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (isLocalhost && window.location.port !== '5000' ? 'http://localhost:5000' : '')
+// In production on Render or any cloud host, frontend and backend share the same origin,
+// so relative paths work automatically with cookies and zero CORS issues.
+// In local development, the backend runs on :5000 while Vite dev server runs on :5173.
+const rawBase = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE_URL = !isLocalhost
+  ? ''
+  : (rawBase || (typeof window !== 'undefined' && window.location.port !== '5000' ? 'http://localhost:5000' : ''))
 
 async function request(endpoint, options = {}) {
   try {
