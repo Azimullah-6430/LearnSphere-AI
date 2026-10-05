@@ -30,7 +30,7 @@ class GeminiService:
     """Centralized service for Gemini 3.6 Flash AI calls across LearnSphere AI."""
 
     def __init__(self):
-        self.model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash"
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
         self.timeout = int(os.getenv("GEMINI_TIMEOUT", "120"))
         self.max_retries = 2
 
@@ -126,7 +126,7 @@ class GeminiService:
 
         last_error = ""
         models_to_try = [self.model]
-        for candidate in ("gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"):
+        for candidate in ("gemini-3.6-flash", "gemini-3.8-flash"):
             if candidate not in models_to_try:
                 models_to_try.append(candidate)
 
