@@ -350,15 +350,20 @@ Context Hints (use only as background guidance; paper header is authoritative):
 EXTRACTION MANDATES:
 1. Extract the EXACT printed Subject Name, Exam Title, and Total Maximum Marks from the paper header/instructions.
    - For Total Maximum Marks: Note the authoritative paper maximum marks (e.g. 50, 70, 75, 80, 100). Do NOT naively sum all elective choice questions together.
-2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1(a), 1(b), 2, 3(i), 3(ii), Part A Q1, 6(a)(i), 6(a)(ii), 6(b)).
-3. CRITICAL: (OR) / ELECTIVE CHOICE DETECTION & MAIN QUESTION CONTINUITY:
+2. Inspect EVERY single page and section. Extract ALL questions and sub-questions (e.g. 1, 2, 3, 4, 5, 6.a (i), 6.a (ii), 6.b (i), 6.b (ii), 7.a (i), 7.a (ii), 7.b (i), 7.b (ii)).
+3. CRITICAL: MULTI-PART & SUB-QUESTION DECOMPOSITION:
+   - When a main question contains numbered subparts (e.g. '6.a (i)' and '(ii)', or '7.a (i)' and '(ii)', or 'b (i)' and '(ii)'):
+   - You MUST extract EACH individual subpart as its OWN distinct question object in the 'questions' array!
+   - Format 'question_number' explicitly: "6(a)(i)", "6(a)(ii)", "6(b)(i)", "6(b)(ii)", "7(a)(i)", "7(a)(ii)", "7(b)(i)", "7(b)(ii)".
+   - Assign the exact individual maximum marks to each subpart (e.g., 6(a)(i) = 10.0, 6(a)(ii) = 10.0, 7(a)(i) = 12.0, 7(a)(ii) = 8.0).
+4. CRITICAL: (OR) / ELECTIVE CHOICE DETECTION & MAIN QUESTION CONTINUITY:
    - In examination papers, elective questions are often printed with '(OR)', '[OR]', 'OR' between Option A and Option B (e.g., 6. (a) ... (OR) ... (b) ...).
    - CRITICAL RULE: Option B is frequently printed as just '(b)', 'b)', or placed directly below '(OR)' WITHOUT repeating the main question number '6' on top.
    - DO NOT increment the main question number for Option B! Option B is ALWAYS '6(b)' (or 6(b)(i)), NEVER '7(a)' or '7'!
    - The main question number increments ONLY when a genuinely new main question starts (e.g. '7.', '7(a)', 'Q7').
-   - Assign the EXACT same 'choice_group' identifier to all alternative options for that question (e.g. "choice_q6" for 6(a)(i), 6(a)(ii), and 6(b), or "choice_q7" for 7(a) and 7(b)).
+   - Assign the EXACT same 'choice_group' identifier to all alternative options for that question (e.g. "choice_q6" for 6(a)(i), 6(a)(ii), 6(b)(i), 6(b)(ii); and "choice_q7" for 7(a)(i), 7(a)(ii), 7(b)(i), 7(b)(ii)).
    - Set 'required_choice_count' to the exact number of options required (usually 1).
-4. For EVERY question:
+5. For EVERY question:
    - Extract the complete verbatim 'question_text' including all parameters, numerical values, equations, constraints, and instructions.
    - For Multiple Choice Questions (MCQs), extract the full text of all printed options under 'options'.
    - Extract the exact printed 'maximum_marks' for each question or subpart. Do NOT guess or default marks.
@@ -374,28 +379,28 @@ Return ONLY a valid JSON object matching this schema:
   "sections": ["Section A (Objective)", "Section B (Descriptive)"],
   "questions": [
     {{
-      "question_id": "q1_a",
-      "question_number": "1(a)",
-      "question_text": "Complete verbatim text of the question",
-      "maximum_marks": 5.0,
-      "section": "Section A",
-      "question_type": "numerical",
+      "question_id": "q6_a_1",
+      "question_number": "6(a)(i)",
+      "question_text": "Complete verbatim text of subpart 6.a (i)",
+      "maximum_marks": 10.0,
+      "section": "PART B",
+      "question_type": "code",
       "options": [],
-      "choice_group": "choice_q1",
+      "choice_group": "choice_q6",
       "required_choice_count": 1,
-      "expected_components": ["Formula selection", "Step-by-step substitution", "Final answer with units"]
+      "expected_components": ["Data type definition", "Dictionary explanation and example", "Set explanation and example"]
     }},
     {{
-      "question_id": "q1_b",
-      "question_number": "1(b)",
-      "question_text": "Alternative OR question verbatim text",
-      "maximum_marks": 5.0,
-      "section": "Section A",
-      "question_type": "descriptive",
+      "question_id": "q6_a_2",
+      "question_number": "6(a)(ii)",
+      "question_text": "Complete verbatim text of subpart 6.a (ii)",
+      "maximum_marks": 10.0,
+      "section": "PART B",
+      "question_type": "code",
       "options": [],
-      "choice_group": "choice_q1",
+      "choice_group": "choice_q6",
       "required_choice_count": 1,
-      "expected_components": ["Key principles", "Diagram", "Explanation"]
+      "expected_components": ["Break statement explanation and code", "Continue statement explanation and code"]
     }}
   ]
 }}
@@ -430,7 +435,13 @@ You are evaluating an official examination paper. Your marking must be rigorous,
 ==================================================
 ULTRA-STRICT HUMAN EXAMINER MARKING PROTOCOL
 ==================================================
-1. READ THE QUESTION FIRST & BUDGET MARKS PER COMPONENT:
+1. EXHAUSTIVE SCRIPT SCANNING (NON-SEQUENTIAL ORDER SUPPORT):
+   - Students frequently answer questions out of order (e.g. starting with Q7(a)(i) on Page 1, Q7(a)(ii) on Page 3, Q6(a)(i) on Page 7, Q6(a)(ii) on Page 10, Part A Q1-Q5 on Pages 13-14).
+   - You MUST thoroughly scan EVERY single page of the answer script from start to finish.
+   - For EVERY question in the Question Paper structure, locate where the student answered it.
+   - When a student attempts subparts like 6(a)(i), 6(a)(ii), 7(a)(i), 7(a)(ii), you MUST evaluate EACH subpart as an individual entry in the 'evaluations' array. NEVER omit 6(a)(i) or 7(a)(i)!
+
+2. READ THE QUESTION FIRST & BUDGET MARKS PER COMPONENT:
    For every question in the Question Paper, establish a strict mark breakdown based on the maximum marks:
    - 2-MARK QUESTIONS:
      * Budget: 1.0 mark for precise technical definition/statement + 1.0 mark for syntax, valid examples, or mechanism.
@@ -444,7 +455,7 @@ ULTRA-STRICT HUMAN EXAMINER MARKING PROTOCOL
      * If any operation/subpart is skipped or left blank: award STRICTLY 0.0 for that subpart.
      * If informal pseudocode or invalid syntax is written instead of executable code in a programming question: deduct marks proportionally for syntax errors.
 
-2. STRICT REAL TEACHER GRADING RULES:
+3. STRICT REAL TEACHER GRADING RULES:
    - STRICT ABOUT TECHNICAL ACCURACY: Never award marks for hand-waving, vague prose, or guessing.
    - NO SYMPATHY OR EFFORT MARKS: Award marks ONLY for verified, correct technical facts and working code/derivations actually present in the script.
    - ZERO MARKS FOR IRRELEVANT FLUFF: Repetitive paragraphs, generic filler, or writing unrelated topics receives 0.0 marks.
@@ -452,15 +463,15 @@ ULTRA-STRICT HUMAN EXAMINER MARKING PROTOCOL
    - ERROR CARRIED FORWARD (NO DOUBLE PENALTY): In multi-step derivations or numericals, if an early arithmetic slip occurs but subsequent steps follow valid mathematical logic, deduct for the slip once. Award legitimate method marks for follow-through steps.
    - PROGRAMMING RIGOR: Check variable scope (e.g. parameter named 'average' but body uses undefined 'mark'), built-in function calls (e.g. 'sum(marks)' vs broken 'marks(sum)'), list appending ('marks.append(x)' vs 'append += marks'), and language-specific syntax (penalize C/Java loops in Python).
 
-3. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
+4. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
    - In both 'evaluation_reason' and 'teacher_feedback', provide the EXACT component-level mark arithmetic.
    - Example: "Awarded 3.5/5.0: +2.0 for correct Newton's second law definition and formula, +1.5 for valid substitution and SI units, -1.5 for arithmetic calculation error in final step."
 
-4. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
+5. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
    - Bind answers strictly to attempted questions (e.g. Q6(a) vs Q6(b)).
    - For unattempted questions or alternative elective options: set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question".
 
-5. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
+6. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
    - "correct_answer"
    - "partially_correct_concept"
    - "correct_concept_with_calculation_error"

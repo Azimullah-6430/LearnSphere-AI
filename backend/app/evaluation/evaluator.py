@@ -434,6 +434,8 @@ class EvaluationAgent:
                 "choice_group": q.get("choice_group"),
                 "required_choice_count": q.get("required_choice_count"),
                 "counted_in_total": True,
+                "is_skipped_due_to_choice": False,
+                "is_extra_choice": False,
             }
 
             c_group = q.get("choice_group")
@@ -846,6 +848,18 @@ class EvaluationAgent:
                     c_grp = f"choice_q{main_n}"
                     req_c = 1
 
+            # Case D: Standalone subpart without main number or option letter (e.g. "(ii)", "ii)", "(i)")
+            if main_n is None and opt_l is None and sub_p is not None and last_main_num is not None:
+                main_n = last_main_num
+                if last_opt_letter is not None:
+                    opt_l = last_opt_letter
+                    qno = f"{main_n}({opt_l})({sub_p})"
+                else:
+                    qno = f"{main_n}({sub_p})"
+                if not c_grp and last_choice_grp:
+                    c_grp = last_choice_grp
+                    req_c = 1
+
             # Default required choice count to 1 if choice group exists
             if c_grp and not req_c:
                 req_c = 1
@@ -944,7 +958,17 @@ class EvaluationAgent:
             "xi": "11", "xii": "12", "xiii": "13", "xiv": "14", "xv": "15"
         }
 
-        # Compound pattern: 6(a)(i), 6.a.i, 6_a_1, 6 a i, 6(a)(1), 7_b_2
+        # Standalone roman subpart: (i), (ii), (iii), (iv), (v), (vi), (vii), (viii), (ix), (x), ii), iii), etc.
+        m = re.match(r"^\s*\(?([ivxlcdm]+)\)?[\s\.\:\)]*$", s)
+        if m and m.group(1).lower() in roman_to_int:
+            return (None, None, roman_to_int[m.group(1).lower()])
+
+        # Standalone numeric subpart: (1), (2), 1), 2)
+        m = re.match(r"^\s*\(?(\d+)\)?[\s\.\:\)]*$", s)
+        if m:
+            return (int(m.group(1)), None, None)
+
+        # Compound pattern: 6(a)(i), 6.a.i, 6_a_1, 6 a i, 6(a)(1), 7_b_2, 7 a i) A), 6 a i)
         m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]*\(?([a-z])\)?\s*[\.\_\-\s/]*\(?([ivxlcdm0-9]+)\)?", s)
         if m:
             main_n = int(m.group(1))
@@ -961,7 +985,7 @@ class EvaluationAgent:
             sub_p = roman_to_int[raw_sub]
             return (main_n, None, sub_p)
 
-        # Main + option letter: 6(b), 6b, 6.b, 6_b, 6 b (excluding roman subparts)
+        # Main + option letter: 6(b), 6b, 6.b, 6_b, 6 b (excluding standalone roman subparts)
         m = re.search(r"(?:^|[^a-z0-9])(\d+)\s*[\.\_\-\s/]*\(?([a-z])\)?(?![a-z0-9])", s)
         if m:
             main_n = int(m.group(1))
@@ -977,11 +1001,15 @@ class EvaluationAgent:
             sub_p = m.group(2)
             return (main_n, None, sub_p)
 
-        # Standalone option + subpart: (a)(i), a.i, a_1
+        # Standalone option + subpart: (a)(i), a.i, a_1, a (i), b (ii)
         m = re.search(r"(?:^|[^a-z0-9])\(?([a-z])\)?\s*[\.\_\-\s/]*\(?([ivxlcdm0-9]+)\)?", s)
         if m:
             opt_l = m.group(1).lower()
             raw_sub = m.group(2).lower()
+            if opt_l in roman_to_int and opt_l not in {"a", "b", "c", "d", "e", "f", "g", "h"} and raw_sub in roman_to_int:
+                full_roman = (opt_l + raw_sub).lower()
+                if full_roman in roman_to_int:
+                    return (None, None, roman_to_int[full_roman])
             sub_p = roman_to_int.get(raw_sub, raw_sub)
             return (None, opt_l, sub_p)
 
@@ -993,7 +1021,10 @@ class EvaluationAgent:
         # Standalone option letter: (a) or (b)
         m = re.search(r"\(?([a-z])\)?", s)
         if m:
-            return (None, m.group(1).lower(), None)
+            raw_letter = m.group(1).lower()
+            if raw_letter in roman_to_int and raw_letter not in {"a", "b", "c", "d", "e", "f", "g", "h"}:
+                return (None, None, roman_to_int[raw_letter])
+            return (None, raw_letter, None)
 
         return (None, None, None)
 
