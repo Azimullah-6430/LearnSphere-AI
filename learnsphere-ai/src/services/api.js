@@ -156,8 +156,28 @@ export const api = {
     body: formData,
   }),
 
-  /** Return the authenticated user's latest READY syllabus from the server. */
+  /** Return the authenticated user's latest active semester-mapped syllabus. */
   getMySyllabus: () => request('/api/syllabus'),
+
+  /** Return the authoritative active validated curriculum object consumed across all learning agents. */
+  getActiveCurriculum: () => request('/api/curriculum/active'),
+
+  /** Get complete source evidence for all subjects in the active curriculum. */
+  getCurriculumEvidence: () => request('/api/syllabus/evidence'),
+
+  /** Get source evidence for a specific course code or name. */
+  getSubjectEvidence: (subjectId) => request(`/api/syllabus/subject-evidence/${encodeURIComponent(subjectId)}`),
+
+  /** Confirm and activate a syllabus flagged as NEEDS_REVIEW or override. */
+  confirmSyllabusOverride: (syllabusId) => request('/api/syllabus/confirm-override', {
+    method: 'POST',
+    body: { syllabus_id: syllabusId }
+  }),
+
+  /** Deactivate / archive syllabus. */
+  deleteSyllabus: () => request('/api/syllabus', {
+    method: 'DELETE'
+  }),
 
   // ── Plagiarism ────────────────────────────────────────────────────────────
 

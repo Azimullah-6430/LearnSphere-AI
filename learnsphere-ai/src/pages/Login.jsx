@@ -27,13 +27,23 @@ export default function Login() {
   const [classesTaught, setClassesTaught] = useState(12)
 
   // Student Registration State
+  // Student Registration State
   const [level, setLevel] = useState('school') // 'school' or 'college'
   const [board, setBoard] = useState('CBSE')
   const [classLevel, setClassLevel] = useState(12)
   const [schoolStream, setSchoolStream] = useState('Science')
+  const [schoolSection, setSchoolSection] = useState('')
+  const [schoolRoll, setSchoolRoll] = useState('')
+
+  // College Student Profile Fields
+  const [collegeDegree, setCollegeDegree] = useState('B.Tech')
   const [collegeStream, setCollegeStream] = useState('Engineering & Technology')
   const [collegeDomain, setCollegeDomain] = useState('Computer Science & AI')
-  const [semester, setSemester] = useState(1)
+  const [collegeBranch, setCollegeBranch] = useState('Computer Science & Engineering')
+  const [currentYear, setCurrentYear] = useState('3rd Year')
+  const [semester, setSemester] = useState(5)
+  const [regulation, setRegulation] = useState('')
+  const [academicYear, setAcademicYear] = useState('2024-2025')
   
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -51,7 +61,18 @@ export default function Login() {
     const availableDomains = COLLEGE_DOMAINS[val] || []
     if (availableDomains.length > 0) {
       setCollegeDomain(availableDomains[0])
+      setCollegeBranch(availableDomains[0])
     }
+  }
+
+  const handleSemesterChange = (semNum) => {
+    const sem = Number(semNum)
+    setSemester(sem)
+    // Auto-align current year if reasonable
+    if (sem <= 2) setCurrentYear('1st Year')
+    else if (sem <= 4) setCurrentYear('2nd Year')
+    else if (sem <= 6) setCurrentYear('3rd Year')
+    else setCurrentYear('4th Year')
   }
 
   const handleSubmit = async (e) => {
@@ -78,12 +99,26 @@ export default function Login() {
           password,
           role: 'student',
           level,
-          board: level === 'school' ? board : null, // ABSOLUTELY NO BOARD FOR COLLEGE
-          classLevel: level === 'school' ? classLevel : null,
+          institutionName,
+          // College-specific credentials
+          degree: level === 'college' ? collegeDegree : null,
+          program: level === 'college' ? collegeDegree : null,
+          department: level === 'college' ? (collegeBranch || collegeDomain) : null,
+          branch: level === 'college' ? (collegeBranch || collegeDomain) : null,
           stream: level === 'school' ? schoolStream : collegeStream,
           domain: level === 'college' ? collegeDomain : null,
+          currentYear: level === 'college' ? currentYear : null,
           semester: level === 'college' ? semester : null,
-          institutionName
+          currentSemester: level === 'college' ? semester : null,
+          regulation: level === 'college' ? (regulation.trim() || null) : null,
+          batch: level === 'college' ? (regulation.trim() || null) : null,
+          academicYear: level === 'college' ? (academicYear.trim() || null) : null,
+          // School-specific credentials (NO college semester fields forced)
+          board: level === 'school' ? board : null,
+          classLevel: level === 'school' ? classLevel : null,
+          grade_level: level === 'school' ? classLevel : null,
+          section: level === 'school' ? (schoolSection.trim() || null) : null,
+          roll_number: level === 'school' ? (schoolRoll.trim() || null) : null,
         }
 
         const res = await api.register(payload)
@@ -250,11 +285,25 @@ export default function Login() {
                 <div className="text-xs font-bold text-[var(--accent)] mb-3 uppercase tracking-wide">Student Academic Profile</div>
                 
                 <div className="mb-3">
-                  <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Student Type</label>
+                  <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Student Academic Level</label>
                   <select value={level} onChange={(e) => setLevel(e.target.value)} className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
                     <option value="school">School Student (Class 1 to 12)</option>
-                    <option value="college">College / University Student</option>
+                    <option value="college">College / University Student (Semester-aware)</option>
                   </select>
+                </div>
+
+                <div className="mb-3">
+                  <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">
+                    {level === 'college' ? 'Institution / College / University Name' : 'School Name'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={level === 'college' ? "e.g. IIT Madras, BITS Pilani, Stanford" : "e.g. Delhi Public School, St. Xavier's"}
+                    value={institutionName}
+                    onChange={(e) => setInstitutionName(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                  />
                 </div>
 
                 {level === 'school' && (
@@ -279,30 +328,108 @@ export default function Login() {
                         {Object.keys(STREAMS).map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Section (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. A or B"
+                          value={schoolSection}
+                          onChange={(e) => setSchoolSection(e.target.value)}
+                          className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Roll No. (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 102"
+                          value={schoolRoll}
+                          onChange={(e) => setSchoolRoll(e.target.value)}
+                          className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
 
                 {level === 'college' && (
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">College Discipline / Stream</label>
-                      <select value={collegeStream} onChange={(e) => handleCollegeStreamChange(e.target.value)} className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
-                        {COLLEGE_STREAMS.map(cs => <option key={cs} value={cs}>{cs}</option>)}
-                      </select>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Degree / Program</label>
+                        <select value={collegeDegree} onChange={(e) => setCollegeDegree(e.target.value)} className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
+                          <option value="B.Tech">B.Tech / B.E.</option>
+                          <option value="B.Sc">B.Sc</option>
+                          <option value="BCA">BCA</option>
+                          <option value="B.Com">B.Com</option>
+                          <option value="BBA">BBA</option>
+                          <option value="M.Tech">M.Tech / M.E.</option>
+                          <option value="MCA">MCA</option>
+                          <option value="MBA">MBA</option>
+                          <option value="MBBS">MBBS / Medical</option>
+                          <option value="Other">Other Program</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Discipline Stream</label>
+                        <select value={collegeStream} onChange={(e) => handleCollegeStreamChange(e.target.value)} className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
+                          {COLLEGE_STREAMS.map(cs => <option key={cs} value={cs}>{cs}</option>)}
+                        </select>
+                      </div>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Domain / Branch Specialization</label>
-                      <select value={collegeDomain} onChange={(e) => setCollegeDomain(e.target.value)} className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
+                      <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Department / Branch Specialization</label>
+                      <select 
+                        value={collegeBranch} 
+                        onChange={(e) => { setCollegeBranch(e.target.value); setCollegeDomain(e.target.value); }} 
+                        className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                      >
                         {(COLLEGE_DOMAINS[collegeStream] || []).map(cd => <option key={cd} value={cd}>{cd}</option>)}
                       </select>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Current Semester</label>
-                      <select value={semester} onChange={(e) => setSemester(Number(e.target.value))} className="w-full px-3 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
-                        {COLLEGE_SEMESTERS.map(s => <option key={s} value={s}>Semester {s}</option>)}
-                      </select>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Current Year</label>
+                        <select value={currentYear} onChange={(e) => setCurrentYear(e.target.value)} className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
+                          <option value="1st Year">1st Year</option>
+                          <option value="2nd Year">2nd Year</option>
+                          <option value="3rd Year">3rd Year</option>
+                          <option value="4th Year">4th Year</option>
+                          <option value="5th Year">5th Year</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Current Semester</label>
+                        <select value={semester} onChange={(e) => handleSemesterChange(e.target.value)} className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]">
+                          {COLLEGE_SEMESTERS.map(s => <option key={s} value={s}>Semester {s}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Regulation / Batch (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. R20 or 2022-2026"
+                          value={regulation}
+                          onChange={(e) => setRegulation(e.target.value)}
+                          className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Academic Year (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 2024-2025"
+                          value={academicYear}
+                          onChange={(e) => setAcademicYear(e.target.value)}
+                          className="w-full px-2 py-2 rounded-md border border-[var(--border-strong)] text-[13px] outline-none bg-[var(--surface)]"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}

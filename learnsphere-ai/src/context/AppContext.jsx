@@ -62,11 +62,12 @@ function clearAllUserStorage() {
     const keysToRemove = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
-      if (k && k.startsWith('learnsphere_')) {
+      if (k && (k.startsWith('learnsphere_') || k.startsWith('syllabus_') || k.startsWith('curriculum_') || k.includes('subject'))) {
         keysToRemove.push(k)
       }
     }
     keysToRemove.forEach(k => localStorage.removeItem(k))
+    try { sessionStorage.clear() } catch {}
   } catch {}
 }
 
@@ -139,13 +140,28 @@ export function AppProvider({ children }) {
 
   const _fetchSyllabus = useCallback(async (expectedSeq) => {
     try {
-      const res = await api.getMySyllabus()
+      let res = null
+      try {
+        res = await api.getActiveCurriculum()
+      } catch {
+        res = await api.getMySyllabus()
+      }
       if (authSequenceRef.current !== expectedSeq) return
-      if (res && res.success && res.syllabus) {
-        setSyllabusDataState(res.syllabus.analysis || res.syllabus)
+      if (res && res.success) {
+        if (res.is_valid && res.subjects && res.subjects.length > 0) {
+          setSyllabusDataState(res)
+        } else if (res.syllabus) {
+          setSyllabusDataState(res.syllabus.analysis || res.syllabus)
+        } else {
+          setSyllabusDataState(null)
+        }
+      } else {
+        setSyllabusDataState(null)
       }
     } catch {
-      // Non-fatal: user simply hasn't uploaded a syllabus yet
+      if (authSequenceRef.current === expectedSeq) {
+        setSyllabusDataState(null)
+      }
     }
   }, [])
 
@@ -493,13 +509,44 @@ export function AppProvider({ children }) {
   // Explicit structured studentProfile for student role (null for teachers or unauthenticated)
   const studentProfile = useMemo(() => {
     if (!userWithInitials || role !== 'student') return null
+    const isCollege = userWithInitials.level === 'college'
+    const isSchool = userWithInitials.level === 'school'
+    const sem = userWithInitials.semester !== undefined && userWithInitials.semester !== null
+      ? userWithInitials.semester
+      : (userWithInitials.current_semester !== undefined && userWithInitials.current_semester !== null
+          ? userWithInitials.current_semester
+          : userWithInitials.currentSemester ?? null)
+
     return {
       ...userWithInitials,
+      isCollege,
+      isSchool,
+      // College fields
+      institution: userWithInitials.institution_name || userWithInitials.institution || userWithInitials.school || userWithInitials.college || null,
+      institution_name: userWithInitials.institution_name || userWithInitials.institution || userWithInitials.school || userWithInitials.college || null,
+      degree: userWithInitials.degree || userWithInitials.program || userWithInitials.course || null,
+      program: userWithInitials.program || userWithInitials.degree || userWithInitials.course || null,
+      department: userWithInitials.department || userWithInitials.branch || userWithInitials.domain || null,
+      branch: userWithInitials.branch || userWithInitials.department || userWithInitials.domain || null,
+      domain: userWithInitials.domain || userWithInitials.department || userWithInitials.branch || null,
+      current_year: userWithInitials.current_year || userWithInitials.currentYear || userWithInitials.year || null,
+      currentYear: userWithInitials.current_year || userWithInitials.currentYear || userWithInitials.year || null,
+      semester: sem,
+      current_semester: sem,
+      currentSemester: sem,
+      regulation: userWithInitials.regulation || userWithInitials.batch || null,
+      batch: userWithInitials.batch || userWithInitials.regulation || null,
+      academic_year: userWithInitials.academic_year || userWithInitials.academicYear || null,
+      academicYear: userWithInitials.academic_year || userWithInitials.academicYear || null,
+      hasValidSemester: isCollege ? (sem !== null && sem !== '' && !isNaN(Number(sem))) : true,
+      // School fields
+      board: userWithInitials.board || null,
       class: userWithInitials.grade_level || userWithInitials.classLevel || null,
+      grade_level: userWithInitials.grade_level || userWithInitials.classLevel || null,
+      classLevel: userWithInitials.grade_level || userWithInitials.classLevel || null,
+      stream: userWithInitials.stream || null,
       section: userWithInitials.section || null,
-      school: userWithInitials.institution_name || userWithInitials.school || null,
-      department: userWithInitials.department || userWithInitials.domain || null,
-      semester: userWithInitials.semester || null,
+      roll_number: userWithInitials.roll_number || userWithInitials.rollNumber || null,
     }
   }, [userWithInitials, role])
 

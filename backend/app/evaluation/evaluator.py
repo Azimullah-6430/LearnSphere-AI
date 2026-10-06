@@ -391,6 +391,13 @@ class EvaluationAgent:
             pct_of_q = round((awarded / max_m) * 100, 2) if max_m > 0 else 0.0
             marks_lost = round(max(0.0, max_m - awarded), 2)
 
+            understanding_lvl = str((item or {}).get("demonstrated_understanding_level") or (
+                "thorough" if pct_of_q >= 90 else
+                "substantial" if pct_of_q >= 65 else
+                "partial" if pct_of_q >= 30 else
+                "minimal" if pct_of_q > 0 else "none"
+            ))
+
             q_record = {
                 "evaluation_id": eval_id,
                 "question_id": q.get("question_id") or norm_qno,
@@ -400,6 +407,7 @@ class EvaluationAgent:
                 "awarded_marks": round(awarded, 2),
                 "marks_lost": marks_lost,
                 "percentage_of_question": pct_of_q,
+                "demonstrated_understanding_level": understanding_lvl,
                 "attempted": attempted,
                 "is_uncertain": is_unc,
                 "answer_classification": classification,

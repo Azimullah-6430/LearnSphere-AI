@@ -107,23 +107,41 @@ function StudentDashboard() {
   const isCollege = user?.level === 'college'
   const isSchool = user?.level === 'school'
 
+  const currentSem = user?.semester !== undefined && user?.semester !== null
+    ? user?.semester
+    : (user?.current_semester !== undefined && user?.current_semester !== null
+        ? user?.current_semester
+        : user?.currentSemester ?? null)
+
+  const hasCollegeSemester = isCollege && currentSem !== null && currentSem !== '' && !isNaN(Number(currentSem))
+
   // Dynamic Academic Format without hardcoded fallbacks
   let academicLevelLabel = 'Not configured'
-  if (isCollege) academicLevelLabel = 'COLLEGE'
+  if (isCollege) academicLevelLabel = `COLLEGE · SEM ${currentSem || '?'}`
   else if (isSchool) academicLevelLabel = 'SCHOOL'
 
   let programSubtitle = 'Profile setup required'
   if (isCollege) {
-    const parts = [user?.department || user?.domain || user?.stream, user?.semester ? `Semester ${user.semester}` : null].filter(Boolean)
-    programSubtitle = parts.length > 0 ? `College Student · ${parts.join(' - ')}` : 'College Student (Program not configured)'
+    const parts = [
+      user?.degree || user?.program,
+      user?.department || user?.branch || user?.domain,
+      currentSem ? `Semester ${currentSem}` : null,
+      user?.current_year || user?.currentYear
+    ].filter(Boolean)
+    programSubtitle = parts.length > 0 ? `College Student · ${parts.join(' · ')}` : 'College Student (Semester setup required)'
   } else if (isSchool) {
-    const parts = [user?.board, user?.grade_level || user?.classLevel ? `Class ${user.grade_level || user.classLevel}` : null, user?.section ? `Section ${user.section}` : null].filter(Boolean)
-    programSubtitle = parts.length > 0 ? `School Student · ${parts.join(' - ')}` : 'School Student (Grade not configured)'
+    const parts = [
+      user?.board ? `${user.board} Board` : null,
+      user?.grade_level || user?.classLevel ? `Class ${user.grade_level || user.classLevel}` : null,
+      user?.stream,
+      user?.section ? `Sec ${user.section}` : null
+    ].filter(Boolean)
+    programSubtitle = parts.length > 0 ? `School Student · ${parts.join(' · ')}` : 'School Student (Grade setup required)'
   }
 
   let programStatValue = 'Not configured'
   if (isCollege) {
-    programStatValue = user?.domain || user?.department || user?.stream || 'Higher Education'
+    programStatValue = [user?.degree || user?.program, user?.branch || user?.department || user?.domain].filter(Boolean).join(' - ') || 'Higher Education'
   } else if (isSchool) {
     if (user?.grade_level || user?.classLevel) {
       programStatValue = `Class ${user.grade_level || user.classLevel}${user?.section ? ` (${user.section})` : ''}`
@@ -167,12 +185,28 @@ function StudentDashboard() {
         </p>
       </div>
 
+      {/* College Semester Incomplete Banner */}
+      {isCollege && !hasCollegeSemester && (
+        <div className="mb-5 p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <AlertCircle size={22} className="text-amber-600 shrink-0" />
+            <div>
+              <div className="text-xs font-bold text-amber-900">Academic Semester Required for Curriculum Mapping</div>
+              <div className="text-xs text-amber-700">Configure your current program and semester context to unlock semester-specific syllabus mapping and AI study tools.</div>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => navigate('/onboarding')} className="shrink-0">
+            Set Semester
+          </Button>
+        </div>
+      )}
+
       {/* Account Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-5">
         <StatCard 
           label="Account Level" 
           value={academicLevelLabel} 
-          delta={isCollege ? (user?.stream || user?.domain || 'University Degree') : (user?.board || 'School Board')} 
+          delta={isCollege ? (currentSem ? `Semester ${currentSem} Context` : 'Semester Required') : (user?.board || 'School Board')} 
           deltaTone={academicLevelLabel !== 'Not configured' ? 'up' : 'neutral'} 
         />
         <StatCard 
@@ -189,7 +223,7 @@ function StudentDashboard() {
         <StatCard 
           label="Academic Program" 
           value={programStatValue} 
-          delta={user?.institution_name || user?.school || 'LearnSphere AI'} 
+          delta={user?.institution_name || user?.school || user?.college || 'LearnSphere AI'} 
         />
       </div>
 

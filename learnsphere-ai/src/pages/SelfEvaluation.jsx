@@ -101,8 +101,12 @@ export default function SelfEvaluation() {
       formData.append('assessment_title', `${effectiveSubject} Self Evaluation`)
       formData.append('role', 'student')
       formData.append('level', activeProfile?.level || 'Standard')
+      formData.append('academic_level', activeProfile?.level || (activeProfile?.semester ? 'college' : 'school'))
       formData.append('board', activeProfile?.board || '')
       formData.append('stream', activeProfile?.stream || '')
+      formData.append('semester', activeProfile?.semester || activeProfile?.current_semester || activeProfile?.currentSemester || '')
+      formData.append('degree', activeProfile?.degree || activeProfile?.program || '')
+      formData.append('department', activeProfile?.department || activeProfile?.branch || '')
 
       formData.append('question_paper', qpRawFile)
       formData.append('answer_script', ansRawFile)

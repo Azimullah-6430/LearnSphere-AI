@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
-import { getDynamicSubjects, getDynamicTransferQuestions, getDynamicChapters } from '../data/syllabusData.js'
+import { getActiveValidatedCurriculum, getDynamicTransferQuestions, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
 import SyllabusModal from '../components/SyllabusModal.jsx'
+import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
 import {
   ChevronRight, CheckCircle2, XCircle, Lightbulb, Target, Brain, Star,
   RotateCcw, BookOpen, Zap, Layers, UploadCloud
@@ -28,8 +29,9 @@ export default function KnowledgeChallenge() {
   const { user, syllabusData, recordActivity } = useApp()
   const activeProfile = user
 
-  const subjects = getDynamicSubjects(activeProfile, syllabusData)
-  const hasExtractedSubjects = subjects.length > 0
+  const activeCurriculum = getActiveValidatedCurriculum(activeProfile, syllabusData)
+  const subjects = activeCurriculum.subjectNames
+  const hasValidCurriculum = activeCurriculum.isValid && subjects.length > 0
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
   const [phase, setPhase] = useState('intro') // 'intro' | 'question' | 'feedback' | 'done'
@@ -42,6 +44,22 @@ export default function KnowledgeChallenge() {
   const [showHint, setShowHint] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
   const [scores, setScores] = useState([])
+
+  useEffect(() => {
+    if (subjects.length > 0 && !subjects.includes(activeSubject)) {
+      setActiveSubject(subjects[0])
+      setActiveModule('All')
+      setPhase('intro')
+      setRounds([])
+      setScores([])
+    } else if (subjects.length === 0 && activeSubject) {
+      setActiveSubject('')
+      setActiveModule('All')
+      setPhase('intro')
+      setRounds([])
+      setScores([])
+    }
+  }, [subjects, activeSubject])
 
   const modules = getDynamicChapters(activeSubject, activeProfile, syllabusData)
   const pool = getDynamicTransferQuestions(activeSubject, activeProfile, syllabusData, activeDifficulty, activeModule)
@@ -97,25 +115,15 @@ export default function KnowledgeChallenge() {
         subtitle="Can your knowledge survive an unfamiliar real-world problem? 20 Questions per Module."
       />
 
-      {!hasExtractedSubjects ? (
-        <div className="p-8 max-w-[600px] mx-auto text-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mx-auto text-2xl">
-            <BookOpen size={32} />
-          </div>
-          <h2 className="text-xl font-extrabold text-[var(--text)]">Syllabus & Curriculum Required</h2>
-          <p className="text-sm text-[var(--text-soft)]">
-            Knowledge Challenges require your course syllabus to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and generate real-world transfer questions. Upload your syllabus document to unlock Knowledge Challenges!
-          </p>
-          <div className="pt-2">
-            <button
-              onClick={() => setIsSyllabusModalOpen(true)}
-              className="px-5 py-2.5 bg-[var(--accent)] text-white text-xs font-bold rounded-xl hover:bg-[var(--accent-dim)] inline-flex items-center gap-2 shadow-md"
-            >
-              <UploadCloud size={16} /> Upload Syllabus Document
-            </button>
-          </div>
+      {!hasValidCurriculum ? (
+        <>
+          <CurriculumReviewNotice
+            curriculum={activeCurriculum}
+            featureName="Knowledge Transfer Challenge"
+            onOpenSyllabusModal={() => setIsSyllabusModalOpen(true)}
+          />
           <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
-        </div>
+        </>
       ) : (
         <>
           {/* Subject Tabs */}
@@ -221,10 +229,10 @@ export default function KnowledgeChallenge() {
           </Card>
         )}
 
-        {/* Question */}
+        {/* Question Phase */}
         {phase === 'question' && currentRound && (
           <div className="space-y-4">
-            {/* Progress */}
+            {/* Progress Bar */}
             <div className="flex items-center gap-3">
               {rounds.map((_, i) => (
                 <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${
@@ -234,23 +242,99 @@ export default function KnowledgeChallenge() {
               <span className="text-[12px] text-[var(--text-faint)] font-semibold shrink-0">{roundIdx + 1}/{rounds.length}</span>
             </div>
 
+            {/* Header Blueprint */}
             <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
               <div className="absolute top-3 right-4 opacity-10"><Brain size={64} strokeWidth={1} /></div>
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
                 {currentRound.difficulty && <Badge tone={diffTone[currentRound.difficulty] || 'neutral'}>{currentRound.difficulty}</Badge>}
-                <Badge tone="neutral">{currentRound.chapter}</Badge>
-                <Badge tone="neutral">{currentRound.concept}</Badge>
+                <Badge tone="accent">{currentRound.semester || (activeProfile?.current_semester ? `Semester ${activeProfile.current_semester}` : 'Active Semester')}</Badge>
+                <Badge tone="neutral">{currentRound.exact_subject || activeSubject}</Badge>
+                <Badge tone="neutral">{currentRound.exact_syllabus_topic || currentRound.chapter}</Badge>
               </div>
-              <p className="text-[14.5px] font-semibold leading-relaxed">{currentRound.scenario}</p>
+              <h2 className="text-[16.5px] font-extrabold leading-snug mb-2">{currentRound.scenario}</h2>
+              {currentRound.real_world_application && (
+                <p className="text-[12.5px] text-[var(--text-soft)]">
+                  <strong className="text-[var(--text)]">🌍 Real-World Application: </strong> {currentRound.real_world_application}
+                </p>
+              )}
             </div>
 
+            {/* Academic & Practical Transfer Blueprint (9 Dimensions) */}
             <Card>
-              <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your answer</div>
+              <div className="flex items-center gap-2 mb-3">
+                <BookOpen size={16} className="text-[var(--accent)]" />
+                <h3 className="text-[12.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+                  Knowledge Transfer Foundations
+                </h3>
+              </div>
+
+              <div className="space-y-3 text-[12.5px]">
+                {currentRound.concept_explanation && (
+                  <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
+                    <strong className="text-[var(--text)] block mb-1">📖 Academic Concept Explanation:</strong>
+                    {currentRound.concept_explanation}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {currentRound.practical_connection && (
+                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
+                      <strong className="text-[var(--accent)] block mb-1">⚡ Practical Connection:</strong>
+                      {currentRound.practical_connection}
+                    </div>
+                  )}
+                  {currentRound.example && (
+                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
+                      <strong className="text-[var(--accent)] block mb-1">💡 Engineering Example:</strong>
+                      {currentRound.example}
+                    </div>
+                  )}
+                </div>
+
+                {currentRound.common_misconception && (
+                  <div className="p-3 rounded-lg bg-[var(--warning-soft)] border border-[var(--warning)] text-[var(--text)]">
+                    <strong className="text-[var(--warning)] block mb-1">⚠️ Common Misconception:</strong>
+                    {currentRound.common_misconception}
+                  </div>
+                )}
+
+                {currentRound.exam_relevance && (
+                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] text-[var(--text-soft)]">
+                    <strong className="text-[var(--text)]">📝 University Exam Relevance: </strong>
+                    {currentRound.exam_relevance}
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* Quick Understanding Question Interactive Check */}
+            {currentRound.quick_understanding_question && (
+              <Card>
+                <div className="flex items-center gap-2 mb-2">
+                  <Target size={15} className="text-[var(--accent)]" />
+                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Quick Understanding Check</div>
+                </div>
+                <p className="text-[13px] font-semibold mb-3 text-[var(--text)]">
+                  {currentRound.quick_understanding_question.question}
+                </p>
+                <div className="space-y-1.5 mb-3">
+                  {(currentRound.quick_understanding_question.options || []).map((opt, idx) => (
+                    <div key={idx} className="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] text-[12.5px] font-medium text-[var(--text-soft)]">
+                      <span className="font-bold text-[var(--accent)] mr-2">{String.fromCharCode(65 + idx)}.</span> {opt}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Student Explanation / Solution Input */}
+            <Card>
+              <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your Transfer Solution</div>
               <textarea
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Apply the relevant concept to solve this problem…"
-                rows={5}
+                placeholder="Apply your syllabus knowledge to solve this transfer scenario…"
+                rows={4}
                 className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
               />
               <div className="flex items-center justify-between mt-3">
@@ -265,11 +349,11 @@ export default function KnowledgeChallenge() {
                     onClick={() => setShowAnswer(!showAnswer)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-[var(--border)] rounded-lg text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors"
                   >
-                    <BookOpen size={13} /> Show answer
+                    <BookOpen size={13} /> Show model solution
                   </button>
                 </div>
                 <Button onClick={submitAnswer} disabled={!answer.trim() && !showAnswer}>
-                  Submit <ChevronRight size={14} />
+                  Submit Solution <ChevronRight size={14} />
                 </Button>
               </div>
 
@@ -281,7 +365,7 @@ export default function KnowledgeChallenge() {
               )}
               {showAnswer && (
                 <div className="mt-3 p-3 bg-[var(--accent-soft)] border border-[var(--border)] rounded-lg">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">Model Answer</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">Model Solution</div>
                   <div className="text-[13px]">{currentRound.modelAnswer}</div>
                 </div>
               )}
@@ -289,7 +373,7 @@ export default function KnowledgeChallenge() {
           </div>
         )}
 
-        {/* Feedback */}
+        {/* Feedback Phase */}
         {phase === 'feedback' && currentRound && (
           <div className="space-y-4">
             <Card>
@@ -301,15 +385,24 @@ export default function KnowledgeChallenge() {
                   </div>
                 </div>
                 <div>
-                  <div className="text-[15px] font-extrabold">Round {roundIdx + 1} complete</div>
-                  <div className="text-sm text-[var(--text-soft)]">Concept: <strong>{currentRound.concept}</strong></div>
+                  <div className="text-[15px] font-extrabold">Round {roundIdx + 1} Complete</div>
+                  <div className="text-sm text-[var(--text-soft)]">
+                    Validated Subject: <strong>{currentRound.exact_subject || activeSubject}</strong> · Topic: <strong>{currentRound.exact_syllabus_topic || currentRound.chapter}</strong>
+                  </div>
                 </div>
               </div>
 
+              {currentRound.quick_understanding_question && (
+                <div className="p-3 mb-4 rounded-lg bg-[var(--success-soft)] border border-[var(--border)] text-[12.5px]">
+                  <strong className="text-[var(--success)] block mb-1">✓ Correct Understanding:</strong>
+                  {currentRound.quick_understanding_question.correct_answer} — {currentRound.quick_understanding_question.explanation}
+                </div>
+              )}
+
               <div className="mb-4">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Concepts applied in this question</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Concepts Applied & Mastered</div>
                 <div className="flex flex-wrap gap-2">
-                  {currentRound.conceptsApplied.map((c, i) => (
+                  {(currentRound.conceptsApplied || []).map((c, i) => (
                     <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[var(--accent-soft)] text-[var(--accent)] rounded-full text-[11.5px] font-semibold">
                       <CheckCircle2 size={11} /> {c}
                     </span>
@@ -318,13 +411,13 @@ export default function KnowledgeChallenge() {
               </div>
 
               <div className="border border-[var(--border)] rounded-lg p-3.5 mb-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Model answer</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Model Transfer Solution</div>
                 <div className="text-[13px] leading-relaxed">{currentRound.modelAnswer}</div>
               </div>
 
               {answer && (
                 <div className="bg-[var(--surface-alt)] rounded-lg p-3.5">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Your answer</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Your Submitted Answer</div>
                   <div className="text-[13px] text-[var(--text-soft)] leading-relaxed">{answer}</div>
                 </div>
               )}

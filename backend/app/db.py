@@ -247,17 +247,26 @@ def _init_sqlite_schema() -> None:
         level TEXT DEFAULT 'school',
         teacher_level TEXT,
         institution_name TEXT,
+        degree TEXT,
+        program TEXT,
         department TEXT,
+        branch TEXT,
         domain TEXT,
+        current_year TEXT,
+        academic_year TEXT,
+        regulation TEXT,
+        batch TEXT,
         board TEXT,
         roll_number TEXT,
         section TEXT,
         grade_level TEXT,
         stream TEXT,
         semester INTEGER,
+        current_semester INTEGER,
         subjects_json TEXT,
         syllabus_path TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS evaluations (
@@ -424,8 +433,18 @@ def _init_sqlite_schema() -> None:
         "user_id": "TEXT UNIQUE",
         "teacher_level": "TEXT",
         "institution_name": "TEXT",
+        "degree": "TEXT",
+        "program": "TEXT",
         "department": "TEXT",
+        "branch": "TEXT",
         "domain": "TEXT",
+        "current_year": "TEXT",
+        "academic_year": "TEXT",
+        "regulation": "TEXT",
+        "batch": "TEXT",
+        "semester": "INTEGER",
+        "current_semester": "INTEGER",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     }
     for col, defn in needed_cols.items():
         if col not in existing_cols:
@@ -433,6 +452,28 @@ def _init_sqlite_schema() -> None:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn};")
             except Exception as exc:
                 logger.debug("[DB] SQLite column migration notice (%s): %s", col, exc)
+
+    cursor.execute("PRAGMA table_info(syllabi);")
+    existing_syllabi_cols = {row[1] for row in cursor.fetchall()}
+    needed_syllabi_cols = {
+        "degree": "TEXT",
+        "program": "TEXT",
+        "department": "TEXT",
+        "branch": "TEXT",
+        "current_year": "TEXT",
+        "academic_year": "TEXT",
+        "regulation": "TEXT",
+        "validation_status": "TEXT DEFAULT 'VALID'",
+        "is_active": "BOOLEAN DEFAULT 1",
+        "detected_semesters": "TEXT",
+        "mismatch_reason": "TEXT",
+    }
+    for col, defn in needed_syllabi_cols.items():
+        if col not in existing_syllabi_cols:
+            try:
+                cursor.execute(f"ALTER TABLE syllabi ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite syllabi column migration notice (%s): %s", col, exc)
 
     conn.commit()
     conn.close()

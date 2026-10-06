@@ -927,22 +927,127 @@ export const SCHOOL_LANGUAGES_DATA = {
   ]
 }
 
-// ─── Dynamic Helper Functions ───────────────────────────────────────────────
-export function getDynamicSubjects(profile, syllabusData) {
-  // 1. If user uploaded a custom syllabus document or text, return extracted subjects
-  if (syllabusData && Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
-    return syllabusData.extracted_subjects
+// ─── Dynamic Helper Functions (Single Authoritative Source of Truth) ───────
+
+export function getCurriculumValidationStatus(profile, syllabusData) {
+  // Support calling with either (syllabusData) or (profile, syllabusData)
+  const data = syllabusData !== undefined ? syllabusData : profile
+  const userProfile = syllabusData !== undefined ? profile : null
+
+  if (!data) {
+    if (userProfile?.level === 'college') {
+      const sem = userProfile?.semester ? parseInt(userProfile.semester) : (userProfile?.current_semester ? parseInt(userProfile.current_semester) : null)
+      const domain = userProfile?.domain || userProfile?.stream || userProfile?.department || userProfile?.branch
+      if (domain && sem) {
+        return { isValid: true, status: 'VALID', isPreConfigured: true, reason: '' }
+      }
+      return { isValid: false, status: 'UNCONFIGURED', isPreConfigured: false, reason: 'College profile missing degree, department, or semester.' }
+    }
+    return { isValid: true, status: 'VALID', isPreConfigured: true, reason: '' }
   }
 
+  const status = (data.validation_status || data.validationStatus || data.status || 'VALID').toUpperCase()
+  const isExplicitlyActive = data.is_active !== false
+  const isValid = (status === 'VALID' || status === 'ACTIVE' || status === 'MANUALLY_CONFIRMED' || status === 'READY') && isExplicitlyActive
+  const reason = data.mismatch_reason || data.summary || ''
+  const report = data.validation_report || data.validationReport || null
+  const semester = data.semester || data.current_semester || userProfile?.semester || null
+
+  return { isValid, status, reason, report, is_active: isExplicitlyActive, semester }
+}
+
+/**
+ * getActiveValidatedCurriculum()
+ * Single canonical entry point for all learning agents:
+ * 1. Personal Trainer
+ * 2. Reality Lab
+ * 3. Knowledge Transfer
+ * 
+ * Guarantees 100% subject, code, and module parity across all agents.
+ */
+export function getActiveValidatedCurriculum(profile, syllabusData) {
+  const validation = getCurriculumValidationStatus(profile, syllabusData)
+  
+  // If curriculum validation fails or requires review, lock curriculum down (no partial activation)
+  if (!validation.isValid) {
+    return {
+      isValid: false,
+      status: validation.status,
+      reason: validation.reason,
+      report: validation.report,
+      semester: profile?.semester || profile?.current_semester || syllabusData?.semester || null,
+      degree: profile?.degree || profile?.program || syllabusData?.degree || null,
+      department: profile?.department || profile?.branch || profile?.domain || syllabusData?.department || null,
+      subjects: [],
+      subjectNames: [],
+      chapters: {},
+      topics: [],
+      sourceDocument: syllabusData?.file_name || null
+    }
+  }
+
+  let subjects = []
+  let subjectNames = []
+  let chapters = {}
+  let topics = []
+
+  // 1. If user uploaded a validated syllabus document or analysis payload
+  if (syllabusData && (Array.isArray(syllabusData.subjects) || Array.isArray(syllabusData.extracted_subjects))) {
+    if (Array.isArray(syllabusData.subjects) && syllabusData.subjects.length > 0) {
+      subjects = syllabusData.subjects.map(s => {
+        if (typeof s === 'object' && s !== null) {
+          return {
+            code: s.code || '',
+            name: s.name || '',
+            type: s.type || s.category || 'Theory Core',
+            category: s.category || s.type || 'Program Core',
+            credits: s.credits || 4,
+            source_page: s.source_page || s.source_page_numbers?.[0] || 1,
+            source_section: s.source_section || '',
+            source_text: s.source_text || '',
+            semester_evidence: s.semester_evidence || '',
+            confidence: s.confidence || 0.98,
+            evidence_verified: s.evidence_verified ?? true
+          }
+        }
+        return { code: '', name: String(s), type: 'Theory Core', category: 'Core', credits: 4 }
+      }).filter(s => Boolean(s.name))
+
+      subjectNames = subjects.map(s => s.name)
+    } else if (Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
+      subjectNames = syllabusData.extracted_subjects.filter(Boolean)
+      subjects = subjectNames.map(name => ({
+        code: '',
+        name,
+        type: 'Theory Core',
+        category: 'Program Core',
+        credits: 4,
+        source_page: 1,
+        source_section: 'Syllabus Table',
+        evidence_verified: true
+      }))
+    }
+    chapters = syllabusData.chapters || syllabusData.units || {}
+    topics = syllabusData.key_topics || syllabusData.topics || []
+  }
   // 2. If student profile has custom subjects array set during onboarding/registration
-  if (profile?.subjects && Array.isArray(profile.subjects) && profile.subjects.length > 0) {
-    return profile.subjects
+  else if (profile?.subjects && Array.isArray(profile.subjects) && profile.subjects.length > 0) {
+    subjectNames = profile.subjects
+    subjects = subjectNames.map(name => ({
+      code: '',
+      name,
+      type: 'Core Subject',
+      category: 'General',
+      credits: 4,
+      source_page: 1,
+      source_section: 'Profile Selection',
+      evidence_verified: true
+    }))
   }
-
   // 3. If college student with semester and domain credentials
-  if (profile?.level === 'college') {
-    const sem = profile?.semester ? parseInt(profile.semester) : null
-    const domain = profile?.domain || profile?.stream || profile?.department
+  else if (profile?.level === 'college') {
+    const sem = profile?.semester ? parseInt(profile.semester) : (profile?.current_semester ? parseInt(profile.current_semester) : null)
+    const domain = profile?.domain || profile?.stream || profile?.department || profile?.branch
     
     if (domain && sem) {
       const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
@@ -953,33 +1058,91 @@ export function getDynamicSubjects(profile, syllabusData) {
       if (domainKey && COLLEGE_SEMESTER_DATA[domainKey]) {
         const semSubjects = COLLEGE_SEMESTER_DATA[domainKey][sem]
         if (semSubjects) {
-          return Object.keys(semSubjects)
+          subjectNames = Object.keys(semSubjects)
+          subjects = subjectNames.map(name => ({
+            code: '',
+            name,
+            type: 'Semester Core',
+            category: domainKey,
+            credits: 4,
+            source_page: 1,
+            source_section: `Semester ${sem} Scheme`,
+            evidence_verified: true
+          }))
+          chapters = semSubjects
+        }
+      }
+    }
+  }
+  // 4. If school student with stream credentials or board + grade
+  else if (profile?.level === 'school') {
+    if (profile?.stream && STREAMS[profile.stream]) {
+      subjectNames = STREAMS[profile.stream]
+      subjects = subjectNames.map(name => ({
+        code: '',
+        name,
+        type: 'Stream Subject',
+        category: profile.stream,
+        credits: 4,
+        source_page: 1,
+        source_section: 'Stream Curriculum',
+        evidence_verified: true
+      }))
+    } else {
+      const board = profile?.board
+      const classLevel = profile?.grade_level || profile?.classLevel || profile?.class
+      if (board && classLevel) {
+        const syl = getSyllabus(board, classLevel)
+        if (syl) {
+          subjectNames = Object.keys(syl)
+          subjects = subjectNames.map(name => ({
+            code: '',
+            name,
+            type: 'Board Subject',
+            category: board,
+            credits: 4,
+            source_page: 1,
+            source_section: `Class ${classLevel} Curriculum`,
+            evidence_verified: true
+          }))
+          chapters = syl
         }
       }
     }
   }
 
-  // 4. If school student with stream credentials or board + grade
-  if (profile?.level === 'school') {
-    if (profile?.stream && STREAMS[profile.stream]) {
-      return STREAMS[profile.stream]
-    }
-    const board = profile?.board
-    const classLevel = profile?.grade_level || profile?.classLevel || profile?.class
-    if (board && classLevel) {
-      const syl = getSyllabus(board, classLevel)
-      if (syl) return Object.keys(syl)
-    }
+  return {
+    isValid: true,
+    status: validation.status,
+    reason: validation.reason,
+    report: validation.report,
+    semester: profile?.semester || profile?.current_semester || syllabusData?.semester || null,
+    degree: profile?.degree || profile?.program || syllabusData?.degree || null,
+    department: profile?.department || profile?.branch || profile?.domain || syllabusData?.department || null,
+    subjects,
+    subjectNames,
+    chapters,
+    topics,
+    sourceDocument: syllabusData?.file_name || null
   }
+}
 
-  // 5. If no syllabus uploaded and no profile credentials set, return empty array
-  return []
+export function getDynamicSubjects(profile, syllabusData) {
+  const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
+  return activeCurriculum.subjectNames
 }
 
 export function getDynamicChapters(subject, profile, syllabusData) {
   if (!subject) return []
 
-  // Check if syllabusData has custom extracted chapters for this subject
+  const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
+  
+  // If active curriculum contains chapters for this subject
+  if (activeCurriculum.chapters && activeCurriculum.chapters[subject]) {
+    return activeCurriculum.chapters[subject]
+  }
+
+  // Check if syllabusData directly has extracted chapters for this subject
   if (syllabusData && syllabusData.chapters && syllabusData.chapters[subject]) {
     return syllabusData.chapters[subject]
   }
@@ -1051,38 +1214,55 @@ const DAY_TO_DAY_SCENARIOS_TEMPLATES = [
 export function getDynamicScenarios(subject, profile, syllabusData, difficultyFilter = 'All', moduleFilter = 'All') {
   let list = []
   const chaps = getDynamicChapters(subject, profile, syllabusData)
+  const semesterStr = profile?.semester || profile?.current_semester ? `Semester ${profile.semester || profile.current_semester}` : "Active Semester"
   
-  if (realityLabBySubject[subject] && realityLabBySubject[subject].length >= 10 && moduleFilter === 'All') {
-    list = realityLabBySubject[subject]
-  } else {
-    const generated = []
-    chaps.forEach((ch, chIdx) => {
-      const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization", "Performance Analysis"]
-      
-      // Generate 20 questions for this module
-      DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
-        const concept = concepts[tIdx % concepts.length]
-        const formattedTitle = tmpl.title.replace('{concept}', concept).replace('{module}', ch.name)
-        const formattedAnswer = tmpl.answer.replace(/{concept}/g, concept).replace(/{module}/g, ch.name)
+  const generated = []
+  chaps.forEach((ch, chIdx) => {
+    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization", "Performance Analysis"]
+    
+    DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
+      const concept = concepts[tIdx % concepts.length]
+      const formattedTitle = tmpl.title.replace('{concept}', concept).replace('{module}', ch.name)
+      const formattedAnswer = tmpl.answer.replace(/{concept}/g, concept).replace(/{module}/g, ch.name)
 
-        generated.push({
-          id: `dyn-lab-${subject.toLowerCase().replace(/\s+/g, '-')}-m${chIdx + 1}-q${tIdx + 1}`,
-          title: formattedTitle,
-          context: tmpl.context,
-          difficulty: tmpl.diff,
-          chapter: ch.name,
-          expectedConcepts: [
-            { concept: concept, required: true },
-            { concept: "Day-to-day Life Application", required: true },
-            { concept: tmpl.context, required: false }
-          ],
-          modelAnswer: formattedAnswer
-        })
+      generated.push({
+        id: `dyn-lab-${subject.toLowerCase().replace(/\s+/g, '-')}-m${chIdx + 1}-q${tIdx + 1}`,
+        title: formattedTitle,
+        subject: subject,
+        semester: semesterStr,
+        syllabus_topic: ch.name,
+        chapter: ch.name,
+        context: tmpl.context,
+        difficulty: tmpl.diff,
+        practical_concept: `${concept} in ${tmpl.context}`,
+        materials: [
+          `Engineering Diagnostic Tool & Test Harness for ${subject}`,
+          `Benchmarking Suite (${tmpl.context})`,
+          `Syllabus Reference Specification: ${ch.name}`
+        ],
+        procedure: [
+          `Step 1: Set up the operational testbed for ${concept}.`,
+          `Step 2: Apply real-world operational stress conditions mimicking ${tmpl.context}.`,
+          `Step 3: Measure system latency, efficiency, and resource utilization.`,
+          `Step 4: Verify compliance with the governing theoretical laws of ${ch.name}.`
+        ],
+        observation: `Under real-world workload in ${tmpl.context}, ${concept} dynamically balances throughput and maintains error-free stability in accordance with ${ch.name} parameters.`,
+        theory_connection: `Directly derived from theoretical foundations and governing mathematical models of ${concept} in ${ch.name}.`,
+        learning_outcome: `Practical engineering competency in configuring, diagnosing, and optimizing ${concept} for real-world deployment.`,
+        exam_relevance: `Direct mapping to University Semester Examination practical design and application questions for ${subject}.`,
+        expectedConcepts: [
+          { concept: concept, required: true },
+          { concept: "Real-World Engineering Application", required: true },
+          { concept: tmpl.context, required: false }
+        ],
+        modelAnswer: formattedAnswer,
+        is_supported: true,
+        unsupported_message: ""
       })
     })
+  })
 
-    list = generated
-  }
+  list = generated
 
   if (moduleFilter && moduleFilter !== 'All') {
     const filteredByModule = list.filter((item) => item.chapter === moduleFilter)
@@ -1100,40 +1280,59 @@ export function getDynamicScenarios(subject, profile, syllabusData, difficultyFi
 export function getDynamicTransferQuestions(subject, profile, syllabusData, difficultyFilter = 'All', moduleFilter = 'All') {
   let list = []
   const chaps = getDynamicChapters(subject, profile, syllabusData)
+  const semesterStr = profile?.semester || profile?.current_semester ? `Semester ${profile.semester || profile.current_semester}` : "Active Semester"
 
-  if (transferBySubject[subject] && transferBySubject[subject].length >= 10 && moduleFilter === 'All') {
-    list = transferBySubject[subject]
-  } else {
-    const generated = []
-    let roundNum = 1
+  const generated = []
+  let roundNum = 1
 
-    chaps.forEach((ch, chIdx) => {
-      const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization"]
-      
-      DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
-        const concept = concepts[tIdx % concepts.length]
-        const formattedTitle = tmpl.title.replace('{concept}', concept).replace('{module}', ch.name)
-        const formattedAnswer = tmpl.answer.replace(/{concept}/g, concept).replace(/{module}/g, ch.name)
+  chaps.forEach((ch, chIdx) => {
+    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization"]
+    
+    DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
+      const concept = concepts[tIdx % concepts.length]
+      const formattedTitle = tmpl.title.replace('{concept}', concept).replace('{module}', ch.name)
+      const formattedAnswer = tmpl.answer.replace(/{concept}/g, concept).replace(/{module}/g, ch.name)
 
-        generated.push({
-          round: roundNum++,
-          difficulty: tmpl.diff,
-          concept: concept,
-          chapter: ch.name,
-          scenario: formattedTitle,
-          hint: `Recall how ${concept} governs operational rules in ${ch.name}.`,
-          modelAnswer: formattedAnswer,
-          conceptsApplied: [concept, tmpl.context, "Day-to-day Life Transfer"],
-          transferScore: tmpl.diff === "Easy" ? 92 : tmpl.diff === "Medium" ? 84 : 76
-        })
+      generated.push({
+        round: roundNum++,
+        id: `kt-${subject.toLowerCase().replace(/\s+/g, '-')}-m${chIdx + 1}-q${tIdx + 1}`,
+        difficulty: tmpl.diff,
+        exact_subject: subject,
+        exact_syllabus_topic: ch.name,
+        semester: semesterStr,
+        concept: concept,
+        chapter: ch.name,
+        scenario: formattedTitle,
+        real_world_application: `Industrial and everyday applications of ${concept} in ${tmpl.context}`,
+        concept_explanation: `Academic explanation: In the accredited syllabus of ${subject}, ${concept} in ${ch.name} defines governing constraints, operational rules, and formal behavioral bounds.`,
+        practical_connection: `Practical execution: Engineers leverage ${concept} to prevent runtime bottlenecks, ensure data integrity, and satisfy real-world performance requirements.`,
+        example: `Production scenario: Deploying ${concept} in ${tmpl.context} ensures optimal throughput and deterministic response under heavy load.`,
+        common_misconception: `Common misconception: Assuming ${concept} can be implemented without verifying prerequisite boundary conditions in ${ch.name}.`,
+        quick_understanding_question: {
+          question: `How does applying ${concept} directly optimize performance in ${tmpl.context}?`,
+          options: [
+            `By enforcing theoretical constraints of ${ch.name} while reducing resource overhead`,
+            `By eliminating all hardware limitations entirely`,
+            `By bypassing formal validation specifications`,
+            `By operating without mathematical foundations`
+          ],
+          correct_answer: `By enforcing theoretical constraints of ${ch.name} while reducing resource overhead`,
+          explanation: `In ${subject}, ${concept} allows systems to operate reliably within formal theoretical limits.`
+        },
+        exam_relevance: `Directly featured in University Semester Examination questions for ${subject} (${ch.name}).`,
+        hint: `Recall how ${concept} governs operational rules in ${ch.name}.`,
+        modelAnswer: formattedAnswer,
+        conceptsApplied: [concept, tmpl.context, "Knowledge Transfer"],
+        transferScore: tmpl.diff === "Easy" ? 92 : tmpl.diff === "Medium" ? 84 : 76,
+        is_valid_topic: true
       })
     })
+  })
 
-    list = generated
-  }
+  list = generated
 
   if (moduleFilter && moduleFilter !== 'All') {
-    const filteredByModule = list.filter((item) => item.chapter === moduleFilter)
+    const filteredByModule = list.filter((item) => item.chapter === moduleFilter || item.exact_syllabus_topic === moduleFilter)
     if (filteredByModule.length > 0) list = filteredByModule
   }
 

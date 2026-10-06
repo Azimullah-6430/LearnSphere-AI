@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { PageHead, Badge, Button } from '../components/ui/Primitives.jsx'
 import { studyTechniques } from '../data/mockData.js'
-import { getDynamicSubjects, getDynamicChapters } from '../data/syllabusData.js'
+import { getActiveValidatedCurriculum, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
+import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
 import { ChevronRight, ChevronDown, ArrowLeft, Send, BookOpen, Target, Sparkles, Zap, Flame, Award, Loader2, UploadCloud } from 'lucide-react'
 
 // Custom Study Methods for Exam High-Score & Deep Understanding
@@ -84,13 +85,16 @@ export default function Trainer() {
   const location = useLocation()
   const activeProfile = user
 
-  const rawSubjects = getDynamicSubjects(activeProfile, syllabusData)
-  const hasExtractedSyllabus = rawSubjects.length > 0
-  const subjects = hasExtractedSyllabus ? rawSubjects : ['General Academic Guidance']
+  const activeCurriculum = getActiveValidatedCurriculum(activeProfile, syllabusData)
+  const subjects = activeCurriculum.subjectNames
+  const subjectObjects = activeCurriculum.subjects || []
+  const hasValidCurriculum = activeCurriculum.isValid && subjects.length > 0
   
-  const [selectedSubject, setSelectedSubject] = useState(subjects[0])
-  const [expandedChapter, setExpandedChapter] = useState(null)
+  const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
+  const [selectedUnit, setSelectedUnit] = useState(null)
+  const [selectedChapter, setSelectedChapter] = useState(null)
   const [selectedConcept, setSelectedConcept] = useState(null)
+  const [expandedUnit, setExpandedUnit] = useState(null)
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
   
   const [selectedMethod, setSelectedMethod] = useState(STUDY_METHODS[0])
@@ -103,7 +107,12 @@ export default function Trainer() {
   const [loadingReply, setLoadingReply] = useState(false)
   const scrollRef = useRef(null)
 
-  const chapters = getDynamicChapters(selectedSubject, activeProfile, syllabusData)
+  const units = getDynamicChapters(selectedSubject, activeProfile, syllabusData)
+
+  // Find active subject metadata (code, category, credits)
+  const currentSubjectObj = subjectObjects.find(s => 
+    (typeof s === 'object' && (s.name === selectedSubject || s.code === selectedSubject))
+  ) || { name: selectedSubject, code: '', type: 'Semester Subject' }
 
   // Handle location state navigation from MisconceptionMap
   useEffect(() => {
@@ -112,19 +121,50 @@ export default function Trainer() {
         setSelectedSubject(location.state.subject)
       }
       setSelectedConcept(location.state.concept)
+      setSelectedChapter(location.state.chapter || null)
+      setSelectedUnit(location.state.unit || null)
       setPhase('method_picker')
     }
-  }, [location.state])
+  }, [location.state, subjects])
 
   useEffect(() => {
-    if (!subjects.includes(selectedSubject)) {
-      setSelectedSubject(subjects[0] || '')
+    if (subjects.length > 0 && !subjects.includes(selectedSubject)) {
+      setSelectedSubject(subjects[0])
+      setSelectedUnit(null)
+      setSelectedChapter(null)
+      setSelectedConcept(null)
+      setMessages([])
+    } else if (subjects.length === 0 && selectedSubject) {
+      setSelectedSubject('')
+      setSelectedUnit(null)
+      setSelectedChapter(null)
+      setSelectedConcept(null)
+      setMessages([])
     }
   }, [subjects, selectedSubject])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, loadingReply])
+
+  const handleSelectSubject = (subj) => {
+    setSelectedSubject(subj)
+    setSelectedUnit(null)
+    setSelectedChapter(null)
+    setSelectedConcept(null)
+    setExpandedUnit(null)
+    if (phase === 'session') {
+      setPhase('setup')
+      setMessages([])
+    }
+  }
+
+  const handleSelectTopic = (unitName, topicName, chapterName = null) => {
+    setSelectedUnit(unitName)
+    setSelectedChapter(chapterName || unitName)
+    setSelectedConcept(topicName)
+    setPhase('method_picker')
+  }
 
   const startSession = (method, technique) => {
     const m = method || selectedMethod
@@ -135,18 +175,19 @@ export default function Trainer() {
     // Record activity & update streak!
     recordActivity('trainer', `Studied "${selectedConcept}" in ${selectedSubject} (${m.name})`, {
       subject: selectedSubject,
+      unit: selectedUnit,
       concept: selectedConcept
     })
 
-    const targetContext = activeProfile?.level === 'college'
-      ? `Semester ${activeProfile?.semester || ''}`.trim()
-      : (activeProfile?.grade_level ? `Class ${activeProfile.grade_level}` : 'School Program')
+    const semLabel = activeCurriculum.semester ? `Semester ${activeCurriculum.semester}` : 'Current Semester'
+    const progLabel = activeCurriculum.degree || activeCurriculum.department || 'Degree Program'
 
-    const teachText = `📚 **Personal AI Trainer Initialized (${targetContext})**:\n\n` +
-      `• **Subject**: ${selectedSubject}\n` +
+    const teachText = `📚 **Personal AI Trainer Initialized (${progLabel} · ${semLabel})**:\n\n` +
+      `• **Validated Subject**: ${currentSubjectObj.code ? `[${currentSubjectObj.code}] ` : ''}${selectedSubject}\n` +
+      `• **Unit / Module**: ${selectedUnit || 'Core Syllabus Unit'}\n` +
       `• **Target Topic**: ${selectedConcept}\n` +
-      `• **Strategy**: ${m.name}\n\n` +
-      `Welcome! Today we are focusing on mastering **"${selectedConcept}"** to help you achieve >90% marks in your exams. Ask me any question or explain your understanding below!`
+      `• **Study Strategy**: ${m.name}\n\n` +
+      `Welcome! We are mastering **"${selectedConcept}"** from your official ${semLabel} curriculum to achieve top exam scores. Feel free to ask questions, solve exam problems, or check your understanding below!`
 
     setMessages([
       { role: 'bot', text: teachText },
@@ -168,10 +209,15 @@ export default function Trainer() {
       const res = await api.trainerChat({
         message: userText,
         subject: selectedSubject,
+        unit: selectedUnit,
+        chapter: selectedChapter,
+        topic: selectedConcept,
         concept: selectedConcept,
         study_method: selectedMethod?.name || selectedMethod?.id,
-        level: activeProfile?.level || 'school',
-        semester: activeProfile?.semester || '',
+        level: activeProfile?.level || 'college',
+        semester: activeCurriculum.semester || activeProfile?.semester || '',
+        degree: activeCurriculum.degree || activeProfile?.degree || '',
+        department: activeCurriculum.department || activeProfile?.department || '',
         class_level: activeProfile?.grade_level || activeProfile?.classLevel || '',
         history: newMsgList.slice(-6)
       })
@@ -190,13 +236,36 @@ export default function Trainer() {
     }
   }
 
+  if (!hasValidCurriculum) {
+    return (
+      <>
+        <PageHead
+          title="Personal AI Trainer & Exam Maximizer"
+          subtitle="Classified subjects from your syllabus. Pick topics and study strategies tailored for exam high scores."
+        />
+        <CurriculumReviewNotice
+          curriculum={activeCurriculum}
+          featureName="Personal AI Trainer"
+          onOpenSyllabusModal={() => setIsSyllabusModalOpen(true)}
+        />
+        <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
+      </>
+    )
+  }
+
+  const semBadge = activeCurriculum.semester ? `Semester ${activeCurriculum.semester}` : 'Semester Active'
+  const progBadge = activeCurriculum.degree ? `${activeCurriculum.degree}` : 'College'
+
   return (
     <>
       <PageHead
         title="Personal AI Trainer & Exam Maximizer"
-        subtitle="Classified subjects from your syllabus. Pick topics and study strategies tailored for exam high scores."
+        subtitle={`Validated ${semBadge} Curriculum · ${progBadge} · Structured Topic Coaching`}
         action={
           <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
+              <BookOpen size={13} /> {semBadge} Validated
+            </span>
             <span className="px-3 py-1 bg-amber-500/10 text-amber-600 border border-amber-500/20 rounded-full text-xs font-bold flex items-center gap-1">
               <Flame size={14} className="text-amber-500 animate-bounce" /> {streakDays} Day Streak
             </span>
@@ -204,92 +273,144 @@ export default function Trainer() {
         }
       />
 
-      <div className="h-[calc(100vh-220px)] min-h-[580px] border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--surface)] flex">
+      <div className="h-[calc(100vh-220px)] min-h-[600px] border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--surface)] flex">
 
-        {/* LEFT: Dynamic Syllabus Tree (Subject → Chapter → Concept) */}
-        <div className="w-[240px] shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
+        {/* LEFT: 4-Level Syllabus Tree (Semester Subjects → Units/Modules → Chapters → Topics) */}
+        <div className="w-[280px] shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden bg-[var(--surface-alt)]/40">
           <div className="p-3.5 border-b border-[var(--border)]">
-            <div className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Classified Subjects</div>
-            <div className="flex flex-col gap-1 max-h-[160px] overflow-y-auto">
-              {subjects.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => { setSelectedSubject(s); setExpandedChapter(null); setSelectedConcept(null) }}
-                  className={`text-left px-2.5 py-1.5 rounded-lg text-[12.5px] font-semibold transition-colors ${
-                    selectedSubject === s
-                      ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-bold'
-                      : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+                {semBadge} Subjects ({subjects.length})
+              </span>
+              <Badge tone="accent">{activeCurriculum.department || 'Core'}</Badge>
+            </div>
+            
+            {/* Subject Selector Tabs */}
+            <div className="flex flex-col gap-1 max-h-[190px] overflow-y-auto pr-1">
+              {subjects.map((s) => {
+                const sObj = subjectObjects.find(item => typeof item === 'object' && item.name === s)
+                const isSelected = selectedSubject === s
+                return (
+                  <button
+                    key={s}
+                    onClick={() => handleSelectSubject(s)}
+                    className={`text-left px-2.5 py-2 rounded-xl text-[12px] font-semibold transition-all flex flex-col gap-0.5 border ${
+                      isSelected
+                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
+                        : 'border-transparent text-[var(--text-soft)] hover:bg-[var(--surface)] hover:border-[var(--border)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      {sObj?.code && (
+                        <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${isSelected ? 'bg-white/20 text-white' : 'bg-[var(--surface-alt)] text-[var(--text-faint)]'}`}>
+                          {sObj.code}
+                        </span>
+                      )}
+                      {sObj?.credits && (
+                        <span className={`text-[9.5px] font-medium ${isSelected ? 'text-white/80' : 'text-[var(--text-faint)]'}`}>
+                          {sObj.credits} Cr
+                        </span>
+                      )}
+                    </div>
+                    <span className="line-clamp-1 leading-tight">{s}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)] px-1.5 py-2">Syllabus Chapters & Topics</div>
-            {chapters.map((ch, idx) => (
-              <div key={ch.name || idx}>
-                <button
-                  onClick={() => setExpandedChapter(expandedChapter === ch.name ? null : ch.name)}
-                  className="w-full flex items-center justify-between px-2 py-2 rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors"
-                >
-                  <span className="text-left leading-tight line-clamp-1">{ch.name}</span>
-                  <ChevronDown size={12} className={`shrink-0 transition-transform ${expandedChapter === ch.name ? 'rotate-180' : ''}`} />
-                </button>
-                {expandedChapter === ch.name && (
-                  <div className="ml-2 mb-1">
-                    {ch.concepts.map((concept) => (
-                      <button
-                        key={concept}
-                        onClick={() => { setSelectedConcept(concept); setPhase('method_picker') }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11.5px] transition-colors mb-0.5 ${
-                          selectedConcept === concept
-                            ? 'bg-[var(--accent)] text-white font-semibold'
-                            : 'text-[var(--text-faint)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
-                        }`}
-                      >
-                        {concept}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+          {/* Unit / Module / Chapter / Topic Hierarchy */}
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)] px-1.5 py-1 flex items-center justify-between">
+              <span>Units & Topics</span>
+              <span className="text-[9.5px] font-normal">{units.length} Modules</span>
+            </div>
+
+            {units.map((unit, uIdx) => {
+              const isExpanded = expandedUnit === unit.name || (!expandedUnit && uIdx === 0)
+              return (
+                <div key={unit.name || uIdx} className="rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--surface)]">
+                  <button
+                    onClick={() => setExpandedUnit(isExpanded ? '__collapsed' : unit.name)}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-[11.5px] font-bold text-left transition-colors ${
+                      isExpanded ? 'bg-[var(--accent-soft)]/60 text-[var(--accent)]' : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
+                    }`}
+                  >
+                    <span className="line-clamp-1 leading-tight">{unit.name}</span>
+                    <ChevronDown size={13} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isExpanded && (
+                    <div className="p-1.5 bg-[var(--surface)] border-t border-[var(--border)] space-y-0.5">
+                      {(unit.concepts || []).map((concept, cIdx) => {
+                        const isSelected = selectedConcept === concept && selectedUnit === unit.name
+                        return (
+                          <button
+                            key={concept || cIdx}
+                            onClick={() => handleSelectTopic(unit.name, concept)}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] transition-all flex items-center gap-1.5 ${
+                              isSelected
+                                ? 'bg-[var(--accent)] text-white font-semibold shadow-xs'
+                                : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-white' : 'bg-[var(--accent)]/50'}`} />
+                            <span className="line-clamp-1">{concept}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
         {/* CENTER: Setup prompt → Study Method picker → AI Chat */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--surface)]">
           {phase === 'setup' && (
-            <div className="flex-1 flex items-center justify-center p-8">
-              <div className="text-center max-w-[420px]">
-                {!hasExtractedSyllabus && (
-                  <div className="mb-6 p-4 bg-[var(--accent-soft)] border border-[var(--accent)]/30 rounded-2xl text-left">
-                    <div className="flex items-center gap-2 text-sm font-bold text-[var(--accent)] mb-1">
-                      <BookOpen size={16} /> Upload Your Syllabus & Curriculum
-                    </div>
-                    <p className="text-xs text-[var(--text-soft)] mb-3">
-                      Upload your course syllabus PDF/image or paste topics to extract your exact degree subjects (e.g., Semester 5 Software Engineering, Web Technologies) and unlock custom Personal Trainer modules!
-                    </p>
-                    <button
-                      onClick={() => setIsSyllabusModalOpen(true)}
-                      className="px-3.5 py-1.5 bg-[var(--accent)] text-white text-xs font-bold rounded-lg hover:bg-[var(--accent-dim)] flex items-center gap-1.5"
-                    >
-                      <UploadCloud size={14} /> Upload Syllabus Document
-                    </button>
-                  </div>
-                )}
-                <div className="text-4xl mb-3">📖</div>
-                <div className="text-[16px] font-extrabold mb-2">Select a topic from your syllabus</div>
-                <div className="text-sm text-[var(--text-soft)] mb-5">
-                  Choose a classified subject and chapter on the left, then select your exam study strategy to begin.
+            <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
+              <div className="text-center max-w-[500px]">
+                <div className="w-14 h-14 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mx-auto text-2xl mb-3 shadow-inner">
+                  <BookOpen size={28} />
                 </div>
-                <div className="flex flex-col gap-2.5 text-[12.5px] text-[var(--text-faint)] text-left bg-[var(--surface-alt)] p-4 rounded-xl">
-                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">1</span> Pick subject from your syllabus</div>
-                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">2</span> Expand chapter & select a topic</div>
-                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">3</span> Choose High-Score Exam Strategy</div>
+                <div className="text-[17px] font-extrabold mb-1.5">
+                  {selectedSubject ? `${selectedSubject}` : 'Select a Topic from Your Curriculum'}
+                </div>
+                <div className="text-xs text-[var(--text-soft)] mb-5 max-w-[420px] mx-auto leading-relaxed">
+                  Navigate through <strong>{semBadge}</strong> units and topics on the left panel, or ask instant questions about your semester syllabus.
+                </div>
+
+                {/* Instant Action Pills */}
+                <div className="flex flex-wrap gap-2 justify-center mb-6">
+                  <button
+                    onClick={() => {
+                      setSelectedConcept("Semester Syllabus Overview")
+                      setSelectedUnit("All Subjects")
+                      setPhase('session')
+                      sendMessage(`What are my ${semBadge} subjects?`)
+                    }}
+                    className="px-3 py-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface-alt)] text-[11.5px] font-semibold text-[var(--text-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all flex items-center gap-1.5"
+                  >
+                    📋 What are my {semBadge} subjects?
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (units[0]?.concepts?.[0]) {
+                        handleSelectTopic(units[0].name, units[0].concepts[0])
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface-alt)] text-[11.5px] font-semibold text-[var(--text-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all flex items-center gap-1.5"
+                  >
+                    🎯 Start Coaching on Unit I
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-2 text-[12px] text-[var(--text-faint)] text-left bg-[var(--surface-alt)] p-4 rounded-xl border border-[var(--border)]">
+                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">1</span> <strong>Subject</strong>: Pick validated {semBadge} course</div>
+                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">2</span> <strong>Unit/Module</strong>: Expand exact syllabus chapter</div>
+                  <div className="flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] font-bold">3</span> <strong>Topic</strong>: Select key concept for exam scoring strategy</div>
                 </div>
               </div>
             </div>
@@ -298,14 +419,18 @@ export default function Trainer() {
           {/* Strategy Picker (shown after topic selected) */}
           {phase === 'method_picker' && selectedConcept && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Selected Topic</div>
-                <div className="text-lg font-extrabold text-[var(--accent)]">{selectedConcept}</div>
-                <div className="text-xs text-[var(--text-soft)]">{selectedSubject} · Syllabus Topic</div>
+              <div className="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)]/60">
+                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">
+                  <span>{semBadge}</span> · <span>{selectedSubject}</span>
+                </div>
+                <div className="text-lg font-extrabold text-[var(--text)]">{selectedConcept}</div>
+                <div className="text-xs text-[var(--text-soft)] mt-0.5">
+                  Unit: <strong>{selectedUnit || 'Core Module'}</strong>
+                </div>
               </div>
 
               <div>
-                <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">1. Choose Exam Study Strategy</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">1. Choose Exam Coaching Strategy</div>
                 <div className="grid md:grid-cols-2 gap-3 mb-6">
                   {STUDY_METHODS.map((m) => (
                     <button
@@ -313,8 +438,8 @@ export default function Trainer() {
                       onClick={() => setSelectedMethod(m)}
                       className={`text-left p-4 rounded-xl border transition-all ${
                         selectedMethod.id === m.id
-                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] shadow-sm'
-                          : 'border-[var(--border)] hover:border-[var(--accent-dim)]'
+                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] shadow-sm ring-1 ring-[var(--accent)]'
+                          : 'border-[var(--border)] hover:border-[var(--accent-dim)] bg-[var(--surface)]'
                       }`}
                     >
                       <div className="font-bold text-[13.5px] mb-1">{m.name}</div>
@@ -324,7 +449,10 @@ export default function Trainer() {
                   ))}
                 </div>
 
-                <div className="flex justify-end pt-2">
+                <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
+                  <Button variant="ghost" onClick={() => setPhase('setup')}>
+                    <ArrowLeft size={14} /> Back to Syllabus Tree
+                  </Button>
                   <Button onClick={() => startSession(selectedMethod, selectedTechnique)} className="flex items-center gap-2">
                     Start Learning Session <ChevronRight size={15} />
                   </Button>
@@ -333,76 +461,95 @@ export default function Trainer() {
             </div>
           )}
 
-          {/* Chat session */}
+          {/* Chat / Coaching Session */}
           {phase === 'session' && (
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface-alt)]/50">
-                <div>
-                  <div className="text-[13px] font-bold">{selectedConcept}</div>
-                  <div className="text-[11px] text-[var(--text-faint)]">{selectedSubject} · {selectedMethod.name}</div>
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Context Header */}
+              <div className="p-3 px-4 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface-alt)]/40 shrink-0">
+                <div className="flex items-center gap-2 truncate">
+                  <button
+                    onClick={() => setPhase('setup')}
+                    className="p-1 rounded-lg hover:bg-[var(--surface)] text-[var(--text-soft)]"
+                    title="Back to topics"
+                  >
+                    <ArrowLeft size={16} />
+                  </button>
+                  <div className="truncate">
+                    <div className="text-[13px] font-bold truncate flex items-center gap-1.5">
+                      <span>{selectedSubject}</span>
+                      <span className="text-[var(--text-faint)]">›</span>
+                      <span className="text-[var(--accent)]">{selectedConcept}</span>
+                    </div>
+                    <div className="text-[10.5px] text-[var(--text-faint)] truncate">
+                      {selectedUnit || 'Syllabus Module'} · {selectedMethod.name}
+                    </div>
+                  </div>
                 </div>
-                <button onClick={() => setPhase('method_picker')} className="text-[11.5px] font-semibold text-[var(--text-faint)] hover:text-[var(--accent)] flex items-center gap-1 border border-[var(--border)] px-2.5 py-1 rounded-lg">
-                  <ArrowLeft size={11} /> Switch strategy
-                </button>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setPhase('method_picker')}
+                    className="px-2.5 py-1 border border-[var(--border)] rounded-lg text-[11px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface)]"
+                  >
+                    Switch Strategy
+                  </button>
+                </div>
               </div>
 
-              <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
-                {messages.map((m, i) => (
-                  <div key={i} className={`max-w-[80%] px-4 py-3 rounded-xl text-[13.5px] leading-relaxed whitespace-pre-line ${
-                    m.role === 'user'
-                      ? 'bg-[var(--accent)] text-white self-end rounded-br-[3px]'
-                      : 'bg-[var(--surface-alt)] self-start rounded-bl-[3px]'
-                  }`}>
-                    {m.text}
+              {/* Chat Message Stream */}
+              <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map((m, idx) => (
+                  <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[85%] rounded-2xl p-4 text-[13px] leading-relaxed shadow-xs ${
+                        m.role === 'user'
+                          ? 'bg-[var(--accent)] text-white font-medium rounded-br-none'
+                          : 'bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text)] rounded-bl-none prose dark:prose-invert max-w-none'
+                      }`}
+                    >
+                      {m.text.split('\n').map((line, lIdx) => (
+                        <p key={lIdx} className="mb-2 last:mb-0 whitespace-pre-wrap">{line}</p>
+                      ))}
+                    </div>
                   </div>
                 ))}
                 {loadingReply && (
-                  <div className="bg-[var(--surface-alt)] self-start rounded-bl-[3px] px-4 py-3 rounded-xl text-[13.5px] text-[var(--text-soft)] flex items-center gap-2 animate-pulse">
-                    <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
-                    <span>AI Personal Trainer is analyzing your question...</span>
+                  <div className="flex justify-start">
+                    <div className="bg-[var(--surface-alt)] border border-[var(--border)] rounded-2xl rounded-bl-none p-3.5 flex items-center gap-2 text-xs text-[var(--text-soft)]">
+                      <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+                      Preparing personalized explanation from your semester syllabus...
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="p-4 border-t border-[var(--border)] space-y-2.5">
-                {/* Quick Action Exam Booster Prompts */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-                  <span className="font-bold text-[var(--text-faint)] uppercase text-[10px] shrink-0 mr-1">Quick Actions:</span>
-                  {[
-                    { label: '🎯 Exam Marking Strategy', prompt: `Give me the exact examiner marking criteria, mandatory technical terms, and common traps for "${selectedConcept}" to score maximum marks.` },
-                    { label: '📝 Generate Practice Problem', prompt: `Generate a high-yield exam-style practice numerical/conceptual problem for "${selectedConcept}" with step-by-step solution breakdown.` },
-                    { label: '⚡ Key Formulas & Derivation', prompt: `List the core standard equations, SI units, and step-by-step mathematical derivation for "${selectedConcept}".` },
-                    { label: '💡 Feynman Analogy Breakdown', prompt: `Explain "${selectedConcept}" using the Feynman technique with a simple intuitive real-world analogy.` }
-                  ].map(({ label, prompt }) => (
-                    <button
-                      key={label}
-                      disabled={loadingReply}
-                      onClick={() => sendMessage(prompt)}
-                      className="px-2.5 py-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all shrink-0 font-semibold text-[11.5px]"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex gap-2">
+              {/* Input Box */}
+              <div className="p-3 border-t border-[var(--border)] bg-[var(--surface)]">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    sendMessage()
+                  }}
+                  className="flex items-center gap-2"
+                >
                   <input
+                    type="text"
                     value={input}
-                    disabled={loadingReply}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                    placeholder={loadingReply ? "AI Trainer is analyzing..." : "Ask a question or type your answer to test your knowledge..."}
-                    className="flex-1 border border-[var(--border-strong)] rounded-lg px-3.5 py-[10px] text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
+                    placeholder={`Ask about ${selectedConcept || selectedSubject} or exam questions...`}
+                    className="flex-1 px-4 py-2.5 text-xs bg-[var(--surface-alt)] border border-[var(--border)] rounded-xl text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                    disabled={loadingReply}
                   />
-                  <button onClick={() => sendMessage()} disabled={loadingReply} className="px-4 py-[10px] rounded-lg bg-[var(--accent)] text-white text-[13.5px] font-semibold hover:bg-[var(--accent-dim)] disabled:opacity-50 flex items-center gap-2 shrink-0">
-                    {loadingReply ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  </button>
-                </div>
+                  <Button type="submit" disabled={!input.trim() || loadingReply} className="px-4 py-2.5">
+                    <Send size={14} />
+                  </Button>
+                </form>
               </div>
             </div>
           )}
         </div>
       </div>
+
       <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>
   )
