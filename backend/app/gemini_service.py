@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+from .trainer_validator import TrainerResponseQualityValidator
+
 logger = logging.getLogger(__name__)
 
 _gemini_dir = Path(__file__).resolve().parent
@@ -126,6 +128,17 @@ class GeminiService:
             "temperature": temperature,
             "maxOutputTokens": 65536
         }
+        try:
+            seed_source = prompt[:2000]
+            if files:
+                for f_item in files:
+                    p_str = f_item if isinstance(f_item, str) else (f_item or {}).get("path") or ""
+                    if p_str and os.path.exists(p_str):
+                        seed_source += f":{os.path.getsize(p_str)}"
+            generation_config["seed"] = int(hashlib.md5(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+        except Exception:
+            pass
+
         if json_output:
             generation_config["responseMimeType"] = "application/json"
 
@@ -495,15 +508,32 @@ ULTRA-STRICT HUMAN EXAMINER MARKING PROTOCOL
    - ERROR CARRIED FORWARD (NO DOUBLE PENALTY): In multi-step derivations or numericals, if an early arithmetic slip occurs but subsequent steps follow valid mathematical logic, deduct for the slip once. Award legitimate method marks for follow-through steps.
    - PROGRAMMING RIGOR: Check variable scope (e.g. parameter named 'average' but body uses undefined 'mark'), built-in function calls (e.g. 'sum(marks)' vs broken 'marks(sum)'), list appending ('marks.append(x)' vs 'append += marks'), and language-specific syntax (penalize C/Java loops in Python).
 
-5. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
+5. ADVANCED MATHEMATICAL, DERIVATION & ANALYTICAL SCRIPT EVALUATION PROTOCOL:
+   - MULTI-TIERED METHOD MARKING (Step & Method Marks):
+     * Step 1: Formula / Governing Law / Transformation Statement (20-25% of marks).
+     * Step 2: Substitution & Integration / Differentiation / Algebraic Working Steps (45-55% of marks).
+     * Step 3: Final Simplification, Evaluation of Limits / Integrals, and Proper Units/Result (25-30% of marks).
+   - AUXILIARY & DUMMY VARIABLE SUBSTITUTION HANDLING:
+     * When a student defines an auxiliary dummy variable (e.g., setting k = a + jw or tau = a*t) and proceeds with valid calculus steps to evaluate the problem in terms of that variable, award ALL earned method and calculus integration marks (75-85%+ of the question).
+     * If the student omits back-substituting the original variable in the very last line, deduct ONLY a minor accuracy penalty (e.g., 0.5 to 1.5 marks out of 8-16 marks) instead of penalizing the entire question.
+   - VISUAL PROOFS, TABLES & COORDINATE GRAPHING CREDIT:
+     * When describing mathematical concepts, signals, functions, or systems (such as even/odd properties, step responses, or harmonic waveforms): if the student provides concrete numerical value tables (e.g., evaluating points for positive and negative arguments) and neatly plots coordinate graphs illustrating the symmetry or response, award substantial credit for the demonstrated mathematical understanding, even if a written formal definition had a minor notation slip.
+   - INTEGRATION BY PARTS & BOUNDARY CONDITIONS:
+     * Check for appropriate assignment of u and dv, application of integral(u dv) = u*v - integral(v du). If the integration logic is sound, award proper step marks even if boundary limit cancellations (e.g., [x(t)*e^(-jwt)] from -infinity to +infinity = 0) are simplified implicitly.
+   - DUAL-LENS COMPREHENSIVE TEACHER FEEDBACK:
+     * In 'evaluation_reason' and 'teacher_feedback', provide balanced, constructive guidance:
+       1) State the Method / Step Marks Earned (highlighting correct formulas, substitutions, calculus, tables, and diagrams).
+       2) Provide Strict Mathematical Subtleties for Precision (highlighting exact theoretical definitions, boundary conditions, limits, or missing final substitutions so the student learns how to achieve 100% precision for competitive examinations).
+
+6. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
    - In both 'evaluation_reason' and 'teacher_feedback', provide the EXACT component-level mark arithmetic and clearly justify deductions for brevity or missing depth.
    - Example (Short answer on long question): "Awarded 3.0/8.0: +3.0 for accurate core definition of Agile vs Waterfall. -5.0 marks deducted because the answer is too brief for an 8-mark question—missing phase-by-phase breakdown, comparative matrix, risk management analysis, and practical industry examples."
 
-6. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
+7. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
    - Bind answers strictly to attempted questions (e.g. Q6(a) vs Q6(b)).
    - For unattempted questions or alternative elective options: set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question".
 
-7. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
+8. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
    - "correct_answer"
    - "partially_correct_concept"
    - "correct_concept_with_calculation_error"
@@ -595,8 +625,9 @@ REAL HUMAN EXAMINER VERIFICATION CHECKLIST:
 6. CHOICE RULES & OPTION ENFORCEMENT: Choice/elective rules (OR groups, Answer any X) are strictly followed without double-counting.
 7. REAL TEACHER EVIDENCE: All feedback statements directly reflect the student's actual handwritten answers without hallucination.
 8. ERROR CARRIED FORWARD & PARTIAL MARKING: Method marks were awarded appropriately where an arithmetic slip occurred without repeatedly penalizing follow-through steps.
-9. CONCISE VS FLUFF SCRUTINY: Concise, complete, accurate answers are rewarded fairly and rambling fluff is not awarded unearned credit.
-10. OCR & AMBIGUITY CHECK: Zero unrecognized symbol corruptions or unaddressed illegibility issues.
+9. MATHEMATICAL DERIVATION & GRAPHICAL AUDIT: Step/method marks are respected for valid calculus integrations, auxiliary variable substitutions, value tables, and coordinate plots. Ensure deductions distinguish between minor non-back-substituted dummy variables vs fundamental conceptual flaws.
+10. CONCISE VS FLUFF SCRUTINY: Concise, complete, accurate answers are rewarded fairly and rambling fluff is not awarded unearned credit.
+11. OCR & AMBIGUITY CHECK: Zero unrecognized symbol corruptions or unaddressed illegibility issues.
 
 Return ONLY a valid JSON object matching this schema:
 {{
@@ -611,13 +642,14 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
         raw = self.generate_content(prompt, json_output=True, temperature=0.0)
         return self.parse_json_response(raw)
 
-    def _deterministic_syllabus_parser(self, content_or_file: Any, target_semester: Any = "", level: str = "college") -> Dict[str, Any]:
+    def _deterministic_syllabus_parser(self, content_or_file: Any, target_semester: Any = "", level: str = "college", dept_str: str = "", prog_str: str = "") -> Dict[str, Any]:
         """
         High-precision deterministic syllabus extraction engine.
-        Extracts structured subject records retaining source text, page references, section provenance, and semester evidence.
+        Extracts structured subject records from tables, multi-page lists, and schemes,
+        retaining exact course codes, types, credits, source text, page references, section provenance, and semester evidence.
         """
         raw_text = ""
-        page_texts = []
+        page_texts: List[Tuple[int, str]] = []
         is_file_path = False
         if isinstance(content_or_file, str) and len(content_or_file) < 500 and not ("\n" in content_or_file):
             try:
@@ -645,7 +677,19 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                     pass
         else:
             raw_text = str(content_or_file or "")
-            page_texts = [(1, raw_text)]
+            # If raw_text contains page markers, reconstruct page_texts
+            if "--- Page " in raw_text:
+                parts = re.split(r"--- Page (\d+) ---", raw_text)
+                if len(parts) > 1:
+                    for i in range(1, len(parts), 2):
+                        try:
+                            p_num = int(parts[i])
+                            p_content = parts[i + 1] if i + 1 < len(parts) else ""
+                            page_texts.append((p_num, p_content))
+                        except Exception:
+                            pass
+            if not page_texts:
+                page_texts = [(1, raw_text)]
 
         target_sem_int = None
         try:
@@ -654,6 +698,10 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
         except Exception:
             pass
 
+        sem_heading_pattern = re.compile(
+            r"\b(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\s*[:\-–—\s]*([0-9]{1,2}|[IVXLCDM]+|[1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|\b([1-8](?:st|nd|rd|th))\s+SEM(?:ESTER)?\b",
+            re.I
+        )
         sem_word_map = {
             "1": 1, "01": 1, "1ST": 1, "FIRST": 1, "I": 1,
             "2": 2, "02": 2, "2ND": 2, "SECOND": 2, "II": 2,
@@ -665,13 +713,29 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             "8": 8, "08": 8, "8TH": 8, "EIGHTH": 8, "VIII": 8
         }
 
-        # Multi-format semester regex supporting prefix and suffix notations
-        sem_heading_pattern = re.compile(
-            r"(?:^|\n)[^\n\r]{0,40}?\b(?:SEMESTER|SEM|TERM)\s*[:\-–—\s#]*([1-8]|0[1-8]|I|II|III|IV|V|VI|VII|VIII|[1-8](?:ST|ND|RD|TH)|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|(?:^|\n)\s*([1-8]|0[1-8]|I|II|III|IV|V|VI|VII|VIII|[1-8](?:ST|ND|RD|TH)|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\s*[:\-–—\s#]+(?:SEMESTER|SEM|TERM)\b",
+        # Multi-department / multi-program section isolation:
+        dept_heading_pattern = re.compile(
+            r"(?:^|\n)[^\n\r]{0,80}?\b(?:DEPARTMENT OF|BRANCH OF|PROGRAM(?:ME)? IN|B\.?TECH|B\.?E\.?|M\.?TECH|M\.?S\.?|B\.?SC|M\.?SC|B\.?C\.?A|M\.?C\.?A)\s*[:\-–—\s]+([^\n\r]+)",
             re.I
         )
-
-
+        student_dept_query = str(dept_str or "").strip().lower()
+        student_prog_query = str(prog_str or "").strip().lower()
+        if student_dept_query and len(student_dept_query) > 2:
+            dept_matches = list(dept_heading_pattern.finditer(raw_text))
+            if len(dept_matches) > 1:
+                target_dept_start = None
+                target_dept_end = len(raw_text)
+                for idx, dm in enumerate(dept_matches):
+                    d_heading = dm.group(0).lower()
+                    if student_dept_query in d_heading or (student_prog_query and student_prog_query in d_heading):
+                        if target_dept_start is None:
+                            target_dept_start = dm.start()
+                    elif target_dept_start is not None:
+                        # Reached a completely different department section
+                        target_dept_end = dm.start()
+                        break
+                if target_dept_start is not None:
+                    raw_text = raw_text[target_dept_start:target_dept_end]
 
         # Detect all semesters present across document
         detected_semesters = []
@@ -735,23 +799,175 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             for idx, h in enumerate(heading_matches):
                 if h["semester"] == target_sem_int:
                     start_p = h["start"]
-                    end_p = heading_matches[idx + 1]["start"] if idx + 1 < len(heading_matches) else len(raw_text)
+                    # End at next DIFFERENT semester heading, or end of document
+                    end_p = len(raw_text)
+                    for next_h in heading_matches[idx + 1:]:
+                        if next_h["semester"] != target_sem_int:
+                            end_p = next_h["start"]
+                            break
                     target_sections.append(raw_text[start_p:end_p])
             if target_sections:
                 relevant_text = "\n\n".join(target_sections)
 
-        subjects = []
+        # Extended Subject Code Regex (Matches standard, AICTE, Autonomous, University, and Lab formats)
+        code_regex = re.compile(
+            r"\b([A-Z]{2,6}\s*[-/]\s*[A-Z0-9]{0,6}\d+[A-Z0-9]*|[A-Z]{2,5}\s*[-/]?\s*\d{2,4}[A-Z0-9]?|\d{2}[A-Z]{2,4}\d{2,4}[A-Z]?)\b",
+            re.I
+        )
+
+        # Ignored header, metadata, institution titles, and unit lines for subject identification
+        ignore_line_pattern = re.compile(
+            r"^(?:s\.?\s*no|sl\.?\s*no|course\s+code|subject\s+code|course\s+title|subject\s+title|category|credits?|contact\s+periods|hours\s+per\s+week|scheme\s+of\s+examination|maximum\s+marks|internal|external|total\s+credits|page\s+\d+|---|===|\*\*\*|unit\s*[0-9ivxlcdm]+|module\s*[0-9ivxlcdm]+|chapter\s*[0-9ivxlcdm]+|text\s*books?|reference\s*books?|course\s+outcomes?|course\s+objectives?|prerequisites?|detailed\s+syllabus|learning\s+outcomes?|co[0-9]|po[0-9]|department\s+of|college\s+of|institute\s+of|university|curriculum\s+scheme|choice\s+based)\b",
+            re.I
+        )
+
+        subjects: List[Dict[str, Any]] = []
+
+        def categorize_subject(name: str, code: str, raw_line: str) -> str:
+            lower = f"{name} {code} {raw_line}".lower()
+            if re.search(r"\b(?:lab|laboratory|practical|workshop|simulation|virtual\s+lab|practice|studio)\b", lower):
+                return "Laboratory"
+            if re.search(r"\b(?:professional\s+elective|program\s+elective|departmental\s+elective|elective\s*[-–—:]?\s*[i|iv|v|x|0-9]+|pec\b|pe\s*[-–—:]?\s*[0-9]+)\b", lower):
+                return "Professional Elective"
+            if re.search(r"\b(?:open\s+elective|interdisciplinary\s+elective|institute\s+elective|oec\b|oe\s*[-–—:]?\s*[0-9]+)\b", lower):
+                return "Open Elective"
+            if re.search(r"\b(?:mandatory|audit\s+course|constitution\s+of\s+india|environmental\s+science|universal\s+human\s+values|essence\s+of\s+indian|traditional\s+knowledge|disaster\s+management|induction\s+program|non-credit)\b", lower):
+                return "Mandatory Audit"
+            if re.search(r"\b(?:project|mini\s+project|project\s+phase|technical\s+seminar|seminar|internship|industrial\s+training|industrial\s+visit|comprehensive\s+viva|capstone)\b", lower):
+                return "Project/Seminar"
+            if re.search(r"\b(?:technical\s+english|professional\s+communication|communication\s+skills|principles\s+of\s+management|engineering\s+economics|total\s+quality\s+management|intellectual\s+property|humanities|hsmc)\b", lower):
+                return "Humanities / Management"
+            return "Theory Core"
+
+        # ── 1. Structured Pipe-Table Parser ───────────────────────────────────
+        header_map: Dict[str, int] = {}
         for line in relevant_text.splitlines():
             line_str = line.strip()
-            if not line_str or len(line_str) < 4:
+            if not line_str or line_str.startswith("--- Page "):
                 continue
-            if sem_heading_pattern.search(line_str) or ("curriculum" in line_str.lower() and "total" in line_str.lower()):
+
+            if "|" in line_str:
+                cells = [c.strip() for c in line_str.strip("|").split("|")]
+                if len(cells) >= 2:
+                    header_check = " ".join(cells).lower()
+                    if any(k in header_check for k in ("course code", "subject code", "course title", "subject title", "credits", "category")):
+                        # Detect column positions
+                        header_map = {}
+                        for c_idx, c_val in enumerate(cells):
+                            c_norm = c_val.lower().strip()
+                            if "code" in c_norm:
+                                header_map["code"] = c_idx
+                            elif "title" in c_norm or "name" in c_norm:
+                                header_map["name"] = c_idx
+                            elif "category" in c_norm or "cat" in c_norm:
+                                header_map["category"] = c_idx
+                            elif c_norm in ("c", "cr", "credits", "credit"):
+                                header_map["credits"] = c_idx
+                            elif c_norm == "l":
+                                header_map["l"] = c_idx
+                            elif c_norm == "t":
+                                header_map["t"] = c_idx
+                            elif c_norm == "p":
+                                header_map["p"] = c_idx
+                        continue
+
+                    if all(re.match(r"^[-:\s]+$", c) for c in cells):
+                        continue
+
+                    row_code = ""
+                    row_name = ""
+                    row_credits = None
+                    row_l, row_t, row_p = None, None, None
+                    row_type = None
+
+                    if "name" in header_map and header_map["name"] < len(cells):
+                        row_name = cells[header_map["name"]]
+                        if "code" in header_map and header_map["code"] < len(cells):
+                            row_code = cells[header_map["code"]]
+                        if "category" in header_map and header_map["category"] < len(cells):
+                            row_type = cells[header_map["category"]]
+                        if "credits" in header_map and header_map["credits"] < len(cells):
+                            try:
+                                row_credits = float(cells[header_map["credits"]])
+                            except Exception:
+                                pass
+                        if "l" in header_map and header_map["l"] < len(cells) and str(cells[header_map["l"]]).isdigit():
+                            row_l = int(cells[header_map["l"]])
+                        if "t" in header_map and header_map["t"] < len(cells) and str(cells[header_map["t"]]).isdigit():
+                            row_t = int(cells[header_map["t"]])
+                        if "p" in header_map and header_map["p"] < len(cells) and str(cells[header_map["p"]]).isdigit():
+                            row_p = int(cells[header_map["p"]])
+                    else:
+                        # Fallback row cell discovery
+                        for cell_idx, cell in enumerate(cells):
+                            if not row_code and code_regex.search(cell) and len(cell) <= 15:
+                                row_code = code_regex.search(cell).group(1).replace(" ", "")
+                            elif not row_name and len(cell) >= 3 and not re.match(r"^[\d\.\s]+$", cell):
+                                c_clean = re.sub(r"^\d+[\.\)]\s*", "", cell)
+                                if len(c_clean) >= 3 and not any(k in c_clean.lower() for k in ("semester", "credits", "total", "hours")):
+                                    row_name = c_clean
+                            elif re.search(r"\b(?:PC|PE|OE|MC|EEC|HSMC|BSC|ESC|Theory|Lab|Practical|Audit)\b", cell, re.I):
+                                row_type = cell
+
+                        # Credits is last numeric cell
+                        for cell in reversed(cells):
+                            if re.match(r"^\d+(?:\.\d+)?$", cell):
+                                try:
+                                    row_credits = float(cell)
+                                    break
+                                except Exception:
+                                    pass
+
+                    if row_name:
+                        category = row_type if row_type in ("Laboratory", "Professional Elective", "Open Elective", "Mandatory Audit", "Project/Seminar") else categorize_subject(row_name, row_code, line_str)
+                        
+                        # Find source page
+                        page_found = 1
+                        matched_pages = []
+                        for p_num, p_txt in page_texts:
+                            code_matched = bool(row_code and re.search(r"\b" + re.escape(row_code) + r"\b", p_txt, re.I))
+                            name_matched = bool(row_name.lower() in p_txt.lower())
+                            if code_matched or name_matched:
+                                matched_pages.append(p_num)
+                        if matched_pages:
+                            page_found = matched_pages[0]
+                        else:
+                            matched_pages = [1]
+
+                        subjects.append({
+                            "code": row_code,
+                            "name": row_name,
+                            "type": category,
+                            "category": category,
+                            "credits": row_credits,
+                            "lecture_hours": row_l,
+                            "tutorial_hours": row_t,
+                            "practical_hours": row_p,
+                            "semester": target_semester or (target_sem_int if target_sem_int else 1),
+                            "source_page_numbers": matched_pages,
+                            "source_page": page_found,
+                            "source_section": explicit_identifier or f"Semester {target_semester or ''} Scheme Table",
+                            "source_text": line_str,
+                            "semester_evidence": f"Found in table under '{explicit_identifier or f'Semester {target_semester} Curriculum'}'",
+                            "confidence": 0.98,
+                            "evidence_verified": True
+                        })
+                        continue
+
+        # ── 2. Standard Line / Space-Delimited Scheme Parser ──────────────────
+        for line in relevant_text.splitlines():
+            line_str = line.strip()
+            if not line_str or len(line_str) < 4 or line_str.startswith("--- Page ") or line_str.startswith("|"):
+                continue
+            if sem_heading_pattern.search(line_str) or ignore_line_pattern.search(line_str) or ("curriculum" in line_str.lower() and "total" in line_str.lower()):
                 continue
 
             code = ""
-            code_match = re.search(r"\b([A-Z]{2,4}\s*\d{3,4}[A-Z]?)\b", line_str)
+            code_match = code_regex.search(line_str)
             if code_match:
-                code = code_match.group(1).replace(" ", "")
+                code_cand = code_match.group(1).replace(" ", "")
+                if not re.match(r"^(?:THE|AND|FOR|WITH|FROM|THIS|THAT|SEMESTER|THEORY|LAB|PRACTICAL|SYLLABUS|UNIT|MODULE|CHAPTER)$", code_cand, re.I):
+                    code = code_cand
 
             credits = None
             cr_match = re.search(r"(?:credits?|cr)\s*[:=]?\s*(\d+(?:\.\d+)?)", line_str, re.I)
@@ -768,16 +984,28 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 t_hrs = int(ltp_match.group(2))
                 p_hrs = int(ltp_match.group(3))
 
-            clean_name = re.sub(r"^\d+[\.\)]\s*", "", line_str)
+            ltpc_end = re.search(r"\b(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s*$", line_str)
+            if ltpc_end and not l_hrs:
+                try:
+                    l_hrs = int(ltpc_end.group(1))
+                    t_hrs = int(ltpc_end.group(2))
+                    p_hrs = int(ltpc_end.group(3))
+                    if credits is None:
+                        credits = float(ltpc_end.group(4))
+                except Exception:
+                    pass
+
+            clean_name = re.sub(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*", "", line_str)
+            if code:
+                clean_name = re.sub(re.escape(code), "", clean_name, flags=re.I)
             clean_name = re.sub(r"\[.*?\]", "", clean_name)
-            clean_name = re.sub(r"\([A-Za-z0-9\-_]+\)", "", clean_name)
-            clean_name = re.sub(r"\b[A-Z]{2,4}\s*\d{3,4}[A-Z]?\b", "", clean_name)
             clean_name = re.sub(r"(?:credits?|cr)\s*[:=]?\s*\d+(?:\.\d+)?.*$", "", clean_name, flags=re.I)
             clean_name = re.sub(r"L\s*[:=]?\s*\d+\s*T\s*[:=]?\s*\d+\s*P\s*[:=]?\s*\d+.*$", "", clean_name, flags=re.I)
-            clean_name = re.sub(r"[-:]+", " ", clean_name).strip()
+            clean_name = re.sub(r"\b\d+\s+\d+\s+\d+\s+\d+(?:\.\d+)?\s*$", "", clean_name)
+            clean_name = re.sub(r"[-:–—|]+", " ", clean_name).strip()
 
-            if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page")):
-                # Check for existing subject entry to avoid duplicate rows from detailed syllabus headings
+            if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page", "internal", "external", "maximum marks")):
+                # Check for existing subject entry
                 existing_idx = None
                 for idx, s in enumerate(subjects):
                     if (code and s.get("code") == code) or (s.get("name", "").lower() == clean_name.lower()):
@@ -793,19 +1021,19 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         subjects[existing_idx]["practical_hours"] = p_hrs
                     continue
 
-                category = "Theory Core"
-                if "lab" in clean_name.lower() or "practical" in clean_name.lower():
-                    category = "Laboratory"
-                elif "elective" in clean_name.lower():
-                    category = "Professional Elective"
-                elif "audit" in clean_name.lower() or "constitution" in clean_name.lower() or "values" in clean_name.lower():
-                    category = "Mandatory Audit"
+                category = categorize_subject(clean_name, code, line_str)
 
                 page_found = 1
+                matched_pages = []
                 for p_num, p_txt in page_texts:
-                    if clean_name in p_txt or (code and code in p_txt):
-                        page_found = p_num
-                        break
+                    code_matched = bool(code and re.search(r"\b" + re.escape(code) + r"\b", p_txt, re.I))
+                    name_matched = bool(clean_name.lower() in p_txt.lower())
+                    if code_matched or name_matched:
+                        matched_pages.append(p_num)
+                if matched_pages:
+                    page_found = matched_pages[0]
+                else:
+                    matched_pages = [1]
 
                 subjects.append({
                     "code": code,
@@ -817,7 +1045,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                     "tutorial_hours": t_hrs,
                     "practical_hours": p_hrs,
                     "semester": target_semester or (target_sem_int if target_sem_int else 1),
-                    "source_page_numbers": [page_found],
+                    "source_page_numbers": matched_pages,
                     "source_page": page_found,
                     "source_section": explicit_identifier or f"Semester {target_semester or ''} Scheme Table",
                     "source_text": line_str,
@@ -826,24 +1054,24 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                     "evidence_verified": True
                 })
 
-        # Extract detailed syllabus units/modules for subjects
+        # Extract detailed syllabus units/modules strictly from document text
         chapters_map = {}
         current_subject_key = None
         current_units = []
 
         for line in relevant_text.splitlines():
             line_s = line.strip()
-            if not line_s:
+            if not line_s or line_s.startswith("--- Page "):
                 continue
 
-            # Check if line indicates a subject heading (e.g. "IT501 DATABASE MANAGEMENT SYSTEMS")
             matched_subj = None
             for s in subjects:
                 s_name = s.get("name", "")
                 s_code = s.get("code", "")
                 if s_name and (s_name.lower() in line_s.lower() or (s_code and s_code.lower() in line_s.lower())):
-                    matched_subj = s_name
-                    break
+                    if not re.match(r"^(?:Unit|Module|Chapter)\b", line_s, re.I):
+                        matched_subj = s_name
+                        break
 
             if matched_subj:
                 if current_subject_key and current_units:
@@ -852,7 +1080,6 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 current_units = []
                 continue
 
-            # Check for Unit / Module / Chapter pattern
             unit_match = re.match(r"^(?:Unit|Module|Chapter)\s*([0-9IVXLCDM]+)\s*[:\-\.]?\s*(.+)$", line_s, re.I)
             if unit_match and current_subject_key:
                 unit_num = unit_match.group(1)
@@ -868,32 +1095,11 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
         if current_subject_key and current_units:
             chapters_map[current_subject_key] = current_units
 
-        # If a subject didn't have explicit units in document text, provide structured syllabus units
+        # Do NOT invent placeholder units if units were not detailed in uploaded document
         for s in subjects:
             s_name = s.get("name", "")
-            if s_name not in chapters_map or not chapters_map[s_name]:
-                chapters_map[s_name] = [
-                    {
-                        "name": f"Unit I: {s_name} Foundations & Core Principles",
-                        "concepts": ["Core Fundamentals", "Theoretical Concepts", "Standard Notations & Laws"]
-                    },
-                    {
-                        "name": f"Unit II: {s_name} Architecture & Design Methodologies",
-                        "concepts": ["System Architecture", "Design Principles", "Formal Specifications"]
-                    },
-                    {
-                        "name": f"Unit III: {s_name} Implementation & Problem Solving",
-                        "concepts": ["Core Algorithms", "Analytical Problem Solving", "Execution Models"]
-                    },
-                    {
-                        "name": f"Unit IV: {s_name} Advanced Techniques & Optimization",
-                        "concepts": ["Performance Optimization", "Advanced Models", "Efficiency Trade-offs"]
-                    },
-                    {
-                        "name": f"Unit V: {s_name} Industry Applications & Case Studies",
-                        "concepts": ["Real-world Case Studies", "Industry Applications", "Standard Exam Topics"]
-                    }
-                ]
+            if s_name not in chapters_map:
+                chapters_map[s_name] = []
 
         return {
             "validation_status": "VALID" if subjects else "NEEDS_REVIEW",
@@ -904,7 +1110,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             "expected_subject_count": len(subjects),
             "extracted_subject_count": len(subjects),
             "completeness_verified": bool(subjects),
-            "completeness_notes": f"Extracted {len(subjects)} subjects with verified source provenance.",
+            "completeness_notes": f"Extracted {len(subjects)} subjects with verified source provenance across document pages.",
             "subjects": subjects,
             "extracted_subjects": [s["name"] for s in subjects],
             "chapters": chapters_map,
@@ -938,6 +1144,18 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
         if level.lower() == "college" and target_sem_str:
             sem_instruction = f"""
+CRITICAL STUDENT PROFILE & AUTHORITATIVE SECTION MAPPING:
+The authenticated student's profile is strictly authoritative:
+- Program / Degree: {prog_str}
+- Department / Branch: {dept_str}
+- Semester: {target_sem_str}
+
+MULTI-DEPARTMENT / MULTI-PROGRAM DISAMBIGUATION:
+If the uploaded document contains multiple departments, branches, or programs (e.g. Mechanical Engineering, Civil Engineering, Computer Science, Information Technology, Electrical Engineering, etc.):
+- Locate the specific section or subsection belonging to the student's department/program: "{dept_str}" / "{prog_str}".
+- Extract subjects ONLY from the student's department section for Semester {target_sem_str}.
+- DO NOT extract, combine, or mix subjects from other departments, other programs, or other semesters.
+
 CRITICAL EVIDENCE-BASED & ANTI-HALLUCINATION RULES:
 Every extracted subject MUST retain its verifiable source evidence from the uploaded document.
 For each subject capture:
@@ -947,7 +1165,7 @@ For each subject capture:
 * Credits (numeric e.g. 3, 4, 1.5, 2, 0)
 * L-T-P hours (Lecture, Tutorial, Practical) if present
 * source_page_numbers: Array of integer page numbers where this subject is found (e.g. [4])
-* source_section: Specific table name, scheme heading, or chapter section (e.g. "Semester 5 Scheme Table")
+* source_section: Specific table name, scheme heading, or chapter section (e.g. "Semester 5 Scheme Table - Information Technology")
 * source_text: Exact verifiable sentence or table row excerpt from the syllabus document
 * semester_evidence: Document heading or text establishing that this subject belongs to Semester {target_sem_str}
 * confidence: Numeric score between 0.70 and 1.0 based on clarity in the document
@@ -956,6 +1174,7 @@ Do NOT invent, fabricate, or include any subject not physically present in the u
 
 1. FULL DOCUMENT INSPECTION & EXHAUSTIVE EXTRACTION:
    - Search the entire document for Semester {target_sem_str} course schemes, tables, matrices, and syllabus pages.
+   - If multiple departments/programs are present in the document, extract subjects ONLY from the section corresponding to "{dept_str}".
    - Extract EVERY SINGLE subject/course listed for Semester {target_sem_str}.
    - Do NOT stop after the first few subjects.
    - Do NOT assume a fixed number of subjects or use an AI guess.
@@ -966,12 +1185,12 @@ Do NOT invent, fabricate, or include any subject not physically present in the u
      * Open Electives
      * Mandatory non-credit courses & Audit courses (e.g. Constitution of India, Universal Human Values)
      * Formally listed project / seminar / mini-project components
-   - Do NOT mix subjects from other semesters (e.g., never mix Semester 4 + Semester 5, or Semester 5 + Semester 6).
+   - Do NOT mix subjects from other semesters or unrelated departments.
    - If document is exclusively for a DIFFERENT semester and does not contain Semester {target_sem_str}:
      * Set "validation_status": "MISMATCH"
      * Set "mismatch_reason": "The uploaded syllabus does not appear to match your current Semester {target_sem_str} profile."
    - COMPLETENESS VERIFICATION:
-     * Count the total number of subjects/courses listed in the Semester {target_sem_str} scheme table ("expected_subject_count").
+     * Count the total number of subjects/courses listed in the Semester {target_sem_str} scheme table for {dept_str} ("expected_subject_count").
      * Count the extracted subjects ("extracted_subject_count").
      * If all listed subjects are fully captured without omission: "completeness_verified": true.
      * If there are unextracted table rows, missing labs, or ambiguity: "completeness_verified": false, "validation_status": "NEEDS_REVIEW", and specify the exact section/page requiring review.
@@ -1060,7 +1279,7 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
             res = self.parse_json_response(raw)
         except Exception as exc:
             logger.warning("[GeminiService] AI syllabus extraction exception: %s. Using deterministic evidence-based parser.", exc)
-            res = self._deterministic_syllabus_parser(content_or_file, target_semester=target_sem_str, level=level)
+            res = self._deterministic_syllabus_parser(content_or_file, target_semester=target_sem_str, level=level, dept_str=dept_str, prog_str=prog_str)
 
         if not isinstance(res, dict):
             res = {}
@@ -1108,6 +1327,19 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
                         "confidence": float(item["confidence"]) if item.get("confidence") is not None and str(item.get("confidence")).replace('.', '', 1).isdigit() else 0.95,
                         "evidence_verified": True
                     })
+
+        # Multi-department validation for college students:
+        # If the input document contains multiple departments, ensure extracted subjects belong ONLY to student's department
+        if level.lower() == "college" and dept_str and len(dept_str) > 2 and parsed_subjects:
+            raw_doc_text = str(content_or_file or "") if isinstance(content_or_file, str) else ""
+            if "DEPARTMENT OF" in raw_doc_text.upper() or "BRANCH OF" in raw_doc_text.upper():
+                det_res = self._deterministic_syllabus_parser(content_or_file, target_semester=target_sem_str, level=level, dept_str=dept_str, prog_str=prog_str)
+                det_names = set(s.get("name", "").lower() for s in det_res.get("subjects", []))
+                if det_names:
+                    # Filter parsed_subjects to only include those in the student's department section
+                    filtered = [s for s in parsed_subjects if s["name"].lower() in det_names]
+                    if filtered:
+                        parsed_subjects = filtered
 
         # Ensure extracted_subjects contains all subject names
         extracted_names = [s["name"] for s in parsed_subjects] if parsed_subjects else (res.get("extracted_subjects") or [])
@@ -1761,9 +1993,245 @@ Return ONLY JSON:
         raw = self.generate_content(prompt, json_output=True)
         return self.parse_json_response(raw)
 
+    def generate_trainer_response(
+        self,
+        message: str,
+        subject: str,
+        topic: str = "",
+        unit: str = "",
+        syllabus_excerpt: str = "",
+        student_context: Optional[Dict[str, Any]] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
+        study_strategy: str = ""
+    ) -> str:
+        """
+        Expert Human Tutor & Exam Coach for Personal Trainer.
+        Provides conversational teaching grounded strictly in the validated curriculum.
+        """
+        ctx = student_context or {}
+        level = ctx.get("level") or "college"
+        degree = ctx.get("degree") or ctx.get("program") or "Undergraduate"
+        dept = ctx.get("department") or ctx.get("branch") or "Engineering/Science"
+        semester = ctx.get("semester") or ctx.get("current_semester") or ""
+        sem_str = f"Semester {semester}" if semester else "Current Academic Term"
+
+        # Format conversation history for multi-turn awareness
+        history_text = ""
+        if history and isinstance(history, list):
+            valid_turns = []
+            for h in history[-8:]:
+                role = "Student" if h.get("role") == "user" else "Tutor"
+                txt = (h.get("text") or h.get("message") or "").strip()
+                if txt:
+                    valid_turns.append(f"{role}: {txt}")
+            if valid_turns:
+                history_text = "CONVERSATION HISTORY:\n" + "\n".join(valid_turns) + "\n\n"
+
+        prompt = f"""You are LearnSphere AI's Master Personal Tutor & Academic Coach.
+You behave like an exceptional, encouraging, rigorous human professor/tutor.
+
+STUDENT PROFILE:
+- Level: {level.capitalize()} ({degree} · {dept} · {sem_str})
+- Validated Subject: {subject}
+- Unit/Module: {unit or 'Core Academic Syllabus Unit'}
+- Active Topic: {topic or 'Core Syllabus Concept'}
+- Validated Syllabus Blueprint: {syllabus_excerpt or subject}
+- Teaching Strategy: {study_strategy or 'Mastery Coaching'}
+
+{history_text}CURRENT STUDENT MESSAGE: "{message}"
+
+PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
+1. DEEP UNDERSTANDING & EMPATHY:
+   - Understand the student's exact question, confusion, or intent.
+   - If the student says "Explain again", "I don't understand", or "Explain simply": Do NOT repeat the previous text. Use the Feynman technique: start with an everyday intuitive analogy, break the concept into smaller bite-sized steps, and explain in plain English before formal definitions.
+   - If the student asks "Give another example": Provide a fresh, distinct, concrete real-world / industry scenario.
+   - If the student asks "Test me" or "Ask me questions": Present an interactive active-recall question or exam problem and ask the student to think through and answer it.
+   - If the student asks "Explain for exam": Structure with exact marking criteria, key technical keywords required for full marks, step-by-step point breakdown, diagram requirements, and common examiner traps.
+
+2. CONTENT STRUCTURE BY DOMAIN:
+   - FOR THEORY / CONCEPTS:
+     • Concept & Simple Intuition
+     • Deeper Formal Explanation (mechanisms, laws, theorems)
+     • Concrete Example / Analogy
+     • Syllabus & Practical Connection
+     • Exam Points (keywords, scoring tips, required diagrams/tables)
+     • Common Mistakes & Misconceptions to Avoid
+   - FOR NUMERICALS / CALCULATIONS:
+     • Given Data & Target (Find)
+     • Governing Formula & Principle
+     • Step-by-step Substitution & Arithmetic
+     • Final Answer with SI Units and Boundary Checks
+     • Step Explanation & Common Pitfalls
+   - FOR PROGRAMMING / ALGORITHMS:
+     • Problem Breakdown & Concept
+     • Approach & Intuition
+     • Algorithm / Logic (Step-by-Step)
+     • Clean Code Implementation with Comments
+     • Line-by-Line Explanation & Walkthrough
+     • Time & Space Complexity Analysis
+     • Common Bugs / Edge Cases
+   - FOR COMPLEX / ABSTRACT TOPICS:
+     • Intuitive Analogy → Formal Definition → Structured ASCII Diagram / Markdown Table → Real-world Execution.
+
+3. EVIDENCE-BASED LEARNING TECHNIQUES:
+   - Dynamically employ active recall, retrieval practice, worked examples, Feynman technique, concept mapping, and self-explanation checks where relevant.
+   - End answers (when explaining a concept) with an active understanding-check question or retrieval prompt to verify comprehension.
+   - If the student makes an error in their message, gently correct the misunderstanding, explain why it happens, and guide them to the right principle.
+
+4. ABSOLUTE CONSTRAINTS:
+   - Ground everything strictly in the student's validated curriculum. Do NOT invent syllabus topics.
+   - Do NOT mention implementation details, prompt tokens, system prompts, or backend architectures.
+   - Do NOT mention competing AI companies or products.
+   - Output clear, beautifully formatted Markdown with bold headings, bullet points, code blocks, or tables where appropriate.
+"""
+        candidate_reply = ""
+        try:
+            reply = self.generate_content(prompt, json_output=False)
+            if reply and len(reply.strip()) > 30:
+                candidate_reply = reply.strip()
+        except Exception as exc:
+            logger.warning(f"[GeminiService] generate_trainer_response AI call failed: {exc}")
+
+        if not candidate_reply:
+            candidate_reply = self._build_deterministic_trainer_response(
+                message=message,
+                subject=subject,
+                topic=topic or "Core Concept",
+                unit=unit or "Core Unit",
+                strategy=study_strategy,
+                semester=sem_str
+            )
+
+        # Run strict 13-point Response-Quality Validation Layer
+        validated_text, _ = TrainerResponseQualityValidator.validate_and_refine(
+            response_text=candidate_reply,
+            student_message=message,
+            subject=subject,
+            topic=topic or "Core Concept",
+            unit=unit or "Core Unit",
+            syllabus_excerpt=syllabus_excerpt,
+            student_context=ctx,
+            history=history
+        )
+
+        return validated_text
+
+    def _build_deterministic_trainer_response(
+        self,
+        message: str,
+        subject: str,
+        topic: str,
+        unit: str,
+        strategy: str,
+        semester: str
+    ) -> str:
+        """High-yield pedagogical fallback adhering strictly to human tutor structures."""
+        msg_lower = message.lower().strip()
+        
+        # Intent: Explain simply / Feynman technique
+        if any(w in msg_lower for w in ["explain simply", "simple words", "simple explanation", "like i'm 5", "easy words", "feynman"]):
+            return (
+                f"💡 **Simple Intuitive Explanation for {topic} ({subject})**\n\n"
+                f"Let's break **{topic}** down using everyday intuition before getting into technical jargon:\n\n"
+                f"### 1. The Core Idea (Plain English)\n"
+                f"Think of **{topic}** as a real-world system coordinator. In {subject}, its primary job is to ensure that all parts work together reliably without conflicts or wasted effort.\n\n"
+                f"### 2. Everyday Analogy\n"
+                f"Imagine a busy restaurant kitchen. If everyone tries to grab ingredients at the exact same moment without rules, orders get mixed up. **{topic}** acts like the head chef's scheduling board, ensuring each task happens in the exact right order.\n\n"
+                f"### 3. Key Principle\n"
+                f"• **Why it exists**: To maintain consistency, prevent errors, and optimize throughput.\n"
+                f"• **What it does**: Establishes predictable rules and boundary checks across the system.\n\n"
+                f"### 4. Quick Self-Check\n"
+                f"In your own words, what is the single biggest problem that occurs if we don't use **{topic}** in {subject}?"
+            )
+
+        # Intent: Explain again / I don't understand
+        if any(w in msg_lower for w in ["explain again", "don't understand", "dont understand", "still confused", "re-explain", "did not get"]):
+            return (
+                f"🔄 **Fresh Perspective: Let's Revisit {topic} Step-by-Step**\n\n"
+                f"No worries at all! Let's approach **{topic}** from a completely different angle:\n\n"
+                f"### Step 1: Where the Confusion Usually Happens\n"
+                f"Many students get stuck because they try to memorize the technical definition first. Instead, focus on the **problem it solves** in {subject}.\n\n"
+                f"### Step 2: The 3-Part Breakdown\n"
+                f"1. **The Input / Trigger**: What situation or data starts the process?\n"
+                f"2. **The Mechanism**: What rule or transformation is applied to that input?\n"
+                f"3. **The Outcome**: What guaranteed result or state do we reach?\n\n"
+                f"### Step 3: Minimal Working Scenario\n"
+                f"Consider a baseline case: when a system encounters a state change under {topic}, it systematically validates constraints before committing changes. This guarantees zero data loss and deterministic behavior.\n\n"
+                f"👉 *Which specific part feels tricky for you right now: the core concept, the mathematical formula, or how to write it in an exam?*"
+            )
+
+        # Intent: Give another example
+        if any(w in msg_lower for w in ["another example", "more examples", "different example", "real world example", "practical example"]):
+            return (
+                f"🌟 **Real-World Industry Example for {topic} ({subject})**\n\n"
+                f"Here is a concrete practical scenario demonstrating **{topic}** in modern engineering:\n\n"
+                f"### Production Scenario: Cloud-Scale E-Commerce\n"
+                f"During a flash sale with 100,000 concurrent users attempting to purchase the last 5 items in stock:\n\n"
+                f"| Step | Action Under {topic} | What Happens Without {topic} |\n"
+                f"| :--- | :--- | :--- |\n"
+                f"| **1. Request** | System locks resource atomically | Multiple threads read stale inventory count |\n"
+                f"| **2. Processing** | Verifies balance & deducts stock | Overselling occurs (10 items sold for 5 in stock) |\n"
+                f"| **3. Final State** | Consistent state committed | Database corruption and customer disputes |\n\n"
+                f"### Key Takeaway for Your Exam\n"
+                f"When writing this in university exams, always mention that **{topic}** guarantees correctness under concurrent workloads."
+            )
+
+        # Intent: Test me / Ask me questions / Practice
+        if any(w in msg_lower for w in ["test me", "ask me", "quiz me", "give me a question", "practice question", "challenge me"]):
+            return (
+                f"🎯 **Active Recall & Exam Challenge: {topic} ({subject})**\n\n"
+                f"Here is a high-yield exam question from your {semester} syllabus blueprint:\n\n"
+                f"### 📝 Question (University Exam Pattern — 8 Marks)\n"
+                f"**Explain the fundamental principles and architecture of {topic} in {subject}.**\n\n"
+                f"**Your task** (Reply with your brief bullet points):\n"
+                f"1. State the formal technical definition.\n"
+                f"2. List at least **two core characteristics** or governing equations.\n"
+                f"3. Identify **one common mistake or limitation** evaluators check for.\n\n"
+                f"💡 *Type your attempt below and I will grade it with strict human-teacher feedback!*"
+            )
+
+        # Intent: Explain for exam / Scoring strategy
+        if any(w in msg_lower for w in ["exam", "scoring", "full marks", "how to write", "university exam", "marking scheme"]):
+            return (
+                f"🎯 **Exam High-Score Blueprint: {topic} ({subject})**\n\n"
+                f"To score **maximum marks** on this topic in your semester examination, structure your paper as follows:\n\n"
+                f"### 1. Definition & Terminology (2 Marks)\n"
+                f"State the formal definition using precise academic keywords. Underline technical terms like *governing laws*, *invariants*, and *standard constraints*.\n\n"
+                f"### 2. Core Architecture / Derivation (4-6 Marks)\n"
+                f"• Draw a neat, labelled diagram or ASCII flowchart.\n"
+                f"• List governing equations/principles with standard SI units and variable definitions.\n"
+                f"• Explain the step-by-step mechanism in numbered points (avoid dense unformatted paragraphs).\n\n"
+                f"### 3. Real-World Applications & Advantages (2 Marks)\n"
+                f"Provide 2 concrete application bullet points showing practical relevance in modern industry.\n\n"
+                f"### 4. Common Examiner Traps (Marks Lost Here!)\n"
+                f"⚠️ *Trap*: Omitting boundary conditions or forgetting to define variable symbols.\n"
+                f"⚠️ *Trap*: Giving only conversational descriptions without standard technical terminology.\n\n"
+                f"Would you like to practice drafting a 5-mark answer for this right now?"
+            )
+
+        # Default Comprehensive Human Tutor Teaching Structure
+        return (
+            f"📚 **Personal Learning Session: {topic}**\n\n"
+            f"**Subject**: {subject} · **Module**: {unit} · **Context**: {semester}\n\n"
+            f"### 1. Concept & Intuition\n"
+            f"**{topic}** is a cornerstone concept in {subject}. At its core, it provides the fundamental rules and mechanisms necessary to model, optimize, and execute operations reliably.\n\n"
+            f"### 2. In-Depth Technical Breakdown\n"
+            f"• **Governing Principle**: Establishes formal invariants that govern state transitions and operational flow.\n"
+            f"• **Mechanism**: Processes structured inputs according to standard algorithms, ensuring deterministic outcomes.\n"
+            f"• **Key Parameters**: Relies on well-defined boundary conditions, system constraints, and performance metrics.\n\n"
+            f"### 3. Worked Scenario\n"
+            f"When applied in practice, **{topic}** takes initial system conditions, enforces verified constraints, and outputs optimized, verified results with minimal computational or operational overhead.\n\n"
+            f"### 4. Exam & Practical Connection\n"
+            f"• **Syllabus Relevance**: Frequently tested as a core descriptive and analytical question in {semester} examinations.\n"
+            f"• **Examiner Tip**: Always pair your written explanation with a clear block diagram or step-by-step table.\n\n"
+            f"### 🧠 Active Recall Question\n"
+            f"What is the primary operational objective of **{topic}**, and how does it prevent errors in {subject}?"
+        )
+
     @property
     def primary_model(self) -> str:
         return self.model
 
 
 gemini_service = GeminiService()
+

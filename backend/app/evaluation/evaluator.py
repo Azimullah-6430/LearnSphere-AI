@@ -26,8 +26,18 @@ class EvaluationAgent:
     7. Pre-finalization source integrity validation before returning.
     """
 
+    _deterministic_eval_cache: Dict[str, Dict[str, Any]] = {}
+
     def __init__(self):
         self.gemini_service = GeminiService()
+
+    @classmethod
+    def clear_cache(cls, eval_key: Optional[str] = None):
+        """Clear cached deterministic evaluations upon record deletion."""
+        if eval_key:
+            cls._deterministic_eval_cache.pop(eval_key, None)
+        else:
+            cls._deterministic_eval_cache.clear()
 
     @staticmethod
     def _compute_file_hash(file_input: Any) -> str:
@@ -78,68 +88,85 @@ class EvaluationAgent:
         stream = str(request.get("stream") or "").strip()
         semester = str(request.get("semester") or "").strip()
 
-        # ── 2. Question Paper Structure Extraction (Sole Source of Truth) ─────
-        logger.info(f"[{eval_id}] [1/4] Extracting question paper structure...")
-        try:
-            qp_raw = self.gemini_service.evaluate_question_paper(
-                request["question_paper"], subject, level, board, stream, semester
-            )
-            qp = self._strict_normalize_qp(qp_raw)
-        except Exception as exc:
-            logger.error(f"[{eval_id}] Question paper extraction error: {exc}")
-            return self._build_review_required_result(
-                request,
-                f"Question paper extraction failed: {str(exc)}",
-                status="FAILED",
-                eval_id=eval_id
-            )
+        # Check deterministic document hash cache to eliminate mark floating on identical re-uploads
+        cache_key = f"{qp_hash}:{ans_hash}:{rubric_hash}:{level}:{board}:{stream}:{semester}"
+        cached_entry = self._deterministic_eval_cache.get(cache_key) if (qp_hash and ans_hash) else None
 
-        # Enforce valid question paper: must contain at least 1 parsed question
-        if not qp.get("questions") or len(qp["questions"]) == 0:
-            logger.error(f"[{eval_id}] Question paper contains no readable questions.")
-            return self._build_review_required_result(
-                request,
-                "The uploaded Question Paper could not be parsed or contains no readable questions. Please upload a clear, legible question paper document.",
-                status="FAILED",
-                eval_id=eval_id
-            )
+        if cached_entry:
+            logger.info(f"[{eval_id}] Exact document hash matched in deterministic cache. Using stable evaluation.")
+            qp = cached_entry["qp"]
+            ai_eval = cached_entry["ai_eval"]
+            subject = cached_entry.get("subject") or subject
+        else:
+            # ── 2. Question Paper Structure Extraction (Sole Source of Truth) ─────
+            logger.info(f"[{eval_id}] [1/4] Extracting question paper structure...")
+            try:
+                qp_raw = self.gemini_service.evaluate_question_paper(
+                    request["question_paper"], subject, level, board, stream, semester
+                )
+                qp = self._strict_normalize_qp(qp_raw)
+            except Exception as exc:
+                logger.error(f"[{eval_id}] Question paper extraction error: {exc}")
+                return self._build_review_required_result(
+                    request,
+                    f"Question paper extraction failed: {str(exc)}",
+                    status="FAILED",
+                    eval_id=eval_id
+                )
 
-        detected_subject = str(qp.get("subject") or "").strip()
-        if detected_subject and detected_subject.lower() not in {"unknown", "general", "n/a"}:
-            subject = detected_subject
-        elif not subject:
-            subject = "Uploaded Examination Paper"
+            # Enforce valid question paper: must contain at least 1 parsed question
+            if not qp.get("questions") or len(qp["questions"]) == 0:
+                logger.error(f"[{eval_id}] Question paper contains no readable questions.")
+                return self._build_review_required_result(
+                    request,
+                    "The uploaded Question Paper could not be parsed or contains no readable questions. Please upload a clear, legible question paper document.",
+                    status="FAILED",
+                    eval_id=eval_id
+                )
 
-        logger.info(f"[{eval_id}] QP Subject: {subject} | Total Marks: {qp['total_marks']} | Slots: {len(qp['questions'])}")
+            detected_subject = str(qp.get("subject") or "").strip()
+            if detected_subject and detected_subject.lower() not in {"unknown", "general", "n/a"}:
+                subject = detected_subject
+            elif not subject:
+                subject = "Uploaded Examination Paper"
 
-        # ── 3. Answer Script Evaluation ──────────────────────────────────────
-        logger.info(f"[{eval_id}] [2/4] Evaluating handwritten answer script for context {eval_id}...")
-        try:
-            ai_eval = self.gemini_service.evaluate_answer_script(
-                request["question_paper"],
-                request["answer_script"],
-                qp,
-                subject,
-                request.get("rubrics"),
-                request.get("syllabus"),
-                level
-            )
-        except Exception as exc:
-            logger.error(f"[{eval_id}] Answer script evaluation error: {exc}")
-            return self._build_review_required_result(
-                request,
-                f"Handwritten answer script evaluation failed: {str(exc)}",
-                status="NEEDS_TEACHER_REVIEW",
-                eval_id=eval_id
-            )
+            logger.info(f"[{eval_id}] QP Subject: {subject} | Total Marks: {qp['total_marks']} | Slots: {len(qp['questions'])}")
 
-        if ai_eval.get("is_unreadable"):
-            return self._build_review_required_result(
-                request,
-                ai_eval.get("unreadable_reason") or "Handwritten script was flagged as unreadable.",
-                status="NEEDS_TEACHER_REVIEW",
-                eval_id=eval_id
-            )
+            # ── 3. Answer Script Evaluation ──────────────────────────────────────
+            logger.info(f"[{eval_id}] [2/4] Evaluating handwritten answer script for context {eval_id}...")
+            try:
+                ai_eval = self.gemini_service.evaluate_answer_script(
+                    request["question_paper"],
+                    request["answer_script"],
+                    qp,
+                    subject,
+                    request.get("rubrics"),
+                    request.get("syllabus"),
+                    level
+                )
+            except Exception as exc:
+                logger.error(f"[{eval_id}] Answer script evaluation error: {exc}")
+                return self._build_review_required_result(
+                    request,
+                    f"Handwritten answer script evaluation failed: {str(exc)}",
+                    status="NEEDS_TEACHER_REVIEW",
+                    eval_id=eval_id
+                )
+
+            if ai_eval.get("is_unreadable"):
+                return self._build_review_required_result(
+                    request,
+                    ai_eval.get("unreadable_reason") or "Handwritten script was flagged as unreadable.",
+                    status="NEEDS_TEACHER_REVIEW",
+                    eval_id=eval_id
+                )
+
+            if qp_hash and ans_hash and not ai_eval.get("is_unreadable"):
+                self._deterministic_eval_cache[cache_key] = {
+                    "qp": qp,
+                    "ai_eval": ai_eval,
+                    "subject": subject
+                }
 
         # ── 4. Calculation & Choice Rules ─────────────────────────────────────
         logger.info(f"[{eval_id}] [3/4] Calculating marks and binding to evaluation ID {eval_id}...")

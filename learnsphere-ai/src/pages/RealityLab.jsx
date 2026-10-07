@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getActiveValidatedCurriculum, getDynamicScenarios, getDynamicChapters } from '../data/syllabusData.js'
-import { useApp } from '../context/AppContext.jsx'
+import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
 import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
@@ -35,13 +35,11 @@ function QualityMeter({ pct }) {
 }
 
 export default function RealityLab() {
-  const { user, syllabusData, recordActivity } = useApp()
+  const { user, recordActivity } = useApp()
+  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
   const isCollege = activeProfile?.level === 'college'
-
-  const activeCurriculum = getActiveValidatedCurriculum(activeProfile, syllabusData)
-  const subjects = activeCurriculum.subjectNames
-  const hasValidCurriculum = activeCurriculum.isValid && subjects.length > 0
+  const activeCurriculum = curriculum
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
   const [activeSubject, setActiveSubject] = useState(subjects[0] || '')

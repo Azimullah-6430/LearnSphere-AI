@@ -217,15 +217,18 @@ class CurriculumCompletenessValidator:
             "detail": c7_detail
         })
 
-        # ── Subject Level Iteration for Checks 8-16 & Anti-Hallucination ────────
+        # ── Subject Level Iteration & Anti-Hallucination ───────────────────────
         seen_names = set()
         seen_codes = set()
-        has_theory = False
-        has_labs = False
-        has_electives = False
+        theory_count = 0
+        lab_count = 0
+        elective_count = 0
+        mandatory_count = 0
         codes_captured_count = 0
         source_provenance_count = 0
         evidence_verified_count = 0
+        low_confidence_count = 0
+        total_confidence = 0.0
 
         # Extract raw text representation for anti-hallucination verification
         raw_doc_text = ""
@@ -266,7 +269,7 @@ class CurriculumCompletenessValidator:
             # Anti-Hallucination check: Subject must exist in raw document text if available
             if raw_doc_text and len(raw_doc_text) > 20:
                 name_clean = re.sub(r"[^\w\s]", "", s_name.lower()).strip()
-                name_tokens = [w for w in name_clean.split() if len(w) > 3 and w not in ("core", "theory", "laboratory", "elective", "course", "unit")]
+                name_tokens = [w for w in name_clean.split() if len(w) > 3 and w not in ("core", "theory", "laboratory", "elective", "course", "unit", "paper")]
                 code_clean = re.sub(r"[^\w]", "", s_code.lower()).strip() if s_code else ""
                 
                 name_in_doc = (name_clean in raw_doc_text) or (any(tok in raw_doc_text for tok in name_tokens) if name_tokens else False)
@@ -277,7 +280,7 @@ class CurriculumCompletenessValidator:
                     issues.append(f"Anti-hallucination error: Subject '{s_name}' ({s_code}) does not appear in the uploaded syllabus document.")
                     continue
 
-            # Check 13: Duplicates
+            # Check: Duplicates
             norm_name = re.sub(r"[^\w\s]", "", s_name.lower()).strip()
             if norm_name in seen_names or (s_code and s_code.upper() in seen_codes):
                 duplicate_count += 1
@@ -287,127 +290,162 @@ class CurriculumCompletenessValidator:
                 if s_code:
                     seen_codes.add(s_code.upper())
 
-            # Check 14: Cross-semester
+            # Check: Cross-semester
             if other_sem_pattern and other_sem_pattern.search(s_name):
                 cross_semester_count += 1
                 issues.append(f"Subject '{s_name}' appears to belong to another semester.")
 
-            # Check 10, 11, 12: Categories
-            if "lab" in s_name.lower() or "practical" in s_type or "lab" in s_type:
-                has_labs = True
+            # Course types breakdown
+            if "lab" in s_name.lower() or "practical" in s_name.lower() or "practical" in s_type or "lab" in s_type:
+                lab_count += 1
             elif "elective" in s_name.lower() or "elective" in s_type:
-                has_electives = True
+                elective_count += 1
+            elif "mandatory" in s_name.lower() or "audit" in s_name.lower() or "mandatory" in s_type or "audit" in s_type:
+                mandatory_count += 1
             else:
-                has_theory = True
+                theory_count += 1
 
-            # Check 8: Subject codes
+            # Subject codes
             if s_code and len(s_code) >= 2:
                 codes_captured_count += 1
 
-            # Check 16: Source section / page / text provenance
+            # Source section / page / text provenance
             has_provenance = bool(s_sec or s_text or sub.get("source_page_numbers") or sub.get("source_page"))
             if has_provenance:
                 source_provenance_count += 1
+                evidence_verified_count += 1
 
             # Confidence check
+            conf_val = 0.95
             if s_conf is not None:
                 try:
-                    if float(s_conf) < 0.70:
-                        uncertain_count += 1
-                        issues.append(f"Subject '{s_name}' extraction confidence ({s_conf}) is below threshold 0.70.")
+                    conf_val = float(s_conf)
                 except Exception:
-                    pass
-
-            if has_provenance:
-                evidence_verified_count += 1
+                    conf_val = 0.95
+            if conf_val < 0.70:
+                low_confidence_count += 1
+                uncertain_count += 1
+                issues.append(f"Subject '{s_name}' extraction confidence ({conf_val}) is below 0.70 threshold.")
+            total_confidence += conf_val
             verified_count += 1
 
-        # ── 8. Subject Codes Captured Where Present ───────────────────────────
-        c8_passed = codes_captured_count > 0 or detected_count == 0
+        avg_confidence = (total_confidence / len(subjects_list)) if subjects_list else 0.0
+
+        # ── 8. Subject Names Captured ─────────────────────────────────────────
+        c8_passed = len(seen_names) > 0 and len(seen_names) == detected_count - duplicate_count
+        checks.append({
+            "id": "subject_names",
+            "number": 8,
+            "name": "Subject Names Captured",
+            "passed": c8_passed,
+            "detail": f"Extracted {len(seen_names)} verified distinct subject names without truncation." if c8_passed else "Subject names are missing or malformed."
+        })
+        if not c8_passed:
+            issues.append("Subject names verification failed.")
+
+        # ── 9. Subject Codes Captured ─────────────────────────────────────────
+        c9_passed = codes_captured_count > 0 or detected_count == 0
         checks.append({
             "id": "subject_codes",
-            "number": 8,
-            "name": "Subject Codes Captured Where Present",
-            "passed": c8_passed,
+            "number": 9,
+            "name": "Subject Codes Captured",
+            "passed": c9_passed,
             "detail": f"Captured official course codes for {codes_captured_count}/{detected_count} subjects."
         })
 
-        # ── 9. Subject Names Captured ─────────────────────────────────────────
-        c9_passed = len(seen_names) > 0 and len(seen_names) == detected_count - duplicate_count
+        # ── 10. Course Types ──────────────────────────────────────────────────
+        c10_passed = (theory_count + lab_count + elective_count + mandatory_count) == detected_count and detected_count > 0
         checks.append({
-            "id": "subject_names",
-            "number": 9,
-            "name": "Exact Subject Names Captured",
-            "passed": c9_passed,
-            "detail": f"Extracted {len(seen_names)} verified distinct subject names without truncation."
-        })
-
-        # ── 10. Theory Subjects Included ──────────────────────────────────────
-        checks.append({
-            "id": "theory_included",
+            "id": "course_types",
             "number": 10,
-            "name": "Theory Subjects Included",
-            "passed": has_theory or detected_count == 0,
-            "detail": "Core academic theory courses successfully identified and mapped." if has_theory else "No theory subjects identified in this section."
+            "name": "Course Types Classification",
+            "passed": c10_passed,
+            "detail": f"Classified course types: {theory_count} Theory, {lab_count} Lab/Practical, {elective_count} Elective, {mandatory_count} Mandatory/Audit."
         })
 
-        # ── 11. Laboratory Subjects Included ──────────────────────────────────
+        # ── 11. Units / Topics Validation ─────────────────────────────────────
+        units_map = analysis.get("chapters") or analysis.get("units") or {}
+        topics_list = analysis.get("key_topics") or analysis.get("topics") or []
+        units_count = sum(len(u_list) for u_list in units_map.values() if isinstance(u_list, list))
+        c11_passed = True # Non-blocking if syllabus document only provided course structure table
+        c11_detail = f"Units & Topics mapped: {len(units_map)} subjects with detailed units ({units_count} total units, {len(topics_list)} key topics)."
         checks.append({
-            "id": "labs_included",
+            "id": "units_topics",
             "number": 11,
-            "name": "Laboratory Subjects Included",
-            "passed": True, # Non-blocking if semester genuinely has no labs
-            "detail": "Laboratory and practical courses captured." if has_labs else "No separate practical labs found (or integrated with theory)."
+            "name": "Units & Topics Hierarchical Extraction",
+            "passed": c11_passed,
+            "detail": c11_detail
         })
 
-        # ── 12. Electives Included Where Formally Listed ──────────────────────
+        # ── 12. Page Evidence & Source Provenance ─────────────────────────────
+        c12_passed = source_provenance_count >= detected_count and detected_count > 0
         checks.append({
-            "id": "electives_included",
+            "id": "page_evidence",
             "number": 12,
-            "name": "Electives Included Where Formally Listed",
-            "passed": True,
-            "detail": "Elective offerings identified and captured." if has_electives else "No separate elective tracks listed for this semester."
+            "name": "Source Page Evidence For Every Subject",
+            "passed": c12_passed,
+            "detail": f"Source page evidence & section references verified for {source_provenance_count}/{detected_count} subjects."
         })
+        if not c12_passed:
+            issues.append(f"Missing source page evidence for {detected_count - source_provenance_count} subjects.")
 
-        # ── 13. No Duplicate Subjects ─────────────────────────────────────────
+        # ── 13. Duplicate Subjects ─────────────────────────────────────────────
         c13_passed = duplicate_count == 0
         checks.append({
-            "id": "no_duplicates",
+            "id": "duplicate_subjects",
             "number": 13,
             "name": "Zero Duplicate Subjects",
             "passed": c13_passed,
             "detail": "Zero duplicate subjects found." if c13_passed else f"{duplicate_count} duplicate course entries detected."
         })
 
-        # ── 14. No Subjects From Another Semester ─────────────────────────────
-        c14_passed = cross_semester_count == 0
+        # ── 14. Suspicious Missing Sections ───────────────────────────────────
+        suspicious_missing = False
+        suspicious_reasons = []
+
+        if raw_doc_text:
+            # If document mentions laboratory courses in semester scheme but 0 labs detected
+            if re.search(r"\b(?:practical|laboratory|practical\s+courses|laboratories)\b", raw_doc_text) and lab_count == 0:
+                # Check if this semester table explicitly mentions laboratory/practical
+                sem_kw = f"semester {student_sem}" if student_sem else "semester"
+                if sem_kw in raw_doc_text and ("practical" in raw_doc_text or "laboratory" in raw_doc_text):
+                    # Only flag if there are explicit lab course codes (like 'lab', 'pr', 'l:0 t:0 p:4')
+                    if re.search(r"\b[A-Z]{2,5}\s*\d{2,4}\s+[A-Za-z\s]+(?:lab|laboratory|practical)\b", raw_doc_text, re.I):
+                        suspicious_missing = True
+                        suspicious_reasons.append("Document mentions practical laboratories for this semester but none were extracted.")
+
+            # If expected count was higher than detected count
+            if expected_count > 0 and detected_count < expected_count:
+                suspicious_missing = True
+                suspicious_reasons.append(f"Table lists {expected_count} rows, but only {detected_count} subjects were extracted.")
+
+            # If cross-semester contamination occurred
+            if cross_semester_count > 0:
+                suspicious_missing = True
+                suspicious_reasons.append(f"{cross_semester_count} subjects from other semesters were detected in current semester extract.")
+
+        c14_passed = not suspicious_missing
         checks.append({
-            "id": "no_cross_semester",
+            "id": "suspicious_missing_sections",
             "number": 14,
-            "name": "Zero Cross-Semester Contamination",
+            "name": "Zero Suspicious Missing Sections",
             "passed": c14_passed,
-            "detail": "Zero subjects from other semesters mixed in." if c14_passed else f"{cross_semester_count} cross-semester subjects contaminated this curriculum."
+            "detail": "Curriculum structure is complete with no missing sections." if c14_passed else "; ".join(suspicious_reasons)
         })
+        if not c14_passed:
+            issues.extend(suspicious_reasons)
 
-        # ── 15. No Fabricated Subjects ────────────────────────────────────────
-        c15_passed = uncertain_count == 0 and detected_count > 0
+        # ── 15. Extraction Confidence ─────────────────────────────────────────
+        c15_passed = low_confidence_count == 0 and avg_confidence >= 0.70 and detected_count > 0
         checks.append({
-            "id": "no_fabricated",
+            "id": "extraction_confidence",
             "number": 15,
-            "name": "Zero Fabricated / Unsubstantiated Entries",
+            "name": "Extraction Confidence & Verification Gate",
             "passed": c15_passed,
-            "detail": "All subjects substantiated with genuine document evidence (Anti-Hallucination Verified)." if c15_passed else f"{uncertain_count} unsubstantiated or uncertain entries flagged."
+            "detail": f"Average extraction confidence: {avg_confidence:.2f}. No ungrounded 100% claims without evidence." if c15_passed else f"Low confidence extraction ({low_confidence_count} uncertain items, avg {avg_confidence:.2f})."
         })
-
-        # ── 16. Source Page/Section Exists For Every Subject ──────────────────
-        c16_passed = source_provenance_count >= detected_count and detected_count > 0
-        checks.append({
-            "id": "source_provenance",
-            "number": 16,
-            "name": "Source Page / Section & Evidence Exists For Every Subject",
-            "passed": c16_passed,
-            "detail": f"Source provenance and section references documented for {source_provenance_count}/{detected_count} subjects."
-        })
+        if not c15_passed:
+            issues.append(f"Extraction confidence check failed (average: {avg_confidence:.2f}).")
 
         # ── Final Verdict & Status Calculation ────────────────────────────────
         critical_failures = (
@@ -415,8 +453,14 @@ class CurriculumCompletenessValidator:
             or uncertain_count > 0
             or cross_semester_count > 0
             or duplicate_count > 0
+            or suspicious_missing
+            or not c1_passed
             or not c4_passed
             or not c5_passed
+            or not c7_passed
+            or not c8_passed
+            or not c12_passed
+            or not c15_passed
             or detected_count == 0
             or val_status == "MISMATCH"
         )
@@ -432,7 +476,7 @@ class CurriculumCompletenessValidator:
         else:
             final_status = "VALID"
             is_valid = True
-            summary = f"Full completeness verified: All {detected_count} subjects for Semester {student_sem or 'Curriculum'} extracted with zero omissions."
+            summary = f"Full completeness verified: All {detected_count} subjects for Semester {student_sem or 'Curriculum'} validated with zero omissions."
 
         passed_checks_count = sum(1 for c in checks if c["passed"])
         validation_score = int(round((passed_checks_count / len(checks)) * 100))
@@ -447,9 +491,17 @@ class CurriculumCompletenessValidator:
             "uncertain_subjects": uncertain_count,
             "evidence_verified_count": evidence_verified_count,
             "source_provenance_count": source_provenance_count,
-            "has_theory": has_theory,
-            "has_labs": has_labs,
-            "has_electives": has_electives,
+            "has_theory": theory_count > 0,
+            "has_labs": lab_count > 0,
+            "has_electives": elective_count > 0,
+            "has_mandatory": mandatory_count > 0,
+            "course_types_breakdown": {
+                "theory": theory_count,
+                "lab": lab_count,
+                "elective": elective_count,
+                "mandatory": mandatory_count
+            },
+            "average_confidence": round(avg_confidence, 2),
             "status": final_status,
             "is_valid": is_valid,
             "validation_score": validation_score,

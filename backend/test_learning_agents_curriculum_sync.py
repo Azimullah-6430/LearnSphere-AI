@@ -95,10 +95,13 @@ def run_tests():
     status, body = client("POST", "/api/auth/register", reg_payload)
     check("Student registration successful (201)", status == 201, f"Status {status}: {body}")
 
-    # 2. Query initial active curriculum
-    print("\n--- 2. Checking Initial Active Curriculum Endpoint ---")
+    # 2. Query initial active curriculum (must be empty / NOT_AVAILABLE)
+    print("\n--- 2. Checking Initial Active Curriculum Endpoint (No Syllabus) ---")
     status, cur_body = client("GET", "/api/curriculum/active")
     check("Active curriculum endpoint responds (200)", status == 200, f"Status {status}: {cur_body}")
+    check("Unuploaded syllabus has is_valid == False", cur_body.get("is_valid") is False, f"is_valid: {cur_body.get('is_valid')}")
+    check("Unuploaded syllabus status == NOT_AVAILABLE", cur_body.get("status") == "NOT_AVAILABLE", f"status: {cur_body.get('status')}")
+    check("Unuploaded syllabus subjects == []", cur_body.get("subjects") == [], f"subjects: {cur_body.get('subjects')}")
     check("Curriculum reflects Semester 5", cur_body.get("semester") == 5, f"Semester: {cur_body.get('semester')}")
     check("Curriculum reflects B.Tech IT", cur_body.get("degree") == "B.Tech" or "IT" in str(cur_body.get("department")), str(cur_body))
 

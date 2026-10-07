@@ -934,26 +934,108 @@ export function getCurriculumValidationStatus(profile, syllabusData) {
   const data = syllabusData !== undefined ? syllabusData : profile
   const userProfile = syllabusData !== undefined ? profile : null
 
+  // If no syllabus data or empty payload, curriculum is NOT_UPLOADED
   if (!data) {
-    if (userProfile?.level === 'college') {
-      const sem = userProfile?.semester ? parseInt(userProfile.semester) : (userProfile?.current_semester ? parseInt(userProfile.current_semester) : null)
-      const domain = userProfile?.domain || userProfile?.stream || userProfile?.department || userProfile?.branch
-      if (domain && sem) {
-        return { isValid: true, status: 'VALID', isPreConfigured: true, reason: '' }
-      }
-      return { isValid: false, status: 'UNCONFIGURED', isPreConfigured: false, reason: 'College profile missing degree, department, or semester.' }
+    return {
+      isValid: false,
+      status: 'NOT_UPLOADED',
+      curriculumStatus: 'NOT_UPLOADED',
+      isPreConfigured: false,
+      reason: 'No syllabus document uploaded. Please upload your official syllabus to unlock subjects.'
     }
-    return { isValid: true, status: 'VALID', isPreConfigured: true, reason: '' }
   }
 
-  const status = (data.validation_status || data.validationStatus || data.status || 'VALID').toUpperCase()
-  const isExplicitlyActive = data.is_active !== false
-  const isValid = (status === 'VALID' || status === 'ACTIVE' || status === 'MANUALLY_CONFIRMED' || status === 'READY') && isExplicitlyActive
-  const reason = data.mismatch_reason || data.summary || ''
-  const report = data.validation_report || data.validationReport || null
-  const semester = data.semester || data.current_semester || userProfile?.semester || null
+  const rawStatus = String(data.validation_status || data.validationStatus || data.status || data.curriculumStatus || '').toUpperCase().trim()
 
-  return { isValid, status, reason, report, is_active: isExplicitlyActive, semester }
+  if (rawStatus === 'PROCESSING' || rawStatus === 'ANALYZING' || rawStatus === 'PARSING') {
+    return {
+      isValid: false,
+      status: 'PROCESSING',
+      curriculumStatus: 'PROCESSING',
+      isPreConfigured: false,
+      reason: 'Your syllabus document is currently being analyzed and verified. Please wait...'
+    }
+  }
+
+  if (rawStatus === 'EXTRACTION_FAILED' || rawStatus === 'FAILED' || rawStatus === 'ERROR') {
+    return {
+      isValid: false,
+      status: 'EXTRACTION_FAILED',
+      curriculumStatus: 'EXTRACTION_FAILED',
+      isPreConfigured: false,
+      reason: data.reason || data.mismatch_reason || data.error || 'Syllabus subject extraction failed. Please upload a clear official syllabus PDF.'
+    }
+  }
+
+  if (rawStatus === 'NOT_UPLOADED' || rawStatus === 'NOT_AVAILABLE' || rawStatus === 'UNCONFIGURED') {
+    return {
+      isValid: false,
+      status: 'NOT_UPLOADED',
+      curriculumStatus: 'NOT_UPLOADED',
+      isPreConfigured: false,
+      reason: 'No syllabus document uploaded. Please upload your official syllabus to unlock subjects.'
+    }
+  }
+
+  const hasSubjects = (Array.isArray(data.subjects) && data.subjects.length > 0) ||
+                      (Array.isArray(data.extracted_subjects) && data.extracted_subjects.length > 0)
+
+  if (!hasSubjects) {
+    if (rawStatus === 'NEEDS_REVIEW' || rawStatus === 'MISMATCH') {
+      return {
+        isValid: false,
+        status: 'NEEDS_REVIEW',
+        curriculumStatus: 'NEEDS_REVIEW',
+        isPreConfigured: false,
+        reason: data.mismatch_reason || data.reason || 'Syllabus validation requires review or re-upload.',
+        report: data.validation_report || data.validationReport || null
+      }
+    }
+    return {
+      isValid: false,
+      status: (data.syllabus_id || data._id || data.id) ? 'EXTRACTION_FAILED' : 'NOT_UPLOADED',
+      curriculumStatus: (data.syllabus_id || data._id || data.id) ? 'EXTRACTION_FAILED' : 'NOT_UPLOADED',
+      isPreConfigured: false,
+      reason: (data.syllabus_id || data._id || data.id) ? 'No valid academic subjects could be extracted from the uploaded document.' : 'No syllabus document uploaded.'
+    }
+  }
+
+  if (rawStatus === 'NEEDS_REVIEW' || rawStatus === 'MISMATCH') {
+    return {
+      isValid: false,
+      status: 'NEEDS_REVIEW',
+      curriculumStatus: 'NEEDS_REVIEW',
+      isPreConfigured: false,
+      reason: data.mismatch_reason || data.reason || 'Syllabus could not be reliably validated against your semester profile.',
+      report: data.validation_report || data.validationReport || null,
+      semester: data.semester || data.current_semester || userProfile?.semester || null
+    }
+  }
+
+  const isExplicitlyActive = data.is_active !== false
+  const isApproved = (rawStatus === 'VALID' || rawStatus === 'ACTIVE' || rawStatus === 'MANUALLY_CONFIRMED' || rawStatus === 'READY') && isExplicitlyActive && hasSubjects
+
+  if (isApproved) {
+    return {
+      isValid: true,
+      status: 'VALID',
+      curriculumStatus: 'VALID',
+      reason: '',
+      report: data.validation_report || data.validationReport || null,
+      is_active: true,
+      semester: data.semester || data.current_semester || userProfile?.semester || null
+    }
+  }
+
+  return {
+    isValid: false,
+    status: 'NEEDS_REVIEW',
+    curriculumStatus: 'NEEDS_REVIEW',
+    isPreConfigured: false,
+    reason: data.mismatch_reason || data.reason || 'Syllabus validation requires review or re-upload.',
+    report: data.validation_report || data.validationReport || null,
+    semester: data.semester || data.current_semester || userProfile?.semester || null
+  }
 }
 
 /**
@@ -964,20 +1046,25 @@ export function getCurriculumValidationStatus(profile, syllabusData) {
  * 3. Knowledge Transfer
  * 
  * Guarantees 100% subject, code, and module parity across all agents.
+ * ABSOLUTE RULE: ONLY 'VALID' STATE EXPOSES SUBJECTS.
  */
 export function getActiveValidatedCurriculum(profile, syllabusData) {
   const validation = getCurriculumValidationStatus(profile, syllabusData)
-  
-  // If curriculum validation fails or requires review, lock curriculum down (no partial activation)
-  if (!validation.isValid) {
+  const semester = profile?.semester || profile?.current_semester || syllabusData?.semester || null
+  const degree = profile?.degree || profile?.program || syllabusData?.degree || null
+  const department = profile?.department || profile?.branch || profile?.domain || syllabusData?.department || null
+
+  // If status is NOT VALID, strictly return empty subjects and topics
+  if (!validation.isValid || validation.status !== 'VALID' || !syllabusData) {
     return {
       isValid: false,
       status: validation.status,
+      curriculumStatus: validation.status,
       reason: validation.reason,
       report: validation.report,
-      semester: profile?.semester || profile?.current_semester || syllabusData?.semester || null,
-      degree: profile?.degree || profile?.program || syllabusData?.degree || null,
-      department: profile?.department || profile?.branch || profile?.domain || syllabusData?.department || null,
+      semester,
+      degree,
+      department,
       subjects: [],
       subjectNames: [],
       chapters: {},
@@ -991,134 +1078,73 @@ export function getActiveValidatedCurriculum(profile, syllabusData) {
   let chapters = {}
   let topics = []
 
-  // 1. If user uploaded a validated syllabus document or analysis payload
-  if (syllabusData && (Array.isArray(syllabusData.subjects) || Array.isArray(syllabusData.extracted_subjects))) {
-    if (Array.isArray(syllabusData.subjects) && syllabusData.subjects.length > 0) {
-      subjects = syllabusData.subjects.map(s => {
-        if (typeof s === 'object' && s !== null) {
-          return {
-            code: s.code || '',
-            name: s.name || '',
-            type: s.type || s.category || 'Theory Core',
-            category: s.category || s.type || 'Program Core',
-            credits: s.credits || 4,
-            source_page: s.source_page || s.source_page_numbers?.[0] || 1,
-            source_section: s.source_section || '',
-            source_text: s.source_text || '',
-            semester_evidence: s.semester_evidence || '',
-            confidence: s.confidence || 0.98,
-            evidence_verified: s.evidence_verified ?? true
-          }
+  // ONLY extract subjects from authentic uploaded syllabus document
+  if (Array.isArray(syllabusData.subjects) && syllabusData.subjects.length > 0) {
+    subjects = syllabusData.subjects.map(s => {
+      if (typeof s === 'object' && s !== null) {
+        return {
+          code: s.code || '',
+          name: s.name || '',
+          type: s.type || s.category || 'Theory Core',
+          category: s.category || s.type || 'Program Core',
+          credits: s.credits || 4,
+          source_page: s.source_page || s.source_page_numbers?.[0] || 1,
+          source_section: s.source_section || '',
+          source_text: s.source_text || '',
+          semester_evidence: s.semester_evidence || '',
+          confidence: s.confidence || 0.98,
+          evidence_verified: s.evidence_verified ?? true
         }
-        return { code: '', name: String(s), type: 'Theory Core', category: 'Core', credits: 4 }
-      }).filter(s => Boolean(s.name))
+      }
+      return { code: '', name: String(s), type: 'Theory Core', category: 'Core', credits: 4 }
+    }).filter(s => Boolean(s.name))
 
-      subjectNames = subjects.map(s => s.name)
-    } else if (Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
-      subjectNames = syllabusData.extracted_subjects.filter(Boolean)
-      subjects = subjectNames.map(name => ({
-        code: '',
-        name,
-        type: 'Theory Core',
-        category: 'Program Core',
-        credits: 4,
-        source_page: 1,
-        source_section: 'Syllabus Table',
-        evidence_verified: true
-      }))
-    }
-    chapters = syllabusData.chapters || syllabusData.units || {}
-    topics = syllabusData.key_topics || syllabusData.topics || []
-  }
-  // 2. If student profile has custom subjects array set during onboarding/registration
-  else if (profile?.subjects && Array.isArray(profile.subjects) && profile.subjects.length > 0) {
-    subjectNames = profile.subjects
+    subjectNames = subjects.map(s => s.name)
+  } else if (Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
+    subjectNames = syllabusData.extracted_subjects.filter(Boolean)
     subjects = subjectNames.map(name => ({
       code: '',
       name,
-      type: 'Core Subject',
-      category: 'General',
+      type: 'Theory Core',
+      category: 'Program Core',
       credits: 4,
       source_page: 1,
-      source_section: 'Profile Selection',
+      source_section: 'Syllabus Table',
       evidence_verified: true
     }))
   }
-  // 3. If college student with semester and domain credentials
-  else if (profile?.level === 'college') {
-    const sem = profile?.semester ? parseInt(profile.semester) : (profile?.current_semester ? parseInt(profile.current_semester) : null)
-    const domain = profile?.domain || profile?.stream || profile?.department || profile?.branch
-    
-    if (domain && sem) {
-      const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
-        k.toLowerCase() === domain.toLowerCase() || 
-        k.toLowerCase().includes(domain.toLowerCase()) || 
-        domain.toLowerCase().includes(k.toLowerCase())
-      )
-      if (domainKey && COLLEGE_SEMESTER_DATA[domainKey]) {
-        const semSubjects = COLLEGE_SEMESTER_DATA[domainKey][sem]
-        if (semSubjects) {
-          subjectNames = Object.keys(semSubjects)
-          subjects = subjectNames.map(name => ({
-            code: '',
-            name,
-            type: 'Semester Core',
-            category: domainKey,
-            credits: 4,
-            source_page: 1,
-            source_section: `Semester ${sem} Scheme`,
-            evidence_verified: true
-          }))
-          chapters = semSubjects
-        }
-      }
-    }
-  }
-  // 4. If school student with stream credentials or board + grade
-  else if (profile?.level === 'school') {
-    if (profile?.stream && STREAMS[profile.stream]) {
-      subjectNames = STREAMS[profile.stream]
-      subjects = subjectNames.map(name => ({
-        code: '',
-        name,
-        type: 'Stream Subject',
-        category: profile.stream,
-        credits: 4,
-        source_page: 1,
-        source_section: 'Stream Curriculum',
-        evidence_verified: true
-      }))
-    } else {
-      const board = profile?.board
-      const classLevel = profile?.grade_level || profile?.classLevel || profile?.class
-      if (board && classLevel) {
-        const syl = getSyllabus(board, classLevel)
-        if (syl) {
-          subjectNames = Object.keys(syl)
-          subjects = subjectNames.map(name => ({
-            code: '',
-            name,
-            type: 'Board Subject',
-            category: board,
-            credits: 4,
-            source_page: 1,
-            source_section: `Class ${classLevel} Curriculum`,
-            evidence_verified: true
-          }))
-          chapters = syl
-        }
-      }
+
+  // If no genuine extracted subjects from uploaded document, lock down as EXTRACTION_FAILED
+  if (subjects.length === 0) {
+    return {
+      isValid: false,
+      status: 'EXTRACTION_FAILED',
+      curriculumStatus: 'EXTRACTION_FAILED',
+      reason: 'No subjects extracted from uploaded syllabus document.',
+      report: validation.report,
+      semester,
+      degree,
+      department,
+      subjects: [],
+      subjectNames: [],
+      chapters: {},
+      topics: [],
+      sourceDocument: syllabusData?.file_name || null
     }
   }
 
+  chapters = syllabusData.chapters || syllabusData.units || {}
+  topics = syllabusData.key_topics || syllabusData.topics || []
+
   return {
     isValid: true,
-    status: validation.status,
-    reason: validation.reason,
+    status: 'VALID',
+    curriculumStatus: 'VALID',
+    reason: '',
     report: validation.report,
-    semester: profile?.semester || profile?.current_semester || syllabusData?.semester || null,
-    degree: profile?.degree || profile?.program || syllabusData?.degree || null,
-    department: profile?.department || profile?.branch || profile?.domain || syllabusData?.department || null,
+    semester,
+    degree,
+    department,
     subjects,
     subjectNames,
     chapters,
@@ -1133,11 +1159,12 @@ export function getDynamicSubjects(profile, syllabusData) {
 }
 
 export function getDynamicChapters(subject, profile, syllabusData) {
-  if (!subject) return []
+  if (!subject || !syllabusData) return []
 
   const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
+  if (!activeCurriculum.isValid) return []
   
-  // If active curriculum contains chapters for this subject
+  // If active curriculum contains extracted chapters for this subject
   if (activeCurriculum.chapters && activeCurriculum.chapters[subject]) {
     return activeCurriculum.chapters[subject]
   }
@@ -1147,45 +1174,11 @@ export function getDynamicChapters(subject, profile, syllabusData) {
     return syllabusData.chapters[subject]
   }
 
-  // Check if subject is native language
-  if (SCHOOL_LANGUAGES_DATA[subject]) {
-    return SCHOOL_LANGUAGES_DATA[subject]
+  if (syllabusData && syllabusData.units && syllabusData.units[subject]) {
+    return syllabusData.units[subject]
   }
 
-  // If college student with explicit domain & sem
-  if (profile?.level === 'college') {
-    const sem = profile?.semester ? parseInt(profile.semester) : null
-    const domain = profile?.domain || profile?.stream || profile?.department
-    if (domain && sem) {
-      const domainKey = Object.keys(COLLEGE_SEMESTER_DATA).find(k => 
-        k.toLowerCase() === domain.toLowerCase() || 
-        k.toLowerCase().includes(domain.toLowerCase()) || 
-        domain.toLowerCase().includes(k.toLowerCase())
-      )
-      if (domainKey && COLLEGE_SEMESTER_DATA[domainKey]) {
-        const semSubjects = COLLEGE_SEMESTER_DATA[domainKey][sem]
-        if (semSubjects && semSubjects[subject]) {
-          return semSubjects[subject]
-        }
-      }
-    }
-  }
-
-  // School board chapters (only if board and class are explicitly configured)
-  const board = profile?.board
-  const classLvl = profile?.grade_level || profile?.classLevel || profile?.class
-  if (board && classLvl) {
-    const syllabus = getSyllabus(board, classLvl)
-    if (syllabus && syllabus[subject]) {
-      return syllabus[subject]
-    }
-  }
-
-  // Generic fallback chapters if subject custom
-  return [
-    { name: `${subject} Core Fundamentals`, concepts: ["Key Principles", "Fundamental Formulas", "Core Theories", "Definitions & Terminology"] },
-    { name: `${subject} Advanced Applications`, concepts: ["Problem Solving Techniques", "Exam Analysis & Scenarios", "Case Studies", "Scoring Strategies"] }
-  ]
+  return []
 }
 
 const DAY_TO_DAY_SCENARIOS_TEMPLATES = [
@@ -1212,13 +1205,19 @@ const DAY_TO_DAY_SCENARIOS_TEMPLATES = [
 ]
 
 export function getDynamicScenarios(subject, profile, syllabusData, difficultyFilter = 'All', moduleFilter = 'All') {
-  let list = []
+  if (!subject || !syllabusData) return []
+  const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
+  if (!activeCurriculum.isValid || !activeCurriculum.subjectNames.includes(subject)) return []
+
   const chaps = getDynamicChapters(subject, profile, syllabusData)
+  if (!chaps || chaps.length === 0) return []
+
+  let list = []
   const semesterStr = profile?.semester || profile?.current_semester ? `Semester ${profile.semester || profile.current_semester}` : "Active Semester"
   
   const generated = []
   chaps.forEach((ch, chIdx) => {
-    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization", "Performance Analysis"]
+    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : [ch.name || "Core Concept"]
     
     DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
       const concept = concepts[tIdx % concepts.length]
@@ -1278,15 +1277,21 @@ export function getDynamicScenarios(subject, profile, syllabusData, difficultyFi
 }
 
 export function getDynamicTransferQuestions(subject, profile, syllabusData, difficultyFilter = 'All', moduleFilter = 'All') {
-  let list = []
+  if (!subject || !syllabusData) return []
+  const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
+  if (!activeCurriculum.isValid || !activeCurriculum.subjectNames.includes(subject)) return []
+
   const chaps = getDynamicChapters(subject, profile, syllabusData)
+  if (!chaps || chaps.length === 0) return []
+
+  let list = []
   const semesterStr = profile?.semester || profile?.current_semester ? `Semester ${profile.semester || profile.current_semester}` : "Active Semester"
 
   const generated = []
   let roundNum = 1
 
   chaps.forEach((ch, chIdx) => {
-    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : ["Core Principle", "System Optimization"]
+    const concepts = (ch.concepts && ch.concepts.length > 0) ? ch.concepts : [ch.name || "Core Concept"]
     
     DAY_TO_DAY_SCENARIOS_TEMPLATES.forEach((tmpl, tIdx) => {
       const concept = concepts[tIdx % concepts.length]

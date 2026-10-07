@@ -42,7 +42,7 @@ class TestMultiSemesterSyllabus(unittest.TestCase):
             "name": "Sarah Connor",
             "level": "college",
             "degree": "B.Tech",
-            "department": "Computer Science and Engineering",
+            "department": "Information Technology",
             "year": 2,
             "semester": 3,
             "current_semester": 3,
@@ -218,7 +218,7 @@ Unit V: Target Machine Code Generation
             level="college",
             semester=3,
             degree="B.Tech",
-            department="Computer Science and Engineering"
+            department="Information Technology"
         )
 
         self.assertEqual(result.get("validation_status"), "VALID")

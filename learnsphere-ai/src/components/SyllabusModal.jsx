@@ -69,6 +69,11 @@ export default function SyllabusModal({ isOpen, onClose }) {
     setError('')
     setOverrideSuccess(false)
 
+    // Invalidate old curriculum context immediately upon uploading a new syllabus
+    if (setSyllabusData) {
+      setSyllabusData({ status: 'PROCESSING', curriculumStatus: 'PROCESSING', isValid: false, is_valid: false, subjects: [], topics: [] })
+    }
+
     try {
       const formData = new FormData()
       if (file) formData.append('syllabus_file', file)
@@ -99,9 +104,21 @@ export default function SyllabusModal({ isOpen, onClose }) {
         setCompletenessVerified(report?.is_valid ?? res.analysis.completeness_verified ?? true)
         setCompletenessNotes(report?.summary || res.analysis.completeness_notes || '')
 
-        // Only activate in local app memory if validation status is VALID
+        // Only replace and activate in app context after successful validation
         if (vStatus === 'VALID' && setSyllabusData) {
           setSyllabusData(res.analysis)
+        } else if (setSyllabusData) {
+          setSyllabusData({
+            status: vStatus,
+            curriculumStatus: vStatus,
+            isValid: false,
+            is_valid: false,
+            validation_status: vStatus,
+            validation_report: report,
+            subjects: [],
+            topics: [],
+            extracted_subjects: []
+          })
         }
       } else {
         setError(res?.error || 'Failed to analyze syllabus document. Please try again.')

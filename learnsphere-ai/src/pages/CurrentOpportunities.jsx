@@ -93,19 +93,22 @@ export default function CurrentOpportunities() {
     })
   }
 
+  const [backendNews, setBackendNews] = useState(null)
+  const [backendOpps, setBackendOpps] = useState(null)
+
   // Handle Live Daily Feed Sync
   const handleDailySync = async () => {
     setIsSyncing(true)
     try {
       const res = await api.getOpportunities({
-        level: isCollege ? 'college' : 'school',
         city: userCity,
         state: userState,
-        country: userCountry,
-        department: isCollege ? (activeProfile?.department || 'Computer Science & AI') : (activeProfile?.board || 'CBSE')
+        country: userCountry
       })
-      if (res && res.last_updated) {
-        setLastSyncedDate(res.last_updated)
+      if (res && res.success) {
+        if (res.news) setBackendNews(res.news)
+        if (res.opportunities) setBackendOpps(res.opportunities)
+        if (res.last_updated) setLastSyncedDate(res.last_updated)
       } else {
         setLastSyncedDate(new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }))
       }
@@ -116,18 +119,44 @@ export default function CurrentOpportunities() {
     }
   }
 
-  // Fetch Fact-Checked Feed
-  const { news: factCheckedNews, opps: factCheckedOpps } = getFactCheckedFeed(activeProfile, {
+  // Load live feed on mount / profile change
+  useEffect(() => {
+    let isMounted = true
+    async function loadLiveFeed() {
+      try {
+        const res = await api.getOpportunities({
+          city: userCity,
+          state: userState,
+          country: userCountry
+        })
+        if (isMounted && res && res.success) {
+          if (res.news) setBackendNews(res.news)
+          if (res.opportunities) setBackendOpps(res.opportunities)
+          if (res.last_updated) setLastSyncedDate(res.last_updated)
+        }
+      } catch (e) {
+        // Fallback to local verified registry
+      }
+    }
+    loadLiveFeed()
+    return () => { isMounted = false }
+  }, [activeProfile?.id, activeProfile?._id, activeProfile?.role, activeProfile?.level, userCity, userState, userCountry])
+
+  // Fetch Fact-Checked Feed (with live backend data taking precedence)
+  const localFeed = getFactCheckedFeed(activeProfile, {
     city: userCity,
     state: userState,
     country: userCountry
   })
 
+  const factCheckedNews = backendNews && backendNews.length > 0 ? backendNews : localFeed.news
+  const factCheckedOpps = backendOpps && backendOpps.length > 0 ? backendOpps : localFeed.opps
+
   // Filter News Updates
   const filteredUpdates = factCheckedNews.filter((item) => {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      const matchText = (item.title + item.summary + item.source + (item.tags || []).join(' ')).toLowerCase()
+      const matchText = (item.title + (item.summary || item.description || '') + item.source + (item.tags || []).join(' ')).toLowerCase()
       if (!matchText.includes(q)) return false
     }
 

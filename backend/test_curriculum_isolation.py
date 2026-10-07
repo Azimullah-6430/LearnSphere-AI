@@ -12,6 +12,7 @@ Verifies:
 import os
 import sys
 import json
+import re
 import unittest
 from datetime import datetime
 
@@ -22,9 +23,69 @@ from server import app, get_mongodb, get_sqlite_db
 from unittest.mock import patch
 
 
+def _mock_analyze_syllabus(file_input, **kwargs):
+    text = ""
+    if isinstance(file_input, str):
+        if os.path.exists(file_input):
+            with open(file_input, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        else:
+            text = file_input
+    elif isinstance(file_input, dict):
+        text = file_input.get("text", "")
+
+    target_semester = kwargs.get("target_semester")
+    if not target_semester:
+        m_sem = re.search(r"SEMESTER\s+(\d+)", text, re.I)
+        if m_sem:
+            target_semester = int(m_sem.group(1))
+        else:
+            target_semester = 5
+
+    subjects = []
+    lines = text.strip().split("\n")
+    for line in lines:
+        line_clean = line.strip()
+        m = re.match(r"^([A-Z]{2,4}\d{3,4})\s+(.+?)(?:\s+Credits:|\s+L:|$)", line_clean)
+        if m:
+            code = m.group(1).strip()
+            name = m.group(2).strip()
+            subjects.append({
+                "code": code,
+                "name": name,
+                "type": "Laboratory" if "Laboratory" in name or "Lab" in name else "Theory Core",
+                "category": "Program Core",
+                "credits": 4.0,
+                "semester": target_semester,
+                "source_page": 1,
+                "source_section": f"Semester {target_semester} Scheme",
+                "source_text": line_clean,
+                "confidence": 0.98,
+                "evidence_verified": True
+            })
+
+    return {
+        "status": "VALID",
+        "validation_status": "VALID",
+        "detected_semesters": [target_semester],
+        "extracted_subjects": [s["name"] for s in subjects],
+        "subjects": subjects,
+        "expected_subject_count": len(subjects),
+        "extracted_subject_count": len(subjects),
+        "is_active": True,
+        "key_topics": ["Unit 1: Fundamentals", "Unit 2: Advanced Topics"],
+        "chapters": {},
+        "program": kwargs.get("degree") or "B.Tech",
+        "department": kwargs.get("department") or "Information Technology"
+    }
+
+
 class TestCurriculumIsolation(unittest.TestCase):
 
     def setUp(self):
+        self.patcher = patch("server.gemini_service.analyze_syllabus", side_effect=_mock_analyze_syllabus)
+        self.mock_analyze = self.patcher.start()
+
         self.app = app.test_client()
         self.app.testing = True
 
@@ -96,6 +157,9 @@ CS604 Distributed Systems Credits: 3 L:3 T:0 P:0
 CS605 Compiler Design Laboratory Credits: 2 L:0 T:0 P:4
 CS606 Cloud Computing Laboratory Credits: 2 L:0 T:0 P:4
 """
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def _login(self, email):
         res = self.app.post("/api/auth/login", json={

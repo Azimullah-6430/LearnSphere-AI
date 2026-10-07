@@ -13,6 +13,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { api } from '../services/api.js'
+import { getActiveValidatedCurriculum } from '../data/syllabusData.js'
 
 const AppContext = createContext(null)
 
@@ -153,14 +154,14 @@ export function AppProvider({ children }) {
         } else if (res.syllabus) {
           setSyllabusDataState(res.syllabus.analysis || res.syllabus)
         } else {
-          setSyllabusDataState(null)
+          setSyllabusDataState(res)
         }
       } else {
-        setSyllabusDataState(null)
+        setSyllabusDataState({ status: 'NOT_UPLOADED', curriculumStatus: 'NOT_UPLOADED', isValid: false, is_valid: false, subjects: [], topics: [] })
       }
     } catch {
       if (authSequenceRef.current === expectedSeq) {
-        setSyllabusDataState(null)
+        setSyllabusDataState({ status: 'NOT_UPLOADED', curriculumStatus: 'NOT_UPLOADED', isValid: false, is_valid: false, subjects: [], topics: [] })
       }
     }
   }, [])
@@ -552,6 +553,26 @@ export function AppProvider({ children }) {
 
   const formattedSessionTime = formatDuration(sessionElapsedSeconds)
 
+  // ── Authoritative Shared Curriculum State ──────────────────────────────────
+  const authoritativeCurriculum = useMemo(() => {
+    return getActiveValidatedCurriculum(studentProfile || userWithInitials, syllabusData)
+  }, [studentProfile, userWithInitials, syllabusData])
+
+  const curriculumStatus = authoritativeCurriculum.status || authoritativeCurriculum.curriculumStatus || 'NOT_UPLOADED'
+  const isCurriculumValid = authoritativeCurriculum.isValid && curriculumStatus === 'VALID'
+  const validatedSubjects = isCurriculumValid ? authoritativeCurriculum.subjectNames : []
+  const validatedSubjectObjects = isCurriculumValid ? (authoritativeCurriculum.subjects || []) : []
+  const validatedUnits = isCurriculumValid ? (authoritativeCurriculum.chapters || {}) : {}
+  const validatedTopics = isCurriculumValid ? (authoritativeCurriculum.topics || []) : []
+
+  const refreshCurriculum = useCallback(async (forceInvalidate = true) => {
+    if (forceInvalidate) {
+      setSyllabusDataState(null)
+    }
+    const currentSeq = authSequenceRef.current
+    await _fetchSyllabus(currentSeq)
+  }, [_fetchSyllabus])
+
   // ── Context value ─────────────────────────────────────────────────────────
   const value = {
     // Auth
@@ -571,9 +592,17 @@ export function AppProvider({ children }) {
     clearProfile: _clearAuthState,
     profileComplete: !!currentUser,
 
-    // Syllabus (server-persisted)
+    // Authoritative Single-Source Curriculum (Shared by Personal Trainer, Reality Lab, Knowledge Transfer)
     syllabusData,
     setSyllabusData,
+    authoritativeCurriculum,
+    curriculumStatus,
+    isCurriculumValid,
+    validatedSubjects,
+    validatedSubjectObjects,
+    validatedUnits,
+    validatedTopics,
+    refreshCurriculum,
 
     // Theme
     theme,
@@ -613,3 +642,22 @@ export function useApp() {
   if (!ctx) throw new Error('useApp must be used within AppProvider')
   return ctx
 }
+
+export function useAuthoritativeCurriculum() {
+  const ctx = useApp()
+  return {
+    curriculum: ctx.authoritativeCurriculum,
+    curriculumStatus: ctx.curriculumStatus,
+    isValid: ctx.isCurriculumValid,
+    is_valid: ctx.isCurriculumValid,
+    subjects: ctx.validatedSubjects,
+    subjectNames: ctx.validatedSubjects,
+    subjectObjects: ctx.validatedSubjectObjects,
+    units: ctx.validatedUnits,
+    chapters: ctx.validatedUnits,
+    topics: ctx.validatedTopics,
+    refreshCurriculum: ctx.refreshCurriculum,
+    setSyllabusData: ctx.setSyllabusData
+  }
+}
+

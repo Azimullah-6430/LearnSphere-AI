@@ -7,7 +7,7 @@ import { api } from '../services/api.js'
 import {
   FileText, ArrowRight, TrendingUp, TrendingDown, Award,
   CheckCircle2, AlertTriangle, AlertCircle, BookOpen, Brain,
-  Sparkles, History, Eye, X, HelpCircle, Layers
+  Sparkles, History, Eye, X, HelpCircle, Layers, Trash2
 } from 'lucide-react'
 
 export default function Performance() {
@@ -18,24 +18,23 @@ export default function Performance() {
   const [selectedEvalDetail, setSelectedEvalDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
-  useEffect(() => {
-    async function loadAnalytics() {
-      setLoading(true)
-      try {
-        const res = await api.getStudentAnalytics()
-        if (res && res.success) {
-          setAnalytics(res)
-        } else {
-          setAnalytics(null)
-        }
-      } catch (err) {
-        console.warn('Analytics API error:', err)
+  const fetchAnalytics = async () => {
+    try {
+      const res = await api.getStudentAnalytics()
+      if (res && res.success) {
+        setAnalytics(res)
+      } else {
         setAnalytics(null)
-      } finally {
-        setLoading(false)
       }
+    } catch (err) {
+      console.warn('Analytics API error:', err)
+      setAnalytics(null)
     }
-    loadAnalytics()
+  }
+
+  useEffect(() => {
+    setLoading(true)
+    fetchAnalytics().finally(() => setLoading(false))
   }, [user])
 
   const handleViewEvaluation = async (evalId) => {
@@ -52,6 +51,36 @@ export default function Performance() {
       alert('Error fetching evaluation: ' + err.message)
     } finally {
       setDetailLoading(false)
+    }
+  }
+
+  const handleDeleteEvaluation = async (evalId, e) => {
+    if (e) e.stopPropagation()
+    if (!evalId) return
+    if (!window.confirm("Are you sure you want to delete this evaluation from your history permanently?")) {
+      return
+    }
+    const targetId = String(evalId)
+    try {
+      await api.deleteEvaluation(targetId)
+    } catch (err) {
+      console.error('Delete evaluation error:', err)
+    }
+    // Optimistic removal from analytics list
+    setAnalytics(prev => {
+      if (!prev) return prev
+      const updatedHistory = (prev.evaluation_history || []).filter(
+        item => String(item.evaluation_id || item.id || item._id) !== targetId
+      )
+      return {
+        ...prev,
+        evaluation_history: updatedHistory,
+        total_evaluations: Math.max(0, (prev.total_evaluations || 1) - 1),
+        has_data: updatedHistory.length > 0
+      }
+    })
+    if (selectedEvalDetail && String(selectedEvalDetail.id || selectedEvalDetail._id || selectedEvalDetail.evaluation_id) === targetId) {
+      setSelectedEvalDetail(null)
     }
   }
 
@@ -315,8 +344,8 @@ export default function Performance() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 self-end sm:self-center">
-                    <div className="text-right">
+                  <div className="flex items-center gap-2 self-end sm:self-center">
+                    <div className="text-right mr-1">
                       <div className="font-black text-sm text-[var(--accent)]">
                         {e.obtained_marks} / {e.total_marks} marks
                       </div>
@@ -326,13 +355,21 @@ export default function Performance() {
                     </div>
 
                     <Button
-                      onClick={() => handleViewEvaluation(e.evaluation_id)}
+                      onClick={() => handleViewEvaluation(e.evaluation_id || e.id || e._id)}
                       disabled={detailLoading}
                       className="text-xs px-3 py-1.5 flex items-center gap-1.5"
                     >
                       <Eye size={13} />
                       <span>View Evaluation</span>
                     </Button>
+
+                    <button
+                      onClick={(evt) => handleDeleteEvaluation(e.evaluation_id || e.id || e._id, evt)}
+                      className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                      title="Delete Evaluation Record"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -454,7 +491,14 @@ export default function Performance() {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-[var(--border)]">
+              <button
+                onClick={(evt) => handleDeleteEvaluation(selectedEvalDetail.id || selectedEvalDetail._id || selectedEvalDetail.evaluation_id, evt)}
+                className="px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-1.5"
+              >
+                <Trash2 size={14} />
+                <span>Delete Evaluation Record</span>
+              </button>
               <Button variant="secondary" onClick={() => setSelectedEvalDetail(null)}>Close</Button>
             </div>
           </div>

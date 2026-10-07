@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getActiveValidatedCurriculum, getDynamicTransferQuestions, getDynamicChapters } from '../data/syllabusData.js'
-import { useApp } from '../context/AppContext.jsx'
+import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import SyllabusModal from '../components/SyllabusModal.jsx'
 import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
 import {
@@ -26,12 +26,10 @@ function ScoreRing({ score, size = 80 }) {
 }
 
 export default function KnowledgeChallenge() {
-  const { user, syllabusData, recordActivity } = useApp()
+  const { user, recordActivity } = useApp()
+  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
-
-  const activeCurriculum = getActiveValidatedCurriculum(activeProfile, syllabusData)
-  const subjects = activeCurriculum.subjectNames
-  const hasValidCurriculum = activeCurriculum.isValid && subjects.length > 0
+  const activeCurriculum = curriculum
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
   const [phase, setPhase] = useState('intro') // 'intro' | 'question' | 'feedback' | 'done'

@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { PageHead, Badge, Button } from '../components/ui/Primitives.jsx'
 import { studyTechniques } from '../data/mockData.js'
 import { getActiveValidatedCurriculum, getDynamicChapters } from '../data/syllabusData.js'
-import { useApp } from '../context/AppContext.jsx'
+import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
 import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
@@ -81,14 +81,11 @@ function generateReply(method, technique, concept, subject, input) {
 }
 
 export default function Trainer() {
-  const { user, syllabusData, recordActivity, streakDays } = useApp()
+  const { user, recordActivity, streakDays } = useApp()
+  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, subjectObjects, units: allUnits } = useAuthoritativeCurriculum()
   const location = useLocation()
   const activeProfile = user
-
-  const activeCurriculum = getActiveValidatedCurriculum(activeProfile, syllabusData)
-  const subjects = activeCurriculum.subjectNames
-  const subjectObjects = activeCurriculum.subjects || []
-  const hasValidCurriculum = activeCurriculum.isValid && subjects.length > 0
+  const activeCurriculum = curriculum
   
   const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
   const [selectedUnit, setSelectedUnit] = useState(null)
@@ -107,7 +104,7 @@ export default function Trainer() {
   const [loadingReply, setLoadingReply] = useState(false)
   const scrollRef = useRef(null)
 
-  const units = getDynamicChapters(selectedSubject, activeProfile, syllabusData)
+  const units = (allUnits && allUnits[selectedSubject]) ? allUnits[selectedSubject] : getDynamicChapters(selectedSubject, activeProfile, curriculum)
 
   // Find active subject metadata (code, category, credits)
   const currentSubjectObj = subjectObjects.find(s => 
@@ -523,8 +520,52 @@ export default function Trainer() {
                 )}
               </div>
 
-              {/* Input Box */}
-              <div className="p-3 border-t border-[var(--border)] bg-[var(--surface)]">
+              {/* Human Tutor Prompt Chips & Input Box */}
+              <div className="p-3 border-t border-[var(--border)] bg-[var(--surface)] space-y-2">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                  <span className="text-[10px] font-bold uppercase text-[var(--text-faint)] shrink-0 mr-1">Tutor Prompts:</span>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage("Explain simply using the Feynman technique and everyday analogies.")}
+                    disabled={loadingReply}
+                    className="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--text-soft)] transition-all shrink-0 flex items-center gap-1"
+                  >
+                    💡 Explain simply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage("Explain for exam: what are the key marks breakdown, mandatory keywords, diagrams, and examiner traps?")}
+                    disabled={loadingReply}
+                    className="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--text-soft)] transition-all shrink-0 flex items-center gap-1"
+                  >
+                    🎯 Explain for exam
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage("Give another concrete real-world engineering example of this concept.")}
+                    disabled={loadingReply}
+                    className="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--text-soft)] transition-all shrink-0 flex items-center gap-1"
+                  >
+                    🌟 Another example
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage("Test me: Ask me a challenging semester exam question on this topic and grade my answer.")}
+                    disabled={loadingReply}
+                    className="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--text-soft)] transition-all shrink-0 flex items-center gap-1"
+                  >
+                    🧠 Test me
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendMessage("I don't understand: please explain again from a different perspective and break it into smaller steps.")}
+                    disabled={loadingReply}
+                    className="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface-alt)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--text-soft)] transition-all shrink-0 flex items-center gap-1"
+                  >
+                    🔄 Explain again
+                  </button>
+                </div>
+
                 <form
                   onSubmit={(e) => {
                     e.preventDefault()
@@ -536,7 +577,7 @@ export default function Trainer() {
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder={`Ask about ${selectedConcept || selectedSubject} or exam questions...`}
+                    placeholder={`Ask about ${selectedConcept || selectedSubject} (e.g., "Explain simply", "Test me", "Step by step numerical")...`}
                     className="flex-1 px-4 py-2.5 text-xs bg-[var(--surface-alt)] border border-[var(--border)] rounded-xl text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                     disabled={loadingReply}
                   />

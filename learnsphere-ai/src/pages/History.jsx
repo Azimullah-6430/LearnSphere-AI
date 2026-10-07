@@ -274,15 +274,13 @@ export default function History() {
                             <span>View</span>
                           </Button>
 
-                          {role === 'teacher' && (
-                            <button
-                              onClick={(e) => handleDelete(evalId, e)}
-                              className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
-                              title="Delete Record"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => handleDelete(evalId, e)}
+                            className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                            title="Delete Evaluation Record"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -513,15 +511,13 @@ export default function History() {
 
             {/* Modal Footer */}
             <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
-              {role === 'teacher' && (
-                <button
-                  onClick={(e) => handleDelete(selectedEval.id || selectedEval._id, e)}
-                  className="px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-1.5"
-                >
-                  <Trash2 size={14} />
-                  <span>Delete Record</span>
-                </button>
-              )}
+              <button
+                onClick={(e) => handleDelete(selectedEval.id || selectedEval._id, e)}
+                className="px-3.5 py-1.5 rounded-lg text-[12px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-1.5"
+              >
+                <Trash2 size={14} />
+                <span>Delete Evaluation Record</span>
+              </button>
               <Button variant="secondary" onClick={() => setSelectedEval(null)} className="ml-auto">
                 Close
               </Button>
