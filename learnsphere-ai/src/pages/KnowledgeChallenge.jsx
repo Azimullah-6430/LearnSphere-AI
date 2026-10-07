@@ -26,7 +26,7 @@ function ScoreRing({ score, size = 80 }) {
 }
 
 export default function KnowledgeChallenge() {
-  const { user, recordActivity } = useApp()
+  const { user, syllabusData, recordActivity } = useApp()
   const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
   const activeCurriculum = curriculum
@@ -59,8 +59,9 @@ export default function KnowledgeChallenge() {
     }
   }, [subjects, activeSubject])
 
-  const modules = getDynamicChapters(activeSubject, activeProfile, syllabusData)
-  const pool = getDynamicTransferQuestions(activeSubject, activeProfile, syllabusData, activeDifficulty, activeModule)
+  const effectiveCurriculum = activeCurriculum || syllabusData
+  const modules = getDynamicChapters(activeSubject, activeProfile, effectiveCurriculum)
+  const pool = getDynamicTransferQuestions(activeSubject, activeProfile, effectiveCurriculum, activeDifficulty, activeModule)
   const currentRound = rounds[roundIdx]
 
   const switchSubject = (sub) => {

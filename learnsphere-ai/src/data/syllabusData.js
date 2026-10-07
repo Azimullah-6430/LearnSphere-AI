@@ -1159,27 +1159,79 @@ export function getDynamicSubjects(profile, syllabusData) {
 }
 
 export function getDynamicChapters(subject, profile, syllabusData) {
-  if (!subject || !syllabusData) return []
+  if (!subject) return []
 
   const activeCurriculum = getActiveValidatedCurriculum(profile, syllabusData)
-  if (!activeCurriculum.isValid) return []
+  if (!activeCurriculum.isValid || !activeCurriculum.subjectNames?.includes(subject)) return []
   
-  // If active curriculum contains extracted chapters for this subject
-  if (activeCurriculum.chapters && activeCurriculum.chapters[subject]) {
+  // 1. If active curriculum contains extracted chapters for this subject
+  if (activeCurriculum.chapters && activeCurriculum.chapters[subject] && activeCurriculum.chapters[subject].length > 0) {
     return activeCurriculum.chapters[subject]
   }
 
-  // Check if syllabusData directly has extracted chapters for this subject
-  if (syllabusData && syllabusData.chapters && syllabusData.chapters[subject]) {
+  // 2. If active curriculum contains units for this subject
+  if (activeCurriculum.units && activeCurriculum.units[subject] && activeCurriculum.units[subject].length > 0) {
+    const rawUnits = activeCurriculum.units[subject]
+    return rawUnits.map((u, i) => {
+      if (typeof u === 'string') {
+        return { name: u, concepts: [u, `${u} Fundamentals`, `${u} Implementation`, `${u} Practical Applications`] }
+      }
+      return u
+    })
+  }
+
+  // 3. Check if syllabusData directly has extracted chapters or units for this subject
+  if (syllabusData && syllabusData.chapters && syllabusData.chapters[subject] && syllabusData.chapters[subject].length > 0) {
     return syllabusData.chapters[subject]
   }
 
-  if (syllabusData && syllabusData.units && syllabusData.units[subject]) {
-    return syllabusData.units[subject]
+  if (syllabusData && syllabusData.units && syllabusData.units[subject] && syllabusData.units[subject].length > 0) {
+    const rawUnits = syllabusData.units[subject]
+    return rawUnits.map((u, i) => {
+      if (typeof u === 'string') {
+        return { name: u, concepts: [u, `${u} Fundamentals`, `${u} Implementation`, `${u} Practical Applications`] }
+      }
+      return u
+    })
   }
 
-  return []
+  // 4. Check subject object from validated subjects list
+  const subObj = (activeCurriculum.subjects || []).find(s => s.name === subject || s.code === subject)
+  if (subObj && Array.isArray(subObj.topics) && subObj.topics.length > 0) {
+    return subObj.topics.map((t, idx) => ({
+      name: `Unit ${idx + 1}: ${t}`,
+      concepts: [t, `${t} Fundamentals`, `${t} Algorithms & Design`, `${t} Production Applications`]
+    }))
+  }
+
+  if (subObj && Array.isArray(subObj.units) && subObj.units.length > 0) {
+    return subObj.units.map((u, idx) => ({
+      name: typeof u === 'string' ? u : (u.name || `Unit ${idx + 1}`),
+      concepts: typeof u === 'string' ? [u] : (u.concepts || [u.name || subject])
+    }))
+  }
+
+  // 5. Build structured modules grounded in the validated subject
+  return [
+    {
+      name: `Unit 1: ${subject} Core Principles & Foundations`,
+      concepts: [`${subject} Architecture`, `${subject} Theoretical Laws`, `${subject} Foundational Models`, `${subject} Fundamentals`]
+    },
+    {
+      name: `Unit 2: ${subject} Analytical Methods & Algorithms`,
+      concepts: [`${subject} Algorithms & Flow`, `${subject} Mathematical Models`, `${subject} Design Constraints`, `${subject} Logic Optimization`]
+    },
+    {
+      name: `Unit 3: ${subject} Practical Engineering & System Design`,
+      concepts: [`${subject} Implementation`, `${subject} System Integration`, `${subject} Diagnostics & Debugging`, `${subject} Verification`]
+    },
+    {
+      name: `Unit 4: ${subject} Industrial Applications & Optimization`,
+      concepts: [`${subject} Performance Tuning`, `${subject} Real-Time Applications`, `${subject} Industrial Standards`, `${subject} Security & Scalability`]
+    }
+  ]
 }
+
 
 const DAY_TO_DAY_SCENARIOS_TEMPLATES = [
   { context: "Smartphone & Streaming Apps", diff: "Easy", title: "Why does your smartphone application use '{concept}' from {module} when streaming HD video or playing music?", answer: "Smartphones use {concept} from {module} to optimize data payload over wireless links, preventing buffering while maintaining clear audio/video playback." },

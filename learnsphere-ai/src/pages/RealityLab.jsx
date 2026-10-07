@@ -35,7 +35,7 @@ function QualityMeter({ pct }) {
 }
 
 export default function RealityLab() {
-  const { user, recordActivity } = useApp()
+  const { user, syllabusData, recordActivity } = useApp()
   const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
   const isCollege = activeProfile?.level === 'college'
@@ -66,8 +66,9 @@ export default function RealityLab() {
     }
   }, [subjects, activeSubject])
 
-  const modules = getDynamicChapters(activeSubject, activeProfile, syllabusData)
-  const scenarios = getDynamicScenarios(activeSubject, activeProfile, syllabusData, activeDifficulty, activeModule)
+  const effectiveCurriculum = activeCurriculum || syllabusData
+  const modules = getDynamicChapters(activeSubject, activeProfile, effectiveCurriculum)
+  const scenarios = getDynamicScenarios(activeSubject, activeProfile, effectiveCurriculum, activeDifficulty, activeModule)
   const scenario = scenarios[scenarioIdx]
 
   const switchSubject = (sub) => {
