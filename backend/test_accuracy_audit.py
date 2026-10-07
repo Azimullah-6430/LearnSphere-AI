@@ -848,6 +848,120 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertTrue(len(res3["evaluations"]) >= 1)
         self.assertEqual(res3["evaluations"][0]["question_id"], "q1")
 
+    def test_38_strict_mark_to_depth_rigor(self):
+        """38. Strict mark-to-depth evaluation: verify that 8-mark, 12-mark, and 16-mark
+        questions written as brief/short answers are strictly capped and penalized by real teacher standards.
+        """
+        qp_struct = {
+            "subject": "Computer Science & Engineering",
+            "total_marks": 36.0,
+            "questions": [
+                {"question_id": "q1", "question_number": "1", "question_text": "Explain the Working Principle of Transformer Architecture with Self-Attention Mechanism.", "maximum_marks": 8.0},
+                {"question_id": "q2", "question_number": "2", "question_text": "Explain Relational Database Normalization from 1NF to BCNF with concrete tables and dependency diagrams.", "maximum_marks": 12.0},
+                {"question_id": "q3", "question_number": "3", "question_text": "Design an End-to-End Distributed Microservices Architecture for an E-commerce Platform with trade-offs.", "maximum_marks": 16.0}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {
+                    "question_id": "q1",
+                    "question_number": "1",
+                    "attempted": True,
+                    "maximum_marks": 8.0,
+                    "awarded_marks": 2.5,
+                    "percentage_of_question": 31.25,
+                    "answer_classification": "correct_answer_with_insufficient_explanation",
+                    "student_answer": "Transformers use self-attention to process words in parallel instead of sequentially like RNNs.",
+                    "evaluation_reason": "Awarded 2.5/8.0: Accurate core concept (+2.5m). Deducted 5.5 marks because the response is a brief one-line summary for an 8-mark question—missing Query/Key/Value matrix formulations, multi-head attention diagrams, feed-forward layers, and positional encoding.",
+                    "teacher_feedback": "Your fundamental concept of parallel self-attention vs RNNs is correct. However, for an 8-mark question, a brief one-line answer cannot receive full credit. You must provide QKV equations, multi-head architecture, and positional encodings.",
+                    "what_was_done_correctly": ["Correct definition of Transformer parallel attention mechanism"],
+                    "what_is_missing": ["Q, K, V mathematical matrix formulation", "Multi-Head Attention mechanism and block diagram", "Positional encoding explanation", "Feed-forward layer and residual normalization details"],
+                    "what_is_incorrect": []
+                },
+                {
+                    "question_id": "q2",
+                    "question_number": "2",
+                    "attempted": True,
+                    "maximum_marks": 12.0,
+                    "awarded_marks": 3.5,
+                    "percentage_of_question": 29.17,
+                    "answer_classification": "incomplete_answer",
+                    "student_answer": "1NF removes repeating groups. 2NF removes partial dependency. 3NF removes transitive dependency. BCNF is Boyce Codd normal form.",
+                    "evaluation_reason": "Awarded 3.5/12.0: Correct definitions of normal forms (+3.5m). Deducted 8.5 marks because 12-mark question requires step-by-step decomposed table schemas, functional dependency diagrams, anomaly examples (insert/update/delete), and formal determinant criteria for BCNF.",
+                    "teacher_feedback": "Accurate basic definitions of normal forms. However, this is a 12-mark major question. You must include sample relation tables, show functional dependencies, and illustrate anomalies at each stage.",
+                    "what_was_done_correctly": ["Accurate baseline definitions of 1NF, 2NF, 3NF, and BCNF"],
+                    "what_is_missing": ["Concrete sample relation tables and decomposition examples", "Functional dependency diagrams", "Insertion, deletion, and update anomaly demonstrations", "Formal mathematical determinant definition for BCNF"],
+                    "what_is_incorrect": []
+                },
+                {
+                    "question_id": "q3",
+                    "question_number": "3",
+                    "attempted": True,
+                    "maximum_marks": 16.0,
+                    "awarded_marks": 4.5,
+                    "percentage_of_question": 28.12,
+                    "answer_classification": "correct_answer_with_insufficient_explanation",
+                    "student_answer": "We have microservices like User Service, Order Service, and Payment Service. They communicate via REST APIs and use separate databases.",
+                    "evaluation_reason": "Awarded 4.5/16.0: High-level microservices concept identified (+4.5m). Deducted 11.5 marks because 16-mark comprehensive design question demands API gateway architecture, distributed transactions (Saga pattern/2PC), event brokers (Kafka/RabbitMQ), circuit breakers, caching, and resiliency trade-offs.",
+                    "teacher_feedback": "Good high-level identification of core microservice boundaries. For a 16-mark engineering design question, extensive depth is required: API gateway, asynchronous messaging, Saga pattern for distributed transactions, CQRS, and latency/resilience analysis.",
+                    "what_was_done_correctly": ["Correctly identified independent service boundaries and database-per-service pattern"],
+                    "what_is_missing": ["System architecture block diagram", "API Gateway and Service Discovery", "Distributed transaction management (Saga Pattern / 2PC)", "Event-driven messaging architecture", "Resiliency mechanisms (Circuit breaker, rate limiting)", "CAP theorem trade-offs"],
+                    "what_is_incorrect": []
+                }
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 36.0)
+        self.assertEqual(result["obtained_marks"], 10.5)
+
+        q1 = next(q for q in result["evaluations"] if q["question_number"] == "1")
+        self.assertLessEqual(q1["awarded_marks"], 3.0)
+        self.assertEqual(q1["answer_classification"], "correct_answer_with_insufficient_explanation")
+
+        q2 = next(q for q in result["evaluations"] if q["question_number"] == "2")
+        self.assertLessEqual(q2["awarded_marks"], 4.0)
+
+        q3 = next(q for q in result["evaluations"] if q["question_number"] == "3")
+        self.assertLessEqual(q3["awarded_marks"], 5.0)
+
+    def test_39_strike_outs_disregarded_clean_text_evaluated(self):
+        """39. Verify that crossed-out/struck-through sections in student scripts are completely
+        excluded from evaluation and only clean, un-struck text is evaluated.
+        """
+        qp_struct = {
+            "subject": "Mathematics",
+            "total_marks": 5.0,
+            "questions": [
+                {"question_id": "q1", "question_number": "1", "question_text": "Find the derivative of f(x) = x^3 - 4x + 7.", "maximum_marks": 5.0}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {
+                    "question_id": "q1",
+                    "question_number": "1",
+                    "attempted": True,
+                    "maximum_marks": 5.0,
+                    "awarded_marks": 5.0,
+                    "percentage_of_question": 100.0,
+                    "answer_classification": "correct_answer",
+                    "student_answer": "Student struck through initial attempt 'f'(x) = 2x - 4'. Replaced with clean un-struck solution: 'f'(x) = d/dx(x^3) - d/dx(4x) + d/dx(7) = 3x^2 - 4'.",
+                    "evaluation_reason": "Full marks (5.0/5.0) awarded for correct power rule differentiation. The student's initial crossed-out work was strictly disregarded, and only the final clean solution was evaluated.",
+                    "teacher_feedback": "Perfect step-by-step differentiation using the power rule. Clean final answer 3x^2 - 4.",
+                    "what_was_done_correctly": ["Correct differentiation of x^3 to 3x^2", "Correct differentiation of -4x to -4", "Derivative of constant 7 equals 0"],
+                    "what_is_missing": [],
+                    "what_is_incorrect": []
+                }
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 5.0)
+        self.assertEqual(result["obtained_marks"], 5.0)
+        self.assertEqual(result["evaluations"][0]["awarded_marks"], 5.0)
+        self.assertIn("struck through", result["evaluations"][0]["student_answer"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

@@ -441,37 +441,67 @@ ULTRA-STRICT HUMAN EXAMINER MARKING PROTOCOL
    - For EVERY question in the Question Paper structure, locate where the student answered it.
    - When a student attempts subparts like 6(a)(i), 6(a)(ii), 7(a)(i), 7(a)(ii), you MUST evaluate EACH subpart as an individual entry in the 'evaluations' array. NEVER omit 6(a)(i) or 7(a)(i)!
 
-2. READ THE QUESTION FIRST & BUDGET MARKS PER COMPONENT:
-   For every question in the Question Paper, establish a strict mark breakdown based on the maximum marks:
-   - 2-MARK QUESTIONS:
-     * Budget: 1.0 mark for precise technical definition/statement + 1.0 mark for syntax, valid examples, or mechanism.
-     * If the student only provides a vague/partial one-line statement without examples/syntax: award MAX 0.5 to 1.0 mark.
-     * Tautological / Circular answers (e.g., "A random number function is a function that calls randomly") receive MAX 0.5 marks.
-     * Complete category confusions (e.g. citing lifecycle stages like "Data Collection" for "Data Sources") receive STRICTLY 0.0 marks.
-   - 5-MARK / 8-MARK QUESTIONS:
-     * Explicitly budget marks across concept (2m), mechanism/examples (2m), and diagrams/code (1-4m).
-   - 10-MARK / 12-MARK / 16-MARK QUESTIONS:
-     * Budget rigorously across all stated sub-components (e.g., Syntax/Theory 4m + Working Program 6m; or 4 distinct operations × 3m each).
-     * If any operation/subpart is skipped or left blank: award STRICTLY 0.0 for that subpart.
-     * If informal pseudocode or invalid syntax is written instead of executable code in a programming question: deduct marks proportionally for syntax errors.
+2. MANDATORY MARK-TO-DEPTH RIGOR (PROPORTIONALITY RULE - NO HIGH/FULL MARKS FOR SHORT ANSWERS TO LONG QUESTIONS):
+   Real human teachers and strict board/university examiners NEVER award high or full marks for brief, short, or superficial answers to long-mark questions, even if what is written is factually correct.
+   The volume, technical depth, structural completeness, step-by-step elaboration, diagrams, proofs, and multi-point coverage MUST STRICTLY MATCH the question's maximum marks:
 
-3. STRICT REAL TEACHER GRADING RULES:
+   - 2-MARK QUESTIONS (Short / Definition):
+     * Standard: 1.0 mark for precise technical definition/statement + 1.0 mark for formula/syntax/example/units.
+     * Brief 1-line definition: Award 0.5 to 1.0 mark.
+     * Tautological / Circular definitions (e.g. "A random function is a function that generates random"): Award MAX 0.5 marks.
+     * Wrong category / Incorrect concept: STRICTLY 0.0 marks.
+
+   - 5-MARK QUESTIONS (Medium Answer):
+     * Requires: Core definition/principle (1.5-2.0m) + Detailed mechanism/working steps/diagram/examples (3.0-3.5m).
+     * SHORT ANSWER PENALTY: If student writes only a short 1-2 sentence answer or brief definition without mechanism, steps, or diagrams: STRICTLY CAP at MAX 1.5 to 2.0 / 5.0 (30-40% max). NEVER give 4.0 or 5.0 for a short answer!
+
+   - 8-MARK QUESTIONS (Long Answer):
+     * Requires: Comprehensive exposition (4-6 detailed points/subsections, detailed working mechanism, clear diagram/flowchart/derivation, and practical examples).
+     * SHORT ANSWER PENALTY: If a student writes a short answer / 2-4 lines / brief summary without sufficient depth, sub-headings, elaboration, or diagrams (even if the brief statement is technically correct): STRICTLY CAP at MAX 2.0 to 3.0 / 8.0 (25-37.5% max).
+     * Moderate Depth (covers only 2-3 points with limited explanation): Award 3.5 to 4.5 / 8.0.
+     * Full / Near-Full Marks (7.0 - 8.0 / 8.0): Awarded ONLY when the response is truly exhaustive with complete depth, multiple structured sections, diagrams, and concrete examples.
+     * NEVER award 5.5, 6.0, 7.0, or 8.0 marks to a short answer for an 8-mark question!
+
+   - 10-MARK / 12-MARK QUESTIONS (Major Long / Detailed Question):
+     * Requires: Thorough multi-point architecture: formal theory, complete step-by-step mathematical derivation / full working code with edge cases, architecture/flowchart diagrams, in-depth explanation across all required sub-components, and real-world trade-offs.
+     * SHORT ANSWER PENALTY: If a student writes a short answer (e.g. 1 short paragraph, basic definitions, or brief bullet points without step-by-step depth): STRICTLY CAP at MAX 2.5 to 4.0 / 10.0-12.0 (25-33% max).
+     * Partial Depth (only 2 of 4 components covered or superficial coverage): Award 4.5 to 6.0 / 10.0-12.0.
+     * Full / Near-Full Marks (9.0 - 12.0): Awarded ONLY for extensive, detailed, complete technical coverage with diagrams and full workings.
+     * NEVER award 7.5, 8.0, 9.0, 10.0, 11.0, or 12.0 marks to a short answer!
+
+   - 15-MARK / 16-MARK QUESTIONS (Comprehensive Essay / Deep Engineering Question):
+     * Requires: Exhaustive university/board level depth: detailed end-to-end framework, comprehensive architecture/block diagrams, complete robust derivations or production-grade code, exhaustive comparative matrices, analysis of 5+ dimensions, risk/compliance analysis, and practical case studies.
+     * SHORT ANSWER PENALTY: If a student writes a short answer (e.g. 1-2 short paragraphs, brief 4-5 line summary, or answers like a 2-mark or 5-mark question): STRICTLY CAP at MAX 3.5 to 5.0 / 16.0 (22-31% max).
+     * Moderate Answer (basic high-level overview without deep engineering analysis): Award 6.0 to 8.5 / 16.0.
+     * Extensive Answer (detailed 5-dimension analysis but minor omissions): Award 11.0 to 13.0 / 16.0.
+     * Full Marks (14.0 - 16.0 / 16.0): Requires complete, professional, exhaustive master-level answer.
+     * NEVER award 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, or 16.0 marks for an answer written like a short answer!
+
+3. STRIKE-OUT & CROSSED-OUT TEXT DISREGARD PROTOCOL (CRITICAL):
+   - Students frequently cross out or strike through words, equations, intermediate calculation steps, or entire paragraphs using horizontal lines, diagonal slashes, scribble marks, or "X" cancellations.
+   - STRICT CANCELLATION DISREGARD: You MUST completely IGNORE and DISREGARD all struck-out / crossed-out content during evaluation:
+     * NEVER award marks for correct concepts, formulas, or answers that have been struck out / crossed out by the student.
+     * NEVER penalize the student or deduct marks for incorrect words, calculation errors, or wrong formulas that have been struck out / crossed out.
+     * Evaluate ONLY clear, clean, un-struck words, numbers, formulas, sentences, and diagrams.
+     * When a student crosses out a faulty step or initial attempt and writes a fresh replacement below or alongside it, evaluate ONLY the final un-struck replacement.
+
+4. STRICT REAL TEACHER GRADING RULES:
    - STRICT ABOUT TECHNICAL ACCURACY: Never award marks for hand-waving, vague prose, or guessing.
    - NO SYMPATHY OR EFFORT MARKS: Award marks ONLY for verified, correct technical facts and working code/derivations actually present in the script.
    - ZERO MARKS FOR IRRELEVANT FLUFF: Repetitive paragraphs, generic filler, or writing unrelated topics receives 0.0 marks.
-   - FULL MARKS ONLY WHEN FULLY EARNED: Full marks require complete conceptual correctness, proper terminology, valid syntax/units, and required examples.
+   - FULL MARKS ONLY WHEN FULLY EARNED: Full marks require complete conceptual correctness, proper terminology, valid syntax/units, required examples, and exhaustive depth commensurate with the mark weight.
    - ERROR CARRIED FORWARD (NO DOUBLE PENALTY): In multi-step derivations or numericals, if an early arithmetic slip occurs but subsequent steps follow valid mathematical logic, deduct for the slip once. Award legitimate method marks for follow-through steps.
    - PROGRAMMING RIGOR: Check variable scope (e.g. parameter named 'average' but body uses undefined 'mark'), built-in function calls (e.g. 'sum(marks)' vs broken 'marks(sum)'), list appending ('marks.append(x)' vs 'append += marks'), and language-specific syntax (penalize C/Java loops in Python).
 
-4. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
-   - In both 'evaluation_reason' and 'teacher_feedback', provide the EXACT component-level mark arithmetic.
-   - Example: "Awarded 3.5/5.0: +2.0 for correct Newton's second law definition and formula, +1.5 for valid substitution and SI units, -1.5 for arithmetic calculation error in final step."
+5. GRANULAR EVIDENCE & ARITHMETIC REASONING IN FEEDBACK:
+   - In both 'evaluation_reason' and 'teacher_feedback', provide the EXACT component-level mark arithmetic and clearly justify deductions for brevity or missing depth.
+   - Example (Short answer on long question): "Awarded 3.0/8.0: +3.0 for accurate core definition of Agile vs Waterfall. -5.0 marks deducted because the answer is too brief for an 8-mark question—missing phase-by-phase breakdown, comparative matrix, risk management analysis, and practical industry examples."
 
-5. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
+6. EXACT QUESTION BINDING & OPTION DISAMBIGUATION:
    - Bind answers strictly to attempted questions (e.g. Q6(a) vs Q6(b)).
    - For unattempted questions or alternative elective options: set attempted: false, awarded_marks: 0.0, answer_classification: "unanswered_question".
 
-6. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
+7. CLASSIFY EVERY ANSWER INTO EXACTLY ONE OF:
    - "correct_answer"
    - "partially_correct_concept"
    - "correct_concept_with_calculation_error"
@@ -556,13 +586,15 @@ EVALUATION RESULT:
 
 REAL HUMAN EXAMINER VERIFICATION CHECKLIST:
 1. QUESTION CORRESPONDENCE: Question count, question IDs, and question numbers correspond directly to the Question Paper structure.
-2. STRICT MARK BOUNDS: Every question has 0.0 <= awarded_marks <= maximum_marks with zero mark inflation or negative marks.
-3. ARITHMETIC INTEGRITY: Total obtained marks equals the exact sum of awarded marks of all counted questions.
-4. CHOICE RULES & OPTION ENFORCEMENT: Choice/elective rules (OR groups, Answer any X) are strictly followed without double-counting.
-5. REAL TEACHER EVIDENCE: All feedback statements directly reflect the student's actual handwritten answers without hallucination.
-6. ERROR CARRIED FORWARD & PARTIAL MARKING: Method marks were awarded appropriately where an arithmetic slip occurred without repeatedly penalizing follow-through steps.
-7. CONCISE VS FLUFF SCRUTINY: Concise, complete, accurate answers are rewarded fairly and rambling fluff is not awarded unearned credit.
-8. OCR & AMBIGUITY CHECK: Zero unrecognized symbol corruptions or unaddressed illegibility issues.
+2. STRICT MARK BOUNDS & ZERO INFLATION: Every question has 0.0 <= awarded_marks <= maximum_marks with zero unearned mark inflation or negative marks.
+3. PROPORTIONALITY & SHORT-ANSWER RIGOR AUDIT: For long answer questions (5m, 8m, 10m, 12m, 16m), strictly verify that short, brief, or superficial answers are NOT awarded high or full marks. A short answer to an 8m question must NOT receive >3.5 marks, and a short answer to a 16m question must NOT receive >5.5 marks. If mark inflation occurred on brief answers, flag disagreement.
+4. STRIKE-OUT / CROSSED-OUT AUDIT: Verify that all struck-out or crossed-out text/calculations in the answer sheets were completely excluded from grading, and only clear, un-struck words and equations were considered.
+5. ARITHMETIC INTEGRITY: Total obtained marks equals the exact sum of awarded marks of all counted questions.
+6. CHOICE RULES & OPTION ENFORCEMENT: Choice/elective rules (OR groups, Answer any X) are strictly followed without double-counting.
+7. REAL TEACHER EVIDENCE: All feedback statements directly reflect the student's actual handwritten answers without hallucination.
+8. ERROR CARRIED FORWARD & PARTIAL MARKING: Method marks were awarded appropriately where an arithmetic slip occurred without repeatedly penalizing follow-through steps.
+9. CONCISE VS FLUFF SCRUTINY: Concise, complete, accurate answers are rewarded fairly and rambling fluff is not awarded unearned credit.
+10. OCR & AMBIGUITY CHECK: Zero unrecognized symbol corruptions or unaddressed illegibility issues.
 
 Return ONLY a valid JSON object matching this schema:
 {{
@@ -1697,21 +1729,29 @@ Return ONLY JSON:
 
     def evaluate_self_evaluation(self, question_text: str, expected_concept: str, student_response: str, subject: str) -> Dict[str, Any]:
         prompt = f"""
-Evaluate student's self-evaluation response using gemini-3.6-flash.
+You are LearnSphere AI's ULTRA-STRICT REAL HUMAN TEACHER AND EXAMINER.
+Evaluate the student's self-evaluation response rigorously and strictly proportional to the maximum marks (10 marks).
+
 Subject: {subject}
 Question: {question_text}
-Expected Concept: {expected_concept}
+Expected Concept & Depth: {expected_concept}
 Student Response: {student_response}
+Maximum Marks: 10
+
+STRICT HUMAN TEACHER GRADING RULES:
+1. PROPORTIONALITY & DEPTH: For a 10-mark question, if the student wrote only a brief/short answer (1-2 sentences without depth, mechanisms, examples, or multi-point breakdown), STRICTLY CAP at MAX 2.5 - 3.5 marks out of 10. NEVER award 7, 8, 9, or 10 marks to a short answer! Full marks require exhaustive, multi-part, structured explanation.
+2. ACCURACY & EVIDENCE: Check for correct terminology, core mechanisms, and step-by-step reasoning.
+3. CLEAR ARITHMETIC: In feedback, explain exactly why marks were awarded and deducted.
 
 Return ONLY JSON:
 {{
-  "awarded_marks": 7,
+  "awarded_marks": 3.0,
   "max_marks": 10,
-  "percentage": 70,
-  "feedback": "Detailed specific feedback referencing student's actual response",
-  "what_was_done_correctly": ["Correctly identified X"],
-  "what_is_missing": ["Missing explanation of Y"],
-  "expected_answer": "Model answer with key points",
+  "percentage": 30.0,
+  "feedback": "Detailed specific feedback referencing student's actual response and explaining marks deducted for brevity and missing depth",
+  "what_was_done_correctly": ["Correctly identified core definition"],
+  "what_is_missing": ["In-depth multi-point explanation", "Real-world examples", "Detailed mechanism"],
+  "expected_answer": "Model answer with comprehensive key points",
   "misconception_detected": false,
   "misconception": ""
 }}
