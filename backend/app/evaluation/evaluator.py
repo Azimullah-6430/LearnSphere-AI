@@ -209,7 +209,7 @@ class EvaluationAgent:
         # Exhaustive multi-strategy question matcher with strict hierarchy enforcement
         used_item_indices = set()
 
-        def find_matching_eval_item(q_spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        def find_matching_eval_item(q_spec: Dict[str, Any], q_idx: int = 0) -> Optional[Dict[str, Any]]:
             target_id = str(q_spec.get("question_id") or "").strip()
             target_no = str(q_spec.get("question_number") or "").strip()
             target_norm_id = self._norm_qno(target_id)
@@ -227,7 +227,6 @@ class EvaluationAgent:
 
             def is_item_compatible(item: Dict[str, Any]) -> bool:
                 h_no, h_id = get_item_hiers(item)
-                # If item has explicit question number hierarchy, check compatibility
                 if h_no != (None, None, None):
                     if not self.is_hierarchy_compatible(target_hier, h_no):
                         return False
@@ -236,7 +235,7 @@ class EvaluationAgent:
                         return False
                 return True
 
-            # Pass 1: Exact question_id match
+            # Pass 1: Exact question_id match (case-insensitive)
             for idx, item in enumerate(eval_items):
                 if idx in used_item_indices: continue
                 item_id = str(item.get("question_id") or "").strip()
@@ -245,7 +244,7 @@ class EvaluationAgent:
                         used_item_indices.add(idx)
                         return item
 
-            # Pass 2: Exact question_number match
+            # Pass 2: Exact question_number match (case-insensitive)
             for idx, item in enumerate(eval_items):
                 if idx in used_item_indices: continue
                 item_no = str(item.get("question_number") or "").strip()
@@ -268,11 +267,13 @@ class EvaluationAgent:
                 if idx in used_item_indices: continue
                 item_id = str(item.get("question_id") or "").strip()
                 item_no = str(item.get("question_number") or "").strip()
-                if target_norm_id and (self._norm_qno(item_id) == target_norm_id or self._norm_qno(item_no) == target_norm_id):
+                norm_item_id = self._norm_qno(item_id)
+                norm_item_no = self._norm_qno(item_no)
+                if target_norm_id and (norm_item_id == target_norm_id or norm_item_no == target_norm_id):
                     if is_item_compatible(item):
                         used_item_indices.add(idx)
                         return item
-                if target_norm_no and (self._norm_qno(item_no) == target_norm_no or self._norm_qno(item_id) == target_norm_no):
+                if target_norm_no and (norm_item_no == target_norm_no or norm_item_id == target_norm_no):
                     if is_item_compatible(item):
                         used_item_indices.add(idx)
                         return item
@@ -309,9 +310,28 @@ class EvaluationAgent:
                         item_text = str(item.get("question_text") or item.get("student_answer") or item.get("teacher_feedback") or "").lower()
                         item_words = set(re.findall(r"\b[a-z]{4,}\b", item_text))
                         matched_words = target_words.intersection(item_words)
-                        if len(matched_words) >= min(3, len(target_words)):
+                        if len(matched_words) >= min(2, len(target_words)):
                             used_item_indices.add(idx)
                             return item
+
+            # Pass 7: Parent-Child / Hierarchy Prefix Match (e.g. Target is 6(a)(i) and item is 6(a) or 6)
+            if target_hier[0] is not None:
+                for idx, item in enumerate(eval_items):
+                    if idx in used_item_indices: continue
+                    h_no, h_id = get_item_hiers(item)
+                    for h in (h_no, h_id):
+                        if h[0] == target_hier[0]:
+                            # If option letters match or one is not specified
+                            if (h[1] is None or target_hier[1] is None or h[1] == target_hier[1]):
+                                used_item_indices.add(idx)
+                                return item
+
+            # Pass 8: Positional Index Fallback for unmapped items in exact sequential position
+            if q_idx < len(eval_items) and q_idx not in used_item_indices:
+                candidate = eval_items[q_idx]
+                if is_item_compatible(candidate):
+                    used_item_indices.add(q_idx)
+                    return candidate
 
             return None
 
@@ -323,10 +343,10 @@ class EvaluationAgent:
         attempted_count = 0
         unattempted_count = 0
 
-        for q in qp["questions"]:
+        for q_idx, q in enumerate(qp["questions"]):
             qno = str(q.get("question_number") or "").strip()
             norm_qno = self._norm_qno(qno)
-            item = find_matching_eval_item(q)
+            item = find_matching_eval_item(q, q_idx)
 
             max_m = float(q.get("maximum_marks") or 0.0)
 
@@ -950,7 +970,7 @@ class EvaluationAgent:
         if not val:
             return (None, None, None)
         s = str(val).strip().lower()
-        s = re.sub(r"^(?:question[\s\._-]*|q[\s\._-]*(?=\d))", "", s)
+        s = re.sub(r"^(?:question|q|ans|answer|sec|section|part|pt)[\s\._:-]*", "", s)
 
         roman_to_int = {
             "i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5",
@@ -1066,10 +1086,9 @@ class EvaluationAgent:
     @staticmethod
     def _norm_qno(value: Any) -> str:
         s = str(value or "").lower().strip()
-        s = re.sub(r"^question\s*", "", s)
-        s = re.sub(r"^q\s*", "", s)
+        s = re.sub(r"^(?:question|q|ans|answer|part|section|sec|pt)[\s\._:-]*", "", s)
         s = re.sub(r"\s+", "", s)
-        return s.replace(".", "").replace("-", "").replace("(", "").replace(")", "")
+        return s.replace(".", "").replace("-", "").replace("(", "").replace(")", "").replace(":", "").replace("_", "")
 
     @staticmethod
     def _grade(percentage: float) -> str:

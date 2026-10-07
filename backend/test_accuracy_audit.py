@@ -960,8 +960,78 @@ class AccuracyAuditTestSuite(unittest.TestCase):
         self.assertEqual(result["evaluations"][0]["awarded_marks"], 5.0)
         self.assertIn("struck through", result["evaluations"][0]["student_answer"])
 
+    def test_40_non_sequential_and_varied_labels_zero_omission(self):
+        """40. Zero Omission & Varied Labelling Test: Ensure questions answered out of sequence,
+        with varied prefix tags (e.g. 'Ans 1', 'Part B Q6(a)(i)', '6.a.2') are accurately mapped
+        and awarded marks without any question being skipped.
+        """
+        qp_struct = {
+            "subject": "Data Structures & Algorithms",
+            "total_marks": 25.0,
+            "questions": [
+                {"question_id": "q1", "question_number": "1", "question_text": "Define time complexity of Binary Search.", "maximum_marks": 5.0},
+                {"question_id": "q2", "question_number": "2", "question_text": "Explain QuickSort partition algorithm.", "maximum_marks": 5.0},
+                {"question_id": "q6_a_1", "question_number": "6(a)(i)", "question_text": "Explain BFS graph traversal.", "maximum_marks": 7.5},
+                {"question_id": "q6_a_2", "question_number": "6(a)(ii)", "question_text": "Explain DFS graph traversal.", "maximum_marks": 7.5}
+            ]
+        }
+        ai_response = {
+            "evaluations": [
+                {
+                    "question_id": "eval_bfs",
+                    "question_number": "Part B - Question 6(a)(i)",
+                    "attempted": True,
+                    "maximum_marks": 7.5,
+                    "awarded_marks": 7.0,
+                    "percentage_of_question": 93.33,
+                    "student_answer": "BFS uses a Queue (FIFO) to explore graph level by level.",
+                    "evaluation_reason": "Awarded 7.0/7.5 for accurate Queue mechanism and level-order traversal explanation."
+                },
+                {
+                    "question_id": "eval_q1",
+                    "question_number": "Ans. 1",
+                    "attempted": True,
+                    "maximum_marks": 5.0,
+                    "awarded_marks": 5.0,
+                    "percentage_of_question": 100.0,
+                    "student_answer": "Binary search time complexity is O(log n) best case O(1).",
+                    "evaluation_reason": "Full marks awarded for O(log n)."
+                },
+                {
+                    "question_id": "eval_dfs",
+                    "question_number": "6.a.2",
+                    "attempted": True,
+                    "maximum_marks": 7.5,
+                    "awarded_marks": 6.5,
+                    "percentage_of_question": 86.67,
+                    "student_answer": "DFS uses a Stack / recursion to explore as far as possible along each branch.",
+                    "evaluation_reason": "Awarded 6.5/7.5 for correct recursion/stack explanation."
+                },
+                {
+                    "question_id": "eval_q2",
+                    "question_number": "Answer 2",
+                    "attempted": True,
+                    "maximum_marks": 5.0,
+                    "awarded_marks": 4.5,
+                    "percentage_of_question": 90.0,
+                    "student_answer": "QuickSort chooses a pivot and places smaller elements left and greater elements right.",
+                    "evaluation_reason": "Awarded 4.5/5.0 for clear Lomuto/Hoare partitioning description."
+                }
+            ]
+        }
+        result = self.agent.verify_and_finalize_evaluation(qp_struct, ai_response)
+        self.assertEqual(result["total_marks"], 25.0)
+        self.assertEqual(result["obtained_marks"], 23.0)
+
+        # Ensure all 4 questions were correctly mapped and none marked unattempted
+        self.assertEqual(len(result["evaluations"]), 4)
+        for q in result["evaluations"]:
+            self.assertTrue(q["attempted"], f"Question {q['question_number']} was mistakenly marked unattempted!")
+            self.assertGreater(q["awarded_marks"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
