@@ -747,7 +747,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
         # Multi-department / multi-program section isolation:
         dept_heading_pattern = re.compile(
-            r"(?:^|\n)[^\n\r]{0,80}?\b(?:DEPARTMENT OF|BRANCH OF|PROGRAM(?:ME)? IN|FACULTY OF|DISCIPLINE OF)\s*[:\-–—\s]+([^\n\r]+)",
+            r"(?:^|\n)\s*(?:DEPARTMENT\s+OF|BRANCH\s+OF|PROGRAM(?:ME)?\s+IN|FACULTY\s+OF)\s+([A-Za-z\s&]{4,60})(?:\n|$)",
             re.I
         )
         student_dept_query = str(dept_str or "").strip().lower()
@@ -1068,8 +1068,11 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         if len(clean_row_name) < 2 or any(k in clean_row_name.lower() for k in ("courses total", "total credits", "scheme of examination")):
                             continue
 
-                        # Filter out generic elective placeholder rows without a specific course code
-                        if not row_code and re.match(r"^(?:professional\s+electives?|open\s+electives?|program\s+electives?|department(?:al)?\s+electives?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_row_name, re.I):
+                        # Filter out generic elective placeholder rows or course category acronym headers without a specific course code
+                        if not row_code and (
+                            re.match(r"^(?:professional\s+electives?|open\s+electives?|program\s+electives?|department(?:al)?\s+electives?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_row_name, re.I)
+                            or re.match(r"^(?:PCC|HSC|PROJ|PEC|BSC|ESC|MC|OEC|HSMC|EEC|PC|PE|OE|HS|MC|PR|PW|VA)$", clean_row_name.strip(), re.I)
+                        ):
                             continue
 
                         category = row_type if (row_type and row_type in ("Laboratory", "Professional Elective", "Open Elective", "Mandatory Audit", "Project/Seminar")) else categorize_subject(clean_row_name, row_code, line_str, active_table_category)
@@ -1140,7 +1143,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 has_sno_prefix = bool(re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*$", line_s) or re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s+[A-Za-z0-9]", line_s))
                 has_code_prefix = bool(re.match(r"^\s*[A-Z]{2,6}\s*[-/]?\s*\d{2,4}", line_s, re.I))
                 
-                if has_sno_prefix or (has_code_prefix and not current_block_lines):
+                if has_sno_prefix or has_code_prefix:
                     starts_new = True
 
                 if starts_new and current_block_lines:
@@ -1157,8 +1160,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 if not line_str or len(line_str) < 4 or institution_pattern.search(line_str):
                     continue
 
-                # Strip trailing footer credits
-                line_str = re.sub(r"\b(?:credits?|total\s+credits?)\s*[:=]?\s*\d+.*$", "", line_str, flags=re.I).strip()
+
 
                 code = ""
                 code_match = code_regex.search(line_str)
@@ -1217,8 +1219,11 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                     continue
 
                 if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page", "internal", "external", "maximum marks")):
-                    # Filter out generic elective placeholder rows without a specific course code
-                    if not code and re.match(r"^(?:professional\s+electives?(?:\s+courses?)?|open\s+electives?(?:\s+courses?)?|program\s+electives?(?:\s+courses?)?|department(?:al)?\s+electives?(?:\s+courses?)?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_name, re.I):
+                    # Filter out generic elective placeholder rows or course category acronym headers without a specific course code
+                    if not code and (
+                        re.match(r"^(?:professional\s+electives?(?:\s+courses?)?|open\s+electives?(?:\s+courses?)?|program\s+electives?(?:\s+courses?)?|department(?:al)?\s+electives?(?:\s+courses?)?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_name, re.I)
+                        or re.match(r"^(?:PCC|HSC|PROJ|PEC|BSC|ESC|MC|OEC|HSMC|EEC|PC|PE|OE|HS|MC|PR|PW|VA)$", clean_name.strip(), re.I)
+                    ):
                         continue
 
                     norm_clean = re.sub(r"[^a-z0-9]", "", clean_name.lower())
@@ -1298,10 +1303,17 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 patterns.append(r"\b" + r"\s+".join(re.escape(w) for w in words[:3]) + r"\b")
 
             course_start = -1
+            other_codes = [other_s.get("code") for other_s in subjects if other_s.get("code") and other_s.get("code").strip() and other_s.get("code").strip() != s_code]
+            other_names = [other_s.get("name") for other_s in subjects if other_s.get("name") and other_s.get("name").strip() and other_s.get("name").strip().lower() != s_name.lower() and len(other_s.get("name").strip()) > 3]
+
             for p in patterns:
                 for m in re.finditer(p, raw_text, re.I):
-                    after_text = raw_text[m.start():m.start() + 1500]
-                    if re.search(r"\b(?:MODULE|UNIT|COURSE OBJECTIVES|PRACTICALS?|LIST OF EXPERIMENTS)\b", after_text, re.I):
+                    after_text = raw_text[m.start():m.start() + 2000]
+                    unit_m = re.search(r"\b(?:MODULE|UNIT|COURSE OBJECTIVES|PRACTICALS?|LIST OF EXPERIMENTS)\b", after_text, re.I)
+                    if unit_m:
+                        prefix_text = after_text[:unit_m.start()]
+                        if other_codes and any(re.search(r"\b" + re.escape(oc) + r"\b", prefix_text, re.I) for oc in other_codes):
+                            continue
                         course_start = m.start()
                         break
                 if course_start != -1:
@@ -1309,10 +1321,24 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
             units: List[Dict[str, Any]] = []
             if course_start != -1:
-                course_block = raw_text[course_start:course_start + 8000]
-                next_course = re.search(r"\n\s*[A-Z]{2,5}\s*\d{3,4}\s*\n\s*[A-Z\s]{4,}\s*\n\s*L\s*T\s*P\s*C", course_block[200:], re.I)
-                if next_course:
-                    course_block = course_block[:200 + next_course.start()]
+                course_block = raw_text[course_start:course_start + 12000]
+
+                # Stop at the boundary of any other extracted subject
+                if other_codes:
+                    other_code_pat = r"(?:^|\n)\s*(?:" + "|".join(re.escape(c) for c in other_codes) + r")\b"
+                    next_c_match = re.search(other_code_pat, course_block[50:], re.I)
+                    if next_c_match:
+                        course_block = course_block[:50 + next_c_match.start()]
+
+                if other_names:
+                    other_name_pat = r"(?:^|\n)\s*(?:[A-Z]{2,6}\s*\d{3,4}\s+)?(?:" + "|".join(re.escape(n) for n in other_names) + r")\b"
+                    next_n_match = re.search(other_name_pat, course_block[50:], re.I)
+                    if next_n_match:
+                        course_block = course_block[:50 + next_n_match.start()]
+
+                next_gen_course = re.search(r"\n\s*(?:[A-Z]{2,6}\s*\d{3,4}(?:\s+[A-Z\s]{3,}|\s*\n)|SEMESTER\s+[0-9IVX]+)", course_block[80:], re.I)
+                if next_gen_course:
+                    course_block = course_block[:80 + next_gen_course.start()]
 
                 unit_header_pattern = re.compile(
                     r"(?:^|\n)\s*(MODULE|UNIT)\s+([0-9IVXLCDM]+)\s*[:\-–—\s]*([^\n\r]+)",
@@ -1341,6 +1367,14 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         rc_clean = re.sub(r"\s+\d+\s*$", "", rc).strip()
                         if rc_clean and not any(k in rc_clean.lower() for k in ("hours", "total", "page", "sdg")):
                             concepts.append(rc_clean)
+
+                    if not concepts:
+                        parts = [p.strip() for p in re.split(r"[,;]+", u_title) if len(p.strip()) > 2]
+                        if len(parts) > 1:
+                            u_title_clean = parts[0]
+                            concepts = parts[1:]
+                        else:
+                            concepts = [u_title_clean]
 
                     units.append({
                         "name": f"{u_type} {u_num}: {u_title_clean}",
