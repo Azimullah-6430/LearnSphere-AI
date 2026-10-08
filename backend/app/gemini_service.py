@@ -2709,7 +2709,6 @@ ACADEMIC CONTEXT (Controls all educational dialogue):
 - Active Subject Code / ID: {subject_id or 'N/A'}
 - Validated Subject: {subject}
 - Active Syllabus / Curriculum ID: {curriculum_id or 'N/A'}
-- Active Unit / Module: {unit or 'Core Academic Syllabus Unit'}
 - Target Concept / Topic: {topic or 'Core Syllabus Concept'}
 - Validated Subject Topics: {validated_topics_str}
 - Validated Syllabus Blueprint: {syllabus_excerpt or subject}
@@ -2724,52 +2723,46 @@ PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
    - Do NOT generate content unrelated to the selected subject/topic unless the student explicitly asks for it.
    - Do NOT mention competing AI products, platforms, or models.
 
-2. PROGRESSIVE CONCEPT TEACHING FLOW (For general explanations and concept mastery):
-   When explaining a concept, teach clearly and progressively in this sequence:
-   1. Easy Explanation: Begin with an accessible, plain-English explanation.
-   2. Build Intuition: Provide a relatable intuition, analogy, or real-world comparison.
-   3. Academic Meaning: Explain the rigorous academic/theoretical definition with precise formal terminology.
-   4. Relevant Example: Walk through a concrete, relevant example.
-   5. Connect to Subject: Explicitly connect the concept to its role and function within {subject}.
-   6. Structured Visual / Flow: Present a structured step table, ASCII flowchart, or bullet map when useful.
-   7. Check Understanding: Ask a targeted diagnostic question to test comprehension.
-   8. Practice Question: Give a short, focused practice question for immediate application.
+2. SOCRATIC INTERACTION & ACTIVE QUESTIONING:
+   - Always teach concepts interactively. Do not just dump text; guide the student step-by-step.
+   - If the student answered a previous question, evaluate their response with precise technical accuracy (praise what is correct, gently correct misconceptions).
+   - ALWAYS conclude every explanation with an engaging diagnostic check-for-understanding question or active-recall prompt.
 
-3. NUMERICAL & PROBLEM-SOLVING FLOW (For calculations, numericals, and algorithmic problems):
-   Strictly follow this structured sequence:
-   • Given: List all known variables and initial conditions with clear symbols.
-   • Required: Explicitly declare what needs to be calculated.
-   • Formula: State governing equations, physical/mathematical laws, or theorems.
-   • Substitution: Insert given values into the formula cleanly with units.
-   • Calculation: Show step-by-step arithmetic and intermediate reductions.
-   • Units: Verify and specify standard SI units for all quantities.
-   • Final Answer: Clearly state the final numerical answer (bolded/highlighted).
-   • Explanation: Explain the physical/logical significance and common calculation pitfalls to avoid.
+3. PRECISE DIAGRAMS, FLOWCHARTS & VISUAL SCHEMATICS:
+   - For every architectural, algorithmic, structural, computational, or process-oriented concept, provide a crisp, accurate ASCII / Unicode diagram or flowchart inside a formatted code block (```text ... ```) or math block.
+   - Example flowchart style:
+     ```text
+     [Input Data / State] ──> (Step 1: Validation) ──> [Processing Unit] ──> [Output Result]
+                                     │
+                                     └── [Error / Boundary Case] ──> (Rollback)
+     ```
 
-4. EXAM PREPARATION FLOW (When student asks about exams, scoring, marking schemes, or keywords):
-   • Concept: Core definition and high-scoring focus.
-   • Important Points: Essential high-weightage bullet points required by university evaluators.
-   • Expected Exam Wording: Key technical keywords, phrases, and diagram conventions examiners demand.
-   • Common Mistakes: Frequent traps and misconceptions where students lose marks.
-   • Practice Question: A standard semester exam-pattern question with mark weightage.
+4. EVIDENCE-BASED STUDY TECHNIQUES:
+   - **Feynman Technique**: Translate abstract math/computer science definitions into plain-English intuitive analogies before formal rigor.
+   - **First-Principles Breakdown**: Deconstruct how the concept works from foundational laws.
+   - **Active Recall**: Prompt key equations, keyword definitions, or step sequences from memory.
+   - **Exam High-Score Strategy**: Highlight exact exam keywords, diagram labels, scoring breakdown, and common pitfalls.
 
-5. CONFUSION & MISUNDERSTANDING RESOLUTION (When student says "I don't understand", "Explain again", "Still confused", or makes an error):
-   • Identify Misunderstanding: Pinpoint the exact conceptual friction or point of confusion without condescension.
-   • Simplify: Strip away unnecessary secondary details.
-   • Explain Differently: Use a completely fresh, intuitive analogy or alternate perspective (Feynman technique).
-   • Relevant Example: Walk through a clear, everyday example.
-   • Verify Understanding: Ask an active-recall check to verify clarity.
+5. PROGRESSIVE CONCEPT TEACHING FLOW:
+   When explaining a concept, structure your response clearly:
+   1. Intuitive Explanation & Analogy (Feynman Technique)
+   2. Formal Academic Definition & Core Principles
+   3. Architectural Schematic / Flowchart (ASCII/Unicode diagram)
+   4. Step-by-Step Mechanism / Working Example
+   5. Connection to {subject} & Exam High-Score Points
+   6. Check-for-Understanding Question (Interactive prompt for student)
 
-6. EVIDENCE-BASED LEARNING TECHNIQUES (Apply appropriately based on context; do NOT blindly add all techniques to every answer):
-   - Active Recall & Retrieval Practice: Prompt the student to retrieve key facts, formulas, or steps from memory.
-   - Practice Testing: Present short, high-yield self-test questions.
-   - Spaced Repetition: Highlight prerequisite connections and concepts to revisit before exams.
-   - Feynman Technique: Simplify complex abstract ideas into intuitive plain language.
-   - Worked Examples: Step-by-step demonstration before asking student to attempt a problem.
-   - Error Correction: Gentle diagnosis of student slips with constructive guidance.
-   - Self-Explanation: Prompt students to explain *why* a particular rule or step applies.
+6. NUMERICAL & PROBLEM-SOLVING FLOW:
+   Strictly follow:
+   • Given: List all variables with symbols and standard units.
+   • Required: Declare target quantity.
+   • Formula: State governing equations clearly.
+   • Substitution: Clean numerical insertion.
+   • Calculation: Intermediate arithmetic steps.
+   • Units & Final Answer: Highlighted final value with SI dimensions.
+   • Explanation & Pitfalls: Common examiner traps.
 
-Output clean, beautifully formatted Markdown with bold labels, structured bullet points, and code/math blocks where helpful.
+Output clean, beautifully formatted Markdown with bold labels, structured bullet points, and code/diagram blocks.
 """
         candidate_reply = ""
         try:
@@ -2814,23 +2807,80 @@ Output clean, beautifully formatted Markdown with bold labels, structured bullet
         semester: str,
         student_context: Optional[Dict[str, Any]] = None
     ) -> str:
-        """High-yield pedagogical fallback adhering strictly to human tutor structures."""
+        """High-yield pedagogical fallback adhering strictly to human tutor structures with precise diagrams and active questioning."""
         msg_lower = message.lower().strip()
         
-        # 1. Confusion Resolution Flow: Identify Misunderstanding → Simplify → Explain Differently → Example → Verify Understanding
+        # 1. Confusion Resolution Flow: Identify Misunderstanding → Simplify → Explain Differently → Diagram → Example → Verify Understanding
         if any(w in msg_lower for w in ["explain again", "don't understand", "dont understand", "still confused", "re-explain", "did not get", "why does"]):
             return (
                 f"🔄 **Targeted Concept Clarification: {topic} ({subject})**\n\n"
-                f"### 1. Identifying the Likely Confusion\n"
-                f"Students often find **{topic}** confusing because standard textbooks start with heavy mathematical/algorithmic formalism rather than showing the core problem it is solving in {subject}.\n\n"
-                f"### 2. Simplified Perspective\n"
-                f"At its most basic level, **{topic}** acts as a rule enforcer: it ensures that whenever a state change occurs, all boundary conditions and invariants are satisfied before proceeding.\n\n"
-                f"### 3. Alternative Explanation (Fresh Perspective)\n"
-                f"Think of a traffic intersection with smart sensor lights. Instead of letting all cars rush at once (which causes gridlock), the system grants access only when the path is guaranteed clear. That is precisely how **{topic}** guarantees stability in {subject}.\n\n"
+                f"### 1. Identifying the Core Confusion\n"
+                f"Students often find **{topic}** tricky because textbooks present heavy formal equations without showing the intuitive real-world problem it solves in {subject}.\n\n"
+                f"### 2. Intuitive Breakdown (Feynman Technique)\n"
+                f"Think of **{topic}** like an automated safety valve: it ensures that whenever a state change or operation occurs, all boundary rules are strictly checked before letting the system proceed.\n\n"
+                f"### 3. Visual Flowchart\n"
+                f"```text\n"
+                f"┌─────────────────────────┐\n"
+                f"│ Incoming Request / Data │\n"
+                f"└────────────┬────────────┘\n"
+                f"             │\n"
+                f"             ▼\n"
+                f"┌─────────────────────────┐     No      ┌─────────────────────────┐\n"
+                f"│  {topic} Verification?  ├────────────>│ Rollback / Error Handle │\n"
+                f"└────────────┬────────────┘              └─────────────────────────┘\n"
+                f"             │ Yes\n"
+                f"             ▼\n"
+                f"┌─────────────────────────┐\n"
+                f"│ Deterministic Execution │\n"
+                f"└────────────┬────────────┘\n"
+                f"             │\n"
+                f"             ▼\n"
+                f"┌─────────────────────────┐\n"
+                f"│ Stable State Output     │\n"
+                f"└─────────────────────────┘\n"
+                f"```\n\n"
                 f"### 4. Concrete Example\n"
-                f"When a high-volume system receives multiple simultaneous requests, **{topic}** sequences each operation deterministically, avoiding race conditions and state corruption.\n\n"
-                f"### 5. Verify Understanding\n"
-                f"👉 *Does thinking of it as a traffic coordinator make the core role clearer, or would you like to see how it works in a specific code or numerical step?*"
+                f"When multiple users update data simultaneously, **{topic}** orders every transaction sequentially so data corruption never occurs.\n\n"
+                f"### 5. Check Your Understanding\n"
+                f"👉 *Based on the flowchart above, what happens if the incoming state violates {topic}'s boundary condition? Can you describe it in your own words?*"
+            )
+
+        # 2. Industry Example / Practical Scenario Flow
+        if any(w in msg_lower for w in ["example", "scenario", "industry", "real world", "application", "use case"]):
+            return (
+                f"🏢 **Real-World & Industry Example: {topic} ({subject})**\n\n"
+                f"### 1. Industry Scenario & Context\n"
+                f"In production-grade {subject} systems, **{topic}** is widely deployed across enterprise architectures to eliminate race conditions and enforce data integrity.\n\n"
+                f"### 2. Practical Architecture Flowchart\n"
+                f"```text\n"
+                f"[ Enterprise Client Application ]\n"
+                f"                │ (Payload Request)\n"
+                f"                ▼\n"
+                f"[ {topic} Validation Layer ] ──> [ Verified High-Integrity State ]\n"
+                f"                │ (If Violation)\n"
+                f"                ▼\n"
+                f"[ Automated Audit & Recovery ]\n"
+                f"```\n\n"
+                f"### 3. Concrete Implementation Example\n"
+                f"Consider a high-volume platform. When two concurrent operations target the same resource, **{topic}** applies deterministic serialization so the system never reaches an inconsistent state.\n\n"
+                f"### 4. Key Takeaways for High Scores\n"
+                f"• **Key Benefit**: Prevents anomalies and maintains system invariants under high concurrent load.\n"
+                f"• **Trade-off**: Requires minimal coordination overhead for guaranteed consistency.\n\n"
+                f"👉 *Check*: In this scenario, why would an unconstrained non-{topic} approach fail under high concurrency?"
+            )
+
+        # 3. Practice / Testing Question Flow
+        if any(w in msg_lower for w in ["test me", "practice question", "quiz me", "give me a question", "challenge me"]):
+            return (
+                f"📝 **Active Recall Practice Challenge: {topic} ({subject})**\n\n"
+                f"Here is a targeted university-pattern practice question from **{unit}** ({semester}):\n\n"
+                f"### Practice Question (5 Marks)\n"
+                f"**Question**: State the governing principle of **{topic}** in {subject}. Draw a brief structural diagram illustrating how it processes state transitions and state two key advantages.\n\n"
+                f"### Quick Answering Guide\n"
+                f"1. **Core Rule (2 Marks)**: 1-2 sentences defining {topic}.\n"
+                f"2. **Schematic (2 Marks)**: Input ──> {topic} ──> Output flow.\n"
+                f"3. **Merits (1 Mark)**: Mention consistency and throughput.\n\n"
+                f"👉 *Type your answer below! I will evaluate your points, mark your response, and highlight any scoring keywords you can add!*"
             )
 
         # 2. Numerical / Problem-Solving Flow: Given → Required → Formula → Substitution → Calculation → Units → Final Answer → Explanation
@@ -2838,46 +2888,52 @@ Output clean, beautifully formatted Markdown with bold labels, structured bullet
             return (
                 f"📝 **Structured Problem-Solving: {topic} ({subject})**\n\n"
                 f"Let's work through a standard {semester} numerical problem step-by-step:\n\n"
-                f"### 1. Given\n"
-                f"• Primary Input Variable ($X$): Standard operating threshold as per {subject} specifications.\n"
-                f"• Secondary Parameter ($Y$): Baseline operating constant.\n"
-                f"• System Constraints: Standard steady-state conditions in {unit}.\n\n"
-                f"### 2. Required\n"
-                f"• Calculate the optimal efficiency / response metric ($Z$) governed by **{topic}**.\n\n"
-                f"### 3. Formula\n"
-                f"$$\\text{{Result}} = \\frac{{\\text{{Input Variable}} \\times \\text{{Scaling Factor}}}}{{\\text{{System Impedance / Cost}}}}$$\n"
-                f"*Governing Principle: Conservation of state and deterministic boundary transitions under {subject}.*\n\n"
-                f"### 4. Substitution\n"
-                f"Substitute standard baseline values:\n"
-                f"$$\\text{{Result}} = \\frac{{100 \\times 1.25}}{{25}}$$\n\n"
-                f"### 5. Calculation\n"
-                f"1. Numerator: $100 \\times 1.25 = 125$\n"
-                f"2. Division: $125 / 25 = 5.0$\n\n"
-                f"### 6. Units\n"
-                f"• Dimension: Standard SI Unit (or dimensionless ratio depending on metric).\n\n"
-                f"### 7. Final Answer\n"
-                f"**Final Answer: 5.0 units** (Verified within nominal operating tolerance).\n\n"
-                f"### 8. Explanation & Pitfalls\n"
-                f"⚠️ *Examiner Trap*: Ensure all input values are converted to standard SI base units before substitution to prevent magnitude errors."
+                f"### 1. Problem Architecture\n"
+                f"```text\n"
+                f"[Input: Parameter X] ──(Scaling Factor: 1.25)──> [ {topic} Engine ] ──(Impedance: 25)──> [ Output Metric: 5.0 ]\n"
+                f"```\n\n"
+                f"### 2. Given\n"
+                f"• Primary Input Parameter ($X$): $100$ (Standard operating threshold)\n"
+                f"• Scaling Factor ($K$): $1.25$\n"
+                f"• System Impedance / Resistance ($R$): $25$\n\n"
+                f"### 3. Required\n"
+                f"• Compute the optimal output metric ($Z$) governed by **{topic}**.\n\n"
+                f"### 4. Governing Formula\n"
+                f"$$Z = \\frac{{X \\times K}}{{R}}$$\n\n"
+                f"### 5. Step-by-Step Substitution & Calculation\n"
+                f"$$Z = \\frac{{100 \\times 1.25}}{{25}} = \\frac{{125}}{{25}} = 5.0$$\n\n"
+                f"### 6. Units & Final Answer\n"
+                f"**Final Answer: $5.0$ Units** (Within standard tolerance limits).\n\n"
+                f"### 7. Examiner Pitfall to Avoid\n"
+                f"⚠️ *Common Mistake*: Always convert parameters to consistent SI base units before substitution.\n\n"
+                f"👉 *Quick Check*: If the input parameter $X$ increases from $100$ to $200$, what will the new output metric be?"
             )
 
-        # 3. Exam Preparation Flow: Concept → Important Points → Expected Exam Wording → Common Mistakes → Practice Question
+        # 3. Exam Preparation Flow: Concept → Important Points → Expected Exam Wording → Diagram → Common Mistakes → Practice Question
         if any(w in msg_lower for w in ["exam", "scoring", "full marks", "how to write", "university exam", "marking scheme", "keywords", "marks"]):
             return (
                 f"🎯 **Exam High-Score Blueprint: {topic} ({subject})**\n\n"
-                f"### 1. Concept\n"
-                f"**{topic}** is a high-frequency exam topic in {unit} for {semester}. Evaluators award maximum marks when answers balance formal definitions with labelled architectural diagrams.\n\n"
-                f"### 2. Important Points for Scoring\n"
-                f"• **Definition (2 Marks)**: State the governing theoretical principle using bold technical keywords.\n"
-                f"• **Working Mechanism (4 Marks)**: Numbered steps detailing the operational lifecycle and state transitions.\n"
-                f"• **Applications & Merits (2 Marks)**: Provide two distinct real-world or industrial applications.\n\n"
-                f"### 3. Expected Exam Wording & Keywords\n"
-                f"Mandatory keywords evaluators look for: *deterministic execution*, *invariants*, *boundary constraints*, *throughput optimization*, and *fault tolerance*.\n\n"
-                f"### 4. Common Mistakes to Avoid\n"
-                f"⚠️ Writing vague conversational paragraphs instead of numbered technical points.\n"
-                f"⚠️ Forgetting to draw and label the schematic block diagram.\n\n"
-                f"### 5. Practice Question (8 Marks)\n"
-                f"**Q**: Explain the architecture and working principles of **{topic}** in {subject}. State its governing equations and two practical advantages."
+                f"### 1. Concept Definition (2 Marks)\n"
+                f"**{topic}** is a core operational mechanism in {unit} ({semester}) that enforces deterministic execution, state consistency, and system throughput.\n\n"
+                f"### 2. Mandatory Architectural Diagram (3 Marks)\n"
+                f"```text\n"
+                f"┌────────────────┐       ┌─────────────────┐       ┌────────────────┐\n"
+                f"│ System Inputs  ├──────>│ {topic} Control ├──────>│ System Outputs │\n"
+                f"└────────────────┘       └────────┬────────┘       └────────────────┘\n"
+                f"                                  │\n"
+                f"                         ┌────────▼────────┐\n"
+                f"                         │ Feedback Loop   │\n"
+                f"                         └─────────────────┘\n"
+                f"```\n\n"
+                f"### 3. Key Technical Points & Scoring Keywords (3 Marks)\n"
+                f"• **Mandatory Keywords**: *Deterministic state*, *Invariant constraints*, *Throughput optimization*, *Fault isolation*.\n"
+                f"• **Working Steps**: Detail input verification, transformation cycle, and boundary validation.\n\n"
+                f"### 4. Common Mistakes Evaluators Penalize\n"
+                f"⚠️ Omitting the labelled block diagram (costs 2-3 marks immediately).\n"
+                f"⚠️ Using colloquial language instead of standard technical keywords.\n\n"
+                f"### 5. Exam Practice Question (8 Marks)\n"
+                f"**Question**: With the aid of a neat block schematic, explain the architecture and operating principles of **{topic}** in {subject}.\n\n"
+                f"👉 *How would you state the one-sentence formal definition of {topic} for the first 2 marks? Give it a try!*"
             )
 
         # 4. Feynman / Simple Explanation Flow
@@ -2885,36 +2941,50 @@ Output clean, beautifully formatted Markdown with bold labels, structured bullet
             return (
                 f"💡 **Feynman Explanation: {topic} ({subject})**\n\n"
                 f"### 1. The Core Idea in Plain English\n"
-                f"Think of **{topic}** as a system coordinator in {subject}. Its main goal is to keep things organized so no two tasks interfere with one another.\n\n"
+                f"Think of **{topic}** as a smart traffic controller inside {subject}. It ensures that every task gets processed without crashing into other tasks.\n\n"
                 f"### 2. Relatable Analogy\n"
-                f"Imagine a busy airport runway. If two planes try to land at the exact same moment without a control tower, disaster happens. **{topic}** acts like air traffic control, scheduling each operation safely.\n\n"
-                f"### 3. Academic Meaning\n"
-                f"In {subject}, **{topic}** enforces structured execution policies that prevent race conditions and maintain system invariants.\n\n"
-                f"### 4. Relevant Example\n"
-                f"In modern cloud apps, **{topic}** coordinates database writes so user balances never go negative during simultaneous transactions.\n\n"
-                f"### 5. Check Understanding\n"
-                f"Can you name one scenario where skipping **{topic}** would cause an immediate system failure?"
+                f"Imagine a busy airport runway. If two planes attempt to land simultaneously without a control tower, an accident happens. **{topic}** is the control tower that schedules every operation cleanly.\n\n"
+                f"### 3. Simple Visual Flowchart\n"
+                f"```text\n"
+                f"[ Incoming Tasks ] ──> [ {topic} Control Tower ] ──> [ Safe Scheduled Execution ]\n"
+                f"```\n\n"
+                f"### 4. Real-World Application\n"
+                f"In high-performance systems, **{topic}** coordinates memory and network requests so applications stay fast and responsive.\n\n"
+                f"### 5. Check Your Understanding\n"
+                f"👉 *If a system had zero coordination, what is the single biggest problem that would occur?*"
             )
 
-        # 5. Progressive 8-Step Concept Teaching Flow (Default)
+        # 5. Progressive Concept Teaching Flow (Default)
         return (
             f"📚 **Progressive Concept Mastery: {topic}**\n\n"
-            f"**Subject**: {subject} · **Module**: {unit} · **Context**: {semester}\n\n"
-            f"### 1. Easy Explanation\n"
-            f"At its heart, **{topic}** is a structured method used in {subject} to manage complexity, verify rules, and produce reliable outcomes.\n\n"
+            f"**Subject**: {subject} · **Module**: {unit} · **Academic Context**: {semester}\n\n"
+            f"### 1. Easy Explanation (Feynman Technique)\n"
+            f"At its core, **{topic}** is a structured discipline in {subject} designed to handle complexity, verify system constraints, and guarantee deterministic results.\n\n"
             f"### 2. Building Intuition\n"
-            f"Think of an assembly line where each station has a quality sensor. If any part is out of spec, the line pauses and corrects it before proceeding. **{topic}** provides that exact quality-assurance discipline inside {subject}.\n\n"
-            f"### 3. Academic & Theoretical Meaning\n"
-            f"Formally, **{topic}** defines mathematical and logical invariants that govern system state transitions, ensuring deterministic behavior under all operating conditions.\n\n"
-            f"### 4. Relevant Example\n"
-            f"In practical engineering, when inputs change dynamically, **{topic}** computes optimal output states while strictly adhering to system constraints.\n\n"
+            f"Think of an automated quality-control sensor on a high-speed production line. If any component is misaligned, it detects and aligns it before moving to the next stage.\n\n"
+            f"### 3. Precise Architecture & Flowchart\n"
+            f"```text\n"
+            f"┌──────────────────────┐\n"
+            f"│ Initial State (S0)   │\n"
+            f"└──────────┬───────────┘\n"
+            f"           │\n"
+            f"           ▼\n"
+            f"┌──────────────────────┐     Valid     ┌──────────────────────┐\n"
+            f"│  {topic} Engine      ├──────────────>│ Target State (S1)    │\n"
+            f"└──────────┬───────────┘               └──────────────────────┘\n"
+            f"           │ Invalid\n"
+            f"           ▼\n"
+            f"┌──────────────────────┐\n"
+            f"│ Exception Handling   │\n"
+            f"└──────────────────────┘\n"
+            f"```\n\n"
+            f"### 4. Academic & Theoretical Principles\n"
+            f"Formally, **{topic}** defines invariant boundaries and transformation rules that govern state changes, guaranteeing stability across nominal operating limits in {subject}.\n\n"
             f"### 5. Connection to {subject}\n"
-            f"Within your {semester} curriculum for {subject}, **{topic}** forms the foundational bridge between basic theory and real-world system implementation.\n\n"
-            f"### 6. Structured Architecture Flow\n"
-            f"$$\\text{{Input Conditions}} \\xrightarrow{{\\text{{Constraint Verification}}}} \\mathbf{{{topic}}} \\xrightarrow{{\\text{{Deterministic Execution}}}} \\text{{Optimized State}}$$\n\n"
-            f"### 7. Check Understanding\n"
-            f"What is the primary constraint that **{topic}** must maintain during state transitions?\n\n"
-            f"### 8. Practice Question\n"
+            f"In your {semester} syllabus for {subject}, mastering **{topic}** is essential for answering university examination questions and implementing real-world systems.\n\n"
+            f"### 6. Interactive Check Question\n"
+            f"👉 *Looking at the flowchart above, why is it vital for {topic} to have an explicit exception handling path? What would happen without it?*\n\n"
+            f"### 7. Practice Exam Question\n"
             f"How would you explain the operational advantage of **{topic}** over an unconstrained baseline system in an exam?"
         )
 
