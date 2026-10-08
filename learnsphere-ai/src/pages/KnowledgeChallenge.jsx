@@ -27,7 +27,7 @@ function ScoreRing({ score, size = 80 }) {
 
 export default function KnowledgeChallenge() {
   const { user, syllabusData, recordActivity } = useApp()
-  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
+  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, subjectObjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
   const activeCurriculum = curriculum
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
@@ -42,6 +42,13 @@ export default function KnowledgeChallenge() {
   const [showHint, setShowHint] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
   const [scores, setScores] = useState([])
+
+  const currentSubjectObj = (subjectObjects || []).find(s =>
+    typeof s === 'object' && (s.name === activeSubject || s.code === activeSubject || s.subject_id === activeSubject || s.id === activeSubject)
+  ) || { name: activeSubject, code: '', subject_id: '' }
+
+  const activeSubjectId = currentSubjectObj.subject_id || currentSubjectObj.id || currentSubjectObj.code || ''
+  const activeCurriculumId = activeCurriculum?.syllabus_id || activeCurriculum?.syllabusId || activeCurriculum?.id || ''
 
   useEffect(() => {
     if (subjects.length > 0 && !subjects.includes(activeSubject)) {
@@ -80,20 +87,62 @@ export default function KnowledgeChallenge() {
     setShowAnswer(false)
     setScores([])
     setPhase('question')
-    recordActivity('challenge', `Started Knowledge Challenge in ${activeSubject} (${activeDifficulty})`, { subject: activeSubject, difficulty: activeDifficulty })
+    recordActivity('challenge', `Started Knowledge Challenge in ${activeSubject} (${activeDifficulty})`, {
+      subject: activeSubject,
+      subjectId: activeSubjectId,
+      curriculumId: activeCurriculumId,
+      difficulty: activeDifficulty
+    })
   }
 
-  const submitAnswer = () => {
-    const score = currentRound.transferScore
-    setScores((prev) => [...prev, { round: currentRound.round, score, answer }])
+  const submitAnswer = async () => {
+    const score = currentRound.transferScore || 85
+    const roundSubmission = {
+      round: currentRound.round || roundIdx + 1,
+      score,
+      answer,
+      subject: activeSubject,
+      subjectId: activeSubjectId,
+      topicId: currentRound.id || currentRound.chapter || activeModule,
+      question: currentRound.scenario || currentRound.question,
+      correctAnswer: currentRound.modelAnswer || currentRound.correct_answer,
+      explanation: currentRound.concept_explanation || currentRound.explanation,
+      difficulty: currentRound.difficulty || activeDifficulty,
+      timestamp: new Date().toISOString()
+    }
+    setScores((prev) => [...prev, roundSubmission])
     setPhase('feedback')
+
+    // Submit tracking data to server
+    try {
+      await api.submitChallenge({
+        subject: activeSubject,
+        subject_id: activeSubjectId,
+        subjectId: activeSubjectId,
+        topic_id: roundSubmission.topicId,
+        question: roundSubmission.question,
+        student_answer: answer,
+        correct_answer: roundSubmission.correctAnswer,
+        explanation: roundSubmission.explanation,
+        difficulty: roundSubmission.difficulty,
+        score: score,
+        total_questions: 100
+      })
+    } catch {
+      // Best-effort tracking persistence
+    }
   }
 
   const nextRound = () => {
     if (roundIdx + 1 >= rounds.length) {
       setPhase('done')
       const finalAvg = scores.length ? Math.round(scores.reduce((a, b) => a + b.score, 0) / scores.length) : 80
-      recordActivity('challenge', `Completed Knowledge Challenge in ${activeSubject} (${finalAvg}%)`, { score: finalAvg, subject: activeSubject })
+      recordActivity('challenge', `Completed Knowledge Challenge in ${activeSubject} (${finalAvg}%)`, {
+        score: finalAvg,
+        subject: activeSubject,
+        subjectId: activeSubjectId,
+        curriculumId: activeCurriculumId
+      })
     } else {
       setRoundIdx((i) => i + 1)
       setAnswer('')
@@ -105,7 +154,7 @@ export default function KnowledgeChallenge() {
 
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b.score, 0) / scores.length) : 0
 
-  const diffTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
+  const diffTone = { Easy: 'success', Medium: 'warning', Hard: 'error', Difficult: 'error' }
 
   return (
     <>

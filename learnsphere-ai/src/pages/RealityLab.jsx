@@ -1,18 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getActiveValidatedCurriculum, getDynamicScenarios, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
 import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
-import { CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, Layers, UploadCloud, Loader2 } from 'lucide-react'
+import { 
+  CheckCircle2, XCircle, FlaskConical, Globe, Shuffle, Eye, BookOpen, 
+  Layers, Loader2, AlertTriangle, ShieldCheck, HelpCircle, Sparkles, Target, 
+  Wrench, ListOrdered, Microscope, Lightbulb, FileText
+} from 'lucide-react'
 
 const difficultyTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
 
 function analyseAnswer(answer, concepts) {
   const lower = answer.toLowerCase()
   return (concepts || []).map((c) => {
-    const keywords = c.concept.toLowerCase().split(/[\s/,()]+/).filter((w) => w.length > 3)
+    const keywords = (c.concept || '').toLowerCase().split(/[\s/,()]+/).filter((w) => w.length > 3)
     const hit = keywords.some((kw) => lower.includes(kw))
     return { ...c, covered: hit }
   })
@@ -38,7 +42,6 @@ export default function RealityLab() {
   const { user, syllabusData, recordActivity } = useApp()
   const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const activeProfile = user
-  const isCollege = activeProfile?.level === 'college'
   const activeCurriculum = curriculum
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
 
@@ -51,30 +54,92 @@ export default function RealityLab() {
   const [showModel, setShowModel] = useState(false)
   const [showAnswer, setShowAnswer] = useState(false)
   const [isEvaluating, setIsEvaluating] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [generatedScenarios, setGeneratedScenarios] = useState([])
+
+  // Match active subject metadata from authoritative curriculum
+  const activeSubjectObj = useMemo(() => {
+    if (!curriculum?.subjects) return null
+    return (curriculum.subjects || []).find(s => 
+      (typeof s === 'object' && s.name === activeSubject) || s === activeSubject
+    )
+  }, [curriculum, activeSubject])
+
+  const activeSubjectId = useMemo(() => {
+    if (typeof activeSubjectObj === 'object' && activeSubjectObj) {
+      return activeSubjectObj.subject_id || activeSubjectObj.subjectId || activeSubjectObj.id || activeSubjectObj.code || ''
+    }
+    return ''
+  }, [activeSubjectObj])
+
+  // Validated topics for the currently selected subject
+  const validatedSubjectTopics = useMemo(() => {
+    if (!activeSubject) return []
+    const topics = []
+    const chaptersDict = curriculum?.chapters || curriculum?.units || allUnits || {}
+    if (chaptersDict[activeSubject]) {
+      const uList = chaptersDict[activeSubject]
+      if (Array.isArray(uList)) {
+        uList.forEach(u => {
+          if (typeof u === 'object' && u !== null) {
+            if (u.name) topics.push(u.name)
+            if (Array.isArray(u.concepts)) topics.push(...u.concepts)
+          } else if (typeof u === 'string') {
+            topics.push(u)
+          }
+        })
+      }
+    }
+    if (activeSubjectObj && typeof activeSubjectObj === 'object') {
+      if (Array.isArray(activeSubjectObj.topics)) topics.push(...activeSubjectObj.topics)
+      if (Array.isArray(activeSubjectObj.units)) {
+        activeSubjectObj.units.forEach(u => {
+          if (typeof u === 'object' && u !== null) {
+            if (u.name) topics.push(u.name)
+            if (Array.isArray(u.concepts)) topics.push(...u.concepts)
+          } else if (typeof u === 'string') {
+            topics.push(u)
+          }
+        })
+      }
+    }
+    return Array.from(new Set(topics.filter(Boolean)))
+  }, [activeSubject, curriculum, allUnits, activeSubjectObj])
 
   useEffect(() => {
     if (subjects.length > 0 && !subjects.includes(activeSubject)) {
       setActiveSubject(subjects[0])
       setActiveModule('All')
       setScenarioIdx(0)
+      setGeneratedScenarios([])
       resetState()
     } else if (subjects.length === 0 && activeSubject) {
       setActiveSubject('')
       setActiveModule('All')
       setScenarioIdx(0)
+      setGeneratedScenarios([])
       resetState()
     }
   }, [subjects, activeSubject])
 
   const effectiveCurriculum = activeCurriculum || syllabusData
   const modules = getDynamicChapters(activeSubject, activeProfile, effectiveCurriculum)
-  const scenarios = getDynamicScenarios(activeSubject, activeProfile, effectiveCurriculum, activeDifficulty, activeModule)
-  const scenario = scenarios[scenarioIdx]
+
+  const dynamicFallbackScenarios = useMemo(() => {
+    return getDynamicScenarios(activeSubject, activeProfile, effectiveCurriculum, activeDifficulty, activeModule)
+  }, [activeSubject, activeProfile, effectiveCurriculum, activeDifficulty, activeModule])
+
+  const scenarios = useMemo(() => {
+    return generatedScenarios.length > 0 ? generatedScenarios : dynamicFallbackScenarios
+  }, [generatedScenarios, dynamicFallbackScenarios])
+
+  const scenario = scenarios[scenarioIdx] || scenarios[0]
 
   const switchSubject = (sub) => {
     setActiveSubject(sub)
     setActiveModule('All')
     setScenarioIdx(0)
+    setGeneratedScenarios([])
     resetState()
   }
 
@@ -98,11 +163,36 @@ export default function RealityLab() {
     setIsEvaluating(false)
   }
 
+  const handleGenerateAIActivity = useCallback(async () => {
+    if (!activeSubject) return
+    setIsGenerating(true)
+    try {
+      const res = await api.generateRealityLab({
+        subject: activeSubject,
+        subject_id: activeSubjectId,
+        topic: activeModule !== 'All' ? activeModule : (validatedSubjectTopics[0] || ''),
+        module: activeModule !== 'All' ? activeModule : (validatedSubjectTopics[0] || ''),
+        difficulty: activeDifficulty !== 'All' ? activeDifficulty : 'Medium',
+        curriculum_id: curriculum?.syllabus_id || curriculum?.syllabusId
+      })
+      if (res && res.success && res.lab) {
+        const lab = res.lab
+        setGeneratedScenarios([lab, ...dynamicFallbackScenarios.filter(s => s.title !== lab.title)])
+        setScenarioIdx(0)
+        resetState()
+      }
+    } catch (err) {
+      console.warn("Reality lab generation fallback to dynamic:", err)
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [activeSubject, activeSubjectId, activeModule, validatedSubjectTopics, activeDifficulty, curriculum, dynamicFallbackScenarios])
+
   const handleAnalyse = async () => {
     if (!answer.trim() || !scenario) return
     setIsEvaluating(true)
     try {
-      const res = await api.evaluateRealityLab(scenario.title, scenario.title, answer, activeSubject)
+      const res = await api.evaluateRealityLab(scenario.title, scenario.task || scenario.title, answer, activeSubject)
       if (res && res.success && res.evaluation) {
         const ev = res.evaluation
         const pct = ev.score ?? 0
@@ -111,7 +201,7 @@ export default function RealityLab() {
           feedback: ev.feedback,
           concepts: (scenario.expectedConcepts || []).map(c => ({
             ...c,
-            covered: (ev.strengths || []).some(s => s.toLowerCase().includes(c.concept.toLowerCase())) || pct >= 70
+            covered: (ev.strengths || []).some(s => s.toLowerCase().includes((c.concept || '').toLowerCase())) || pct >= 70
           }))
         })
         recordActivity('lab', `Completed Reality Lab scenario: ${scenario?.title} (${pct}%)`, { score: pct, subject: activeSubject })
@@ -147,7 +237,7 @@ export default function RealityLab() {
     resetState()
   }
 
-  if (!hasValidCurriculum) {
+  if (!hasValidCurriculum || subjects.length === 0) {
     return (
       <>
         <PageHead
@@ -171,7 +261,10 @@ export default function RealityLab() {
           <button key={sub} onClick={() => switchSubject(sub)} className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border ${activeSubject === sub ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] text-[var(--text-soft)]'}`}>{sub}</button>
         ))}
       </div>
-      <div className="p-6 border border-[var(--border)] rounded-xl text-center text-[var(--text-soft)]">No scenarios found for this filter. <button onClick={() => { setActiveDifficulty('All'); setActiveModule('All'); }} className="text-[var(--accent)] underline font-bold ml-1">Reset Filters</button></div>
+      <div className="p-6 border border-[var(--border)] rounded-xl text-center text-[var(--text-soft)]">
+        No practical activities found for this filter.
+        <button onClick={() => { setActiveDifficulty('All'); setActiveModule('All'); }} className="text-[var(--accent)] underline font-bold ml-1">Reset Filters</button>
+      </div>
       <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </div>
   )
@@ -183,6 +276,10 @@ export default function RealityLab() {
         subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena."
         action={
           <div className="flex items-center gap-2">
+            <Button onClick={handleGenerateAIActivity} disabled={isGenerating} size="sm" variant="outline">
+              {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} className="text-[var(--accent)]" />}
+              Generate Practical Activity
+            </Button>
             <span className="text-[12px] text-[var(--text-faint)] font-semibold">{scenarioIdx + 1}/{scenarios.length}</span>
             <button onClick={handleNext} className="px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">Next</button>
             <button onClick={handleRandom} className="flex items-center gap-1 px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">
@@ -192,7 +289,7 @@ export default function RealityLab() {
         }
       />
 
-      {/* Subject Tabs */}
+      {/* Validated Subject Tabs */}
       <div className="flex gap-1.5 flex-wrap mb-4">
         {subjects.map((sub) => (
           <button
@@ -200,7 +297,7 @@ export default function RealityLab() {
             onClick={() => switchSubject(sub)}
             className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border transition-all ${
               activeSubject === sub
-                ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
                 : 'border-[var(--border-strong)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
             }`}
           >
@@ -209,24 +306,27 @@ export default function RealityLab() {
         ))}
       </div>
 
-      {/* Module & Difficulty Filter Bar */}
+      {/* Topic/Module & Difficulty Filter Bar */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5 p-2 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
-        <div className="flex items-center gap-2">
-          <Layers size={14} className="text-[var(--accent)] ml-1" />
-          <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Module:</span>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Layers size={14} className="text-[var(--accent)] ml-1 shrink-0" />
+          <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] shrink-0">Topic:</span>
           <select
             value={activeModule}
             onChange={(e) => switchModule(e.target.value)}
-            className="px-3 py-1 rounded-lg border border-[var(--border-strong)] text-[12px] font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[280px] truncate"
+            className="px-3 py-1 rounded-lg border border-[var(--border-strong)] text-[12px] font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[320px] truncate"
           >
-            <option value="All">All Modules ({scenarios.length} total Qs)</option>
+            <option value="All">All Validated Topics ({scenarios.length} activities)</option>
             {modules.map((m) => (
               <option key={m.name} value={m.name}>{m.name}</option>
+            ))}
+            {validatedSubjectTopics.length > 0 && !modules.length && validatedSubjectTopics.map((t, i) => (
+              <option key={i} value={t}>{t}</option>
             ))}
           </select>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {[
             { id: 'All', label: 'All Modes' },
             { id: 'Easy', label: '🟢 Easy' },
@@ -248,7 +348,7 @@ export default function RealityLab() {
         </div>
       </div>
 
-      <div className="max-w-[760px] space-y-4">
+      <div className="max-w-[800px] space-y-4">
         {/* Scenario Header with Semester & Syllabus grounding */}
         <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
           <div className="absolute top-4 right-5 opacity-8">
@@ -256,18 +356,30 @@ export default function RealityLab() {
           </div>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <Globe size={13} className="text-[var(--accent)]" />
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">{scenario.context || "Industry Application"}</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">
+              {scenario.real_world_connection || scenario.context || "Industry & Day-to-Day Application"}
+            </span>
             <span className="mx-1 text-[var(--border-strong)]">·</span>
-            <Badge tone={difficultyTone[scenario.difficulty]}>{scenario.difficulty}</Badge>
+            <Badge tone={difficultyTone[scenario.difficulty] || 'accent'}>{scenario.difficulty || 'Medium'}</Badge>
             <Badge tone="accent">{scenario.semester || (activeProfile?.current_semester ? `Semester ${activeProfile.current_semester}` : 'Active Semester')}</Badge>
             <Badge tone="neutral">{scenario.subject || activeSubject}</Badge>
             {(scenario.syllabus_topic || scenario.chapter) && <Badge tone="neutral">{scenario.syllabus_topic || scenario.chapter}</Badge>}
           </div>
-          <h2 className="text-[17px] font-extrabold leading-snug max-w-[540px] mb-2">{scenario.title}</h2>
-          {scenario.practical_concept && (
-            <p className="text-[13px] text-[var(--text-soft)] font-medium">
-              <strong className="text-[var(--text)]">Practical Concept:</strong> {scenario.practical_concept}
+          <h2 className="text-[17px] font-extrabold leading-snug max-w-[620px] mb-2">{scenario.title}</h2>
+          
+          {/* Concept Being Demonstrated */}
+          {(scenario.concept_being_demonstrated || scenario.practical_concept) && (
+            <p className="text-[13px] text-[var(--text-soft)] font-medium mb-1">
+              <strong className="text-[var(--text)]">Concept Demonstrated:</strong> {scenario.concept_being_demonstrated || scenario.practical_concept}
             </p>
+          )}
+
+          {/* Objective */}
+          {(scenario.objective || scenario.learning_outcome) && (
+            <div className="flex items-start gap-2 mt-2 pt-2 border-t border-[var(--border)] text-[12.5px] text-[var(--text-soft)]">
+              <Target size={14} className="text-[var(--accent)] shrink-0 mt-0.5" />
+              <span><strong className="text-[var(--text)]">Objective:</strong> {scenario.objective || scenario.learning_outcome}</span>
+            </div>
           )}
         </div>
 
@@ -286,7 +398,7 @@ export default function RealityLab() {
           </Card>
         ) : (
           <>
-            {/* 10-Field Practical Activity Blueprint Card */}
+            {/* Practical Activity Blueprint Card with all 11 required pedagogical fields */}
             <Card>
               <div className="flex items-center gap-2 mb-3">
                 <BookOpen size={16} className="text-[var(--accent)]" />
@@ -295,64 +407,106 @@ export default function RealityLab() {
                 </h3>
               </div>
 
+              {/* Materials & Procedure */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mb-4 text-[12.5px]">
                 <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
-                  <span className="font-bold text-[var(--accent)] block mb-1">🛠️ Materials & Tools:</span>
-                  <ul className="list-disc list-inside space-y-0.5 text-[var(--text-soft)]">
-                    {(scenario.materials || ["Engineering Simulator", "Analytical Profiler"]).map((m, i) => (
+                  <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
+                    <Wrench size={13} />
+                    <span>Materials & Tools (Day-to-Day / Local):</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[var(--text-soft)]">
+                    {(scenario.materials || ["Standard Engineering Tool / Safe Simulation Sandbox"]).map((m, i) => (
                       <li key={i}>{m}</li>
                     ))}
                   </ul>
                 </div>
 
                 <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
-                  <span className="font-bold text-[var(--accent)] block mb-1">📋 Procedure:</span>
-                  <ul className="list-decimal list-inside space-y-0.5 text-[var(--text-soft)]">
-                    {(scenario.procedure || ["Step 1: Configure testbed", "Step 2: Measure metrics"]).map((p, i) => (
+                  <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
+                    <ListOrdered size={13} />
+                    <span>Step-by-Step Procedure:</span>
+                  </div>
+                  <ul className="list-decimal list-inside space-y-1 text-[var(--text-soft)]">
+                    {(scenario.steps || scenario.procedure || ["Step 1: Configure testbed", "Step 2: Measure metrics"]).map((p, i) => (
                       <li key={i}>{p}</li>
                     ))}
                   </ul>
                 </div>
               </div>
 
+              {/* Expected Observation & Explanation */}
               <div className="space-y-2.5 text-[12.5px]">
-                {scenario.observation && (
+                {(scenario.expected_observation || scenario.observation) && (
                   <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                    <strong className="text-[var(--text)]">🔬 Expected Observation: </strong>
-                    {scenario.observation}
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
+                      <Microscope size={13} className="text-[var(--accent)]" />
+                      <span>Expected Observation:</span>
+                    </div>
+                    {scenario.expected_observation || scenario.observation}
                   </div>
                 )}
-                {scenario.theory_connection && (
+
+                {(scenario.explanation || scenario.theory_connection) && (
                   <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                    <strong className="text-[var(--text)]">📐 Theory Connection: </strong>
-                    {scenario.theory_connection}
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
+                      <Lightbulb size={13} className="text-[var(--accent)]" />
+                      <span>Scientific & Theoretical Explanation:</span>
+                    </div>
+                    {scenario.explanation || scenario.theory_connection}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {scenario.learning_outcome && (
-                    <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                      <strong className="text-[var(--text)]">🎯 Learning Outcome: </strong>
-                      {scenario.learning_outcome}
+
+                {/* Safety Considerations Banner */}
+                {(scenario.safety_considerations || scenario.safety_warnings) && (
+                  <div className="p-3 rounded-lg bg-[var(--warning-soft)] border border-[var(--warning)] text-[12px] text-[var(--text)]">
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--warning-strong)] mb-1">
+                      <AlertTriangle size={14} className="text-[var(--warning)]" />
+                      <span>Safety Considerations & Hazard Precautions:</span>
                     </div>
-                  )}
-                  {scenario.exam_relevance && (
-                    <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                      <strong className="text-[var(--text)]">📝 Exam Relevance: </strong>
-                      {scenario.exam_relevance}
+                    <p className="leading-relaxed text-[var(--text-soft)]">
+                      {scenario.safety_considerations || scenario.safety_warnings}
+                    </p>
+                  </div>
+                )}
+
+                {/* Questions to Test Understanding */}
+                {Array.isArray(scenario.questions_to_test_understanding) && scenario.questions_to_test_understanding.length > 0 && (
+                  <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px]">
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
+                      <HelpCircle size={14} />
+                      <span>Questions to Test Understanding:</span>
                     </div>
-                  )}
-                </div>
+                    <ul className="list-disc list-inside space-y-1 text-[var(--text-soft)]">
+                      {scenario.questions_to_test_understanding.map((q, i) => (
+                        <li key={i}>{q}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Exam Relevance */}
+                {scenario.exam_relevance && (
+                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] text-[var(--text-soft)]">
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
+                      <FileText size={13} className="text-[var(--accent)]" />
+                      <span>Exam Relevance:</span>
+                    </div>
+                    {scenario.exam_relevance}
+                  </div>
+                )}
               </div>
             </Card>
 
             {!result && !showAnswer ? (
               <>
                 <Card>
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your Practical Explanation / Solution</div>
+                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">
+                    {scenario.task ? `Challenge Task: ${scenario.task}` : 'Your Practical Explanation / Solution'}
+                  </div>
                   <textarea
                     value={answer}
                     onChange={(e) => setAnswer(e.target.value)}
-                    placeholder="Explain this practical activity using academic concepts, formulas, and experimental reasoning from your semester syllabus…"
+                    placeholder="Explain this practical activity using academic concepts, formulas, and experimental reasoning from your validated semester syllabus…"
                     rows={5}
                     disabled={isEvaluating}
                     className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
@@ -391,7 +545,7 @@ export default function RealityLab() {
                   <BookOpen size={15} className="text-[var(--accent)]" />
                   <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--accent)]">Model Practical Solution</div>
                 </div>
-                <div className="text-[13.5px] leading-relaxed mb-5">{scenario.modelAnswer}</div>
+                <div className="text-[13.5px] leading-relaxed mb-5">{scenario.model_answer || scenario.modelAnswer}</div>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Key concepts covered</div>
                 <div className="flex flex-wrap gap-2 mb-4">
                   {(scenario.expectedConcepts || []).filter(c => c.required).map((c, i) => (
@@ -442,7 +596,7 @@ export default function RealityLab() {
                   ) : (
                     <div className="border border-[var(--border)] rounded-lg p-3.5">
                       <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Model engineering solution</div>
-                      <div className="text-[13.5px] leading-relaxed">{scenario.modelAnswer}</div>
+                      <div className="text-[13.5px] leading-relaxed">{scenario.model_answer || scenario.modelAnswer}</div>
                     </div>
                   )}
                 </Card>

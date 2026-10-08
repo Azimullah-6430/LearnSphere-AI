@@ -106,10 +106,13 @@ export default function Trainer() {
 
   const units = (allUnits && allUnits[selectedSubject]) ? allUnits[selectedSubject] : getDynamicChapters(selectedSubject, activeProfile, curriculum)
 
-  // Find active subject metadata (code, category, credits)
+  // Find active subject metadata (subjectId, code, category, credits)
   const currentSubjectObj = subjectObjects.find(s => 
-    (typeof s === 'object' && (s.name === selectedSubject || s.code === selectedSubject))
-  ) || { name: selectedSubject, code: '', type: 'Semester Subject' }
+    (typeof s === 'object' && (s.name === selectedSubject || s.code === selectedSubject || s.subject_id === selectedSubject || s.id === selectedSubject))
+  ) || { name: selectedSubject, code: '', subject_id: '', type: 'Semester Subject' }
+
+  const activeSubjectId = currentSubjectObj.subject_id || currentSubjectObj.id || currentSubjectObj.code || ''
+  const activeCurriculumId = activeCurriculum?.syllabus_id || activeCurriculum?.syllabusId || activeCurriculum?.id || ''
 
   // Handle location state navigation from MisconceptionMap
   useEffect(() => {
@@ -172,6 +175,8 @@ export default function Trainer() {
     // Record activity & update streak!
     recordActivity('trainer', `Studied "${selectedConcept}" in ${selectedSubject} (${m.name})`, {
       subject: selectedSubject,
+      subjectId: activeSubjectId,
+      curriculumId: activeCurriculumId,
       unit: selectedUnit,
       concept: selectedConcept
     })
@@ -206,6 +211,10 @@ export default function Trainer() {
       const res = await api.trainerChat({
         message: userText,
         subject: selectedSubject,
+        subject_id: activeSubjectId,
+        subjectId: activeSubjectId,
+        curriculum_id: activeCurriculumId,
+        syllabus_id: activeCurriculumId,
         unit: selectedUnit,
         chapter: selectedChapter,
         topic: selectedConcept,

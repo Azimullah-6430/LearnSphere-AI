@@ -1284,22 +1284,38 @@ export function getDynamicScenarios(subject, profile, syllabusData, difficultyFi
         syllabus_topic: ch.name,
         chapter: ch.name,
         context: tmpl.context,
+        real_world_connection: tmpl.context,
+        objective: `Demonstrate and analyze practical implementation of ${concept} under authentic operating constraints.`,
+        learning_outcome: `Practical engineering competency in configuring, diagnosing, and optimizing ${concept} for real-world deployment.`,
         difficulty: tmpl.diff,
+        concept_being_demonstrated: concept,
         practical_concept: `${concept} in ${tmpl.context}`,
         materials: [
           `Engineering Diagnostic Tool & Test Harness for ${subject}`,
           `Benchmarking Suite (${tmpl.context})`,
-          `Syllabus Reference Specification: ${ch.name}`
+          `Safe Local / Day-to-Day Simulation Testbed: ${ch.name}`
         ],
-        procedure: [
-          `Step 1: Set up the operational testbed for ${concept}.`,
+        steps: [
+          `Step 1: Set up the operational testbed for ${concept} with verified safety parameters.`,
           `Step 2: Apply real-world operational stress conditions mimicking ${tmpl.context}.`,
           `Step 3: Measure system latency, efficiency, and resource utilization.`,
           `Step 4: Verify compliance with the governing theoretical laws of ${ch.name}.`
         ],
+        procedure: [
+          `Step 1: Set up the operational testbed for ${concept} with verified safety parameters.`,
+          `Step 2: Apply real-world operational stress conditions mimicking ${tmpl.context}.`,
+          `Step 3: Measure system latency, efficiency, and resource utilization.`,
+          `Step 4: Verify compliance with the governing theoretical laws of ${ch.name}.`
+        ],
+        expected_observation: `Under real-world workload in ${tmpl.context}, ${concept} dynamically balances throughput and maintains error-free stability in accordance with ${ch.name} parameters.`,
         observation: `Under real-world workload in ${tmpl.context}, ${concept} dynamically balances throughput and maintains error-free stability in accordance with ${ch.name} parameters.`,
+        explanation: `Directly derived from theoretical foundations and governing mathematical models of ${concept} in ${ch.name}.`,
         theory_connection: `Directly derived from theoretical foundations and governing mathematical models of ${concept} in ${ch.name}.`,
-        learning_outcome: `Practical engineering competency in configuring, diagnosing, and optimizing ${concept} for real-world deployment.`,
+        safety_considerations: `Safety Protocol: Ensure electrical/computational test isolation, monitor thermal limits during load testing, and verify ratings before energizing hardware components.`,
+        questions_to_test_understanding: [
+          `Why does ${concept} prevent performance degradation in ${tmpl.context}?`,
+          `How would you adjust parameters if observed system efficiency drops below target thresholds?`
+        ],
         exam_relevance: `Direct mapping to University Semester Examination practical design and application questions for ${subject}.`,
         expectedConcepts: [
           { concept: concept, required: true },

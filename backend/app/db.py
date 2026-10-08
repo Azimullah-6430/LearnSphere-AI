@@ -206,9 +206,22 @@ def _init_mongodb_indexes(db) -> None:
         db["evaluations"].create_index([("created_at", -1)], background=True)
         db["evaluations"].create_index("status", background=True)
 
-        # syllabi
+        # syllabi - indexed for fast retrieval by studentId, syllabusId, semester, curriculumStatus
         db["syllabi"].create_index("student_id", background=True)
+        db["syllabi"].create_index("studentId", background=True)
+        db["syllabi"].create_index("syllabus_id", background=True)
+        db["syllabi"].create_index("syllabusId", background=True)
+        db["syllabi"].create_index("semester", background=True)
+        db["syllabi"].create_index("curriculumStatus", background=True)
+        db["syllabi"].create_index("status", background=True)
         db["syllabi"].create_index([("student_id", 1), ("status", 1)], background=True)
+        db["syllabi"].create_index([("student_id", 1), ("curriculumStatus", 1)], background=True)
+        db["syllabi"].create_index([("studentId", 1), ("curriculumStatus", 1)], background=True)
+        db["syllabi"].create_index([("student_id", 1), ("is_active", 1)], background=True)
+        db["syllabi"].create_index([("student_id", 1), ("file_hash", 1)], background=True)
+        db["syllabi"].create_index([("studentId", 1), ("file_hash", 1)], background=True)
+        db["syllabi"].create_index([("student_id", 1), ("semester", 1), ("is_active", 1)], background=True)
+        db["syllabi"].create_index([("studentId", 1), ("semester", 1), ("is_active", 1)], background=True)
 
         # misconceptions
         db["misconceptions"].create_index("student_name", background=True)
@@ -474,6 +487,25 @@ def _init_sqlite_schema() -> None:
                 cursor.execute(f"ALTER TABLE syllabi ADD COLUMN {col} {defn};")
             except Exception as exc:
                 logger.debug("[DB] SQLite syllabi column migration notice (%s): %s", col, exc)
+
+    cursor.execute("PRAGMA table_info(knowledge_challenges);")
+    existing_kc_cols = {row[1] for row in cursor.fetchall()}
+    needed_kc_cols = {
+        "student_id": "TEXT",
+        "subject_id": "TEXT",
+        "topic_id": "TEXT",
+        "question": "TEXT",
+        "student_answer": "TEXT",
+        "correct_answer": "TEXT",
+        "explanation": "TEXT",
+        "difficulty": "TEXT",
+    }
+    for col, defn in needed_kc_cols.items():
+        if col not in existing_kc_cols:
+            try:
+                cursor.execute(f"ALTER TABLE knowledge_challenges ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite knowledge_challenges column migration notice (%s): %s", col, exc)
 
     conn.commit()
     conn.close()

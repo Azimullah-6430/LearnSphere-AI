@@ -261,10 +261,11 @@ export function AppProvider({ children }) {
   }, [_applyInstitutionMode, _clearAuthState, _fetchSyllabus, _restoreStreak, _startSession])
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // TEACHER CLASSES STORAGE (ISOLATED TO TEACHER ROLE & USER ID)
+  // TEACHER CLASSES STORAGE (ISOLATED TO TEACHER ROLE & MONGODB SYNC)
   // ═══════════════════════════════════════════════════════════════════════════
 
   useEffect(() => {
+    let isCancelled = false
     if (role === 'teacher' && currentUser) {
       const keyClasses     = getUserStorageKey('teacher_classes', currentUser)
       const keyActiveClass = getUserStorageKey('active_class_id', currentUser)
@@ -286,11 +287,25 @@ export function AppProvider({ children }) {
         const savedClassId = localStorage.getItem(keyActiveClass) || ''
         setActiveClassIdState(savedClassId)
       }
+
+      // Fetch authoritative classes from MongoDB
+      api.getTeacherClasses().then(res => {
+        if (!isCancelled && res && res.success && Array.isArray(res.classes)) {
+          setTeacherClasses(res.classes)
+          if (keyClasses) safeSet(keyClasses, res.classes)
+          if (res.classes.length > 0) {
+            setActiveClassIdState(prev => prev || res.classes[0].id)
+          }
+        }
+      }).catch(err => {
+        console.warn('[AppContext] Failed to fetch teacher classes from MongoDB:', err)
+      })
     } else {
       // Students have zero teacher classes
       setTeacherClasses([])
       setActiveClassIdState('')
     }
+    return () => { isCancelled = true }
   }, [role, currentUser])
 
   useEffect(() => {
@@ -435,7 +450,7 @@ export function AppProvider({ children }) {
     if (key) safeSet(key, mode)
   }
 
-  // ── Teacher class management (User-scoped layout cache) ───────────────────
+  // ── Teacher class management (MongoDB Sync + Cache) ───────────────────────
   const setActiveClassId = (id) => {
     setActiveClassIdState(id)
     const key = getUserStorageKey('active_class_id', currentUser)
@@ -446,48 +461,84 @@ export function AppProvider({ children }) {
     const created = { id: `cls_${Date.now()}`, created_at: getTodayStr(), ...newCls }
     setTeacherClasses(prev => [created, ...prev])
     setActiveClassId(created.id)
+    api.createTeacherClass(created).catch(err => {
+      console.error('[AppContext] Failed to persist class in MongoDB:', err)
+    })
     return created
   }
 
   const deleteClass = (classId) => {
     setTeacherClasses(prev => prev.filter(c => c.id !== classId))
     if (activeClassId === classId) setActiveClassId('')
+    api.deleteTeacherClass(classId).catch(err => {
+      console.error('[AppContext] Failed to delete class from MongoDB:', err)
+    })
   }
 
   const uploadStudentRoster = (classId, newStudentsList) => {
-    setTeacherClasses(prev => prev.map(cls => {
-      if (cls.id !== classId) return cls
-      const updated = newStudentsList.map((st, idx) => ({
-        id: st.id || `std_${Date.now()}_${idx}`,
-        rollNo: st.rollNo || `ROLL-${idx + 1}`,
-        name: st.name, order: idx + 1, marksHistory: st.marksHistory || [],
-      }))
-      return { ...cls, students: updated, students_count: updated.length }
-    }))
+    setTeacherClasses(prev => {
+      let targetCls = null
+      const updated = prev.map(cls => {
+        if (cls.id !== classId) return cls
+        const updatedStudents = newStudentsList.map((st, idx) => ({
+          id: st.id || `std_${Date.now()}_${idx}`,
+          rollNo: st.rollNo || `ROLL-${idx + 1}`,
+          name: st.name, order: idx + 1, marksHistory: st.marksHistory || [],
+        }))
+        targetCls = { ...cls, students: updatedStudents, students_count: updatedStudents.length }
+        return targetCls
+      })
+      if (targetCls) {
+        api.updateTeacherClass(classId, { students: targetCls.students, students_count: targetCls.students_count }).catch(err => {
+          console.error('[AppContext] Failed to update roster in MongoDB:', err)
+        })
+      }
+      return updated
+    })
   }
 
   const addOrUpdateStudentMarks = (classId, studentId, markEntry) => {
-    setTeacherClasses(prev => prev.map(cls => {
-      if (cls.id !== classId) return cls
-      const students = (cls.students || []).map(std => {
-        if (std.id !== studentId && std.rollNo !== studentId && std.name !== studentId) return std
-        const history = std.marksHistory || []
-        const idx = history.findIndex(m => m.subject === markEntry.subject && m.assessment === markEntry.assessment)
-        const nextHistory = idx >= 0
-          ? history.map((m, i) => i === idx ? markEntry : m)
-          : [markEntry, ...history]
-        return { ...std, marksHistory: nextHistory }
+    setTeacherClasses(prev => {
+      let targetCls = null
+      const updated = prev.map(cls => {
+        if (cls.id !== classId) return cls
+        const students = (cls.students || []).map(std => {
+          if (std.id !== studentId && std.rollNo !== studentId && std.name !== studentId) return std
+          const history = std.marksHistory || []
+          const idx = history.findIndex(m => m.subject === markEntry.subject && m.assessment === markEntry.assessment)
+          const nextHistory = idx >= 0
+            ? history.map((m, i) => i === idx ? markEntry : m)
+            : [markEntry, ...history]
+          return { ...std, marksHistory: nextHistory }
+        })
+        targetCls = { ...cls, students }
+        return targetCls
       })
-      return { ...cls, students }
-    }))
+      if (targetCls) {
+        api.updateTeacherClass(classId, { students: targetCls.students }).catch(err => {
+          console.error('[AppContext] Failed to update marks in MongoDB:', err)
+        })
+      }
+      return updated
+    })
   }
 
   const deleteStudentFromClass = (classId, studentId) => {
-    setTeacherClasses(prev => prev.map(cls => {
-      if (cls.id !== classId) return cls
-      const students = (cls.students || []).filter(s => s.id !== studentId)
-      return { ...cls, students, students_count: students.length }
-    }))
+    setTeacherClasses(prev => {
+      let targetCls = null
+      const updated = prev.map(cls => {
+        if (cls.id !== classId) return cls
+        const students = (cls.students || []).filter(s => s.id !== studentId)
+        targetCls = { ...cls, students, students_count: students.length }
+        return targetCls
+      })
+      if (targetCls) {
+        api.updateTeacherClass(classId, { students: targetCls.students, students_count: targetCls.students_count }).catch(err => {
+          console.error('[AppContext] Failed to delete student in MongoDB:', err)
+        })
+      }
+      return updated
+    })
   }
 
   // ── Derived values (Strictly account-scoped) ──────────────────────────────

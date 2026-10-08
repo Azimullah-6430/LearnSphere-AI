@@ -156,6 +156,9 @@ export const api = {
     body: formData,
   }),
 
+  /** Return status of an uploaded syllabus during staged extraction. */
+  getSyllabusStatus: (syllabusId) => request(`/api/syllabus/status/${encodeURIComponent(syllabusId)}`),
+
   /** Return the authenticated user's latest active semester-mapped syllabus. */
   getMySyllabus: () => request('/api/syllabus'),
 
@@ -228,11 +231,15 @@ export const api = {
 
   // ── Reality Lab ───────────────────────────────────────────────────────────
 
-  generateRealityLab: (subject, module, difficulty, syllabusContext) =>
-    request('/api/reality-lab/generate', {
+  generateRealityLab: (subjectOrParams, module, difficulty, syllabusContext) => {
+    const body = typeof subjectOrParams === 'object' && subjectOrParams !== null
+      ? subjectOrParams
+      : { subject: subjectOrParams, module, difficulty, syllabus_context: syllabusContext }
+    return request('/api/reality-lab/generate', {
       method: 'POST',
-      body: { subject, module, difficulty, syllabus_context: syllabusContext },
-    }),
+      body,
+    })
+  },
 
   evaluateRealityLab: (title, task, studentResponse, subject) =>
     request('/api/reality-lab/evaluate', {
@@ -274,4 +281,14 @@ export const api = {
 
   updateActionCenterStatus: (itemId, status) =>
     request(`/api/action-center/${itemId}`, { method: 'PUT', body: { status } }),
+
+  // ── Teacher Classes (MongoDB) ──────────────────────────────────────────────
+
+  getTeacherClasses: () => request('/api/teacher/classes'),
+  createTeacherClass: (data) =>
+    request('/api/teacher/classes', { method: 'POST', body: data }),
+  updateTeacherClass: (classId, data) =>
+    request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'PUT', body: data }),
+  deleteTeacherClass: (classId) =>
+    request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'DELETE' }),
 }

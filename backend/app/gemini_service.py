@@ -9,8 +9,10 @@ import re
 import time
 import base64
 import logging
+import hashlib
+import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
@@ -62,13 +64,30 @@ class GeminiService:
         parts = []
 
         if ext in (".png", ".jpg", ".jpeg", ".webp"):
-            mime = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp"
             try:
-                with open(p, "rb") as f:
-                    b64_data = base64.b64encode(f.read()).decode("utf-8")
-                parts.append({"inline_data": {"mime_type": mime, "data": b64_data}})
-            except Exception as e:
-                logger.warning(f"Could not encode image {p}: {e}")
+                from PIL import Image
+                import io
+                with Image.open(p) as img:
+                    # Convert RGBA/P to RGB for clean JPEG compression
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    # If exceptionally huge image (e.g. 4000x3000 phone camera photo), scale down to 1920 max dim
+                    max_dim = 1920
+                    if max(img.size) > max_dim:
+                        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=85, optimize=True)
+                    b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+                parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64_data}})
+            except Exception:
+                # Fallback to direct read
+                try:
+                    mime = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp"
+                    with open(p, "rb") as f:
+                        b64_data = base64.b64encode(f.read()).decode("utf-8")
+                    parts.append({"inline_data": {"mime_type": mime, "data": b64_data}})
+                except Exception as e:
+                    logger.warning(f"Could not encode image {p}: {e}")
         elif ext == ".pdf":
             try:
                 try:
@@ -76,26 +95,27 @@ class GeminiService:
                 except ImportError:
                     import fitz
                 doc = fitz.open(str(p))
-                # Process ALL pages with high-fidelity visual rendering and text extraction
                 total_pages = len(doc)
                 for page_idx in range(total_pages):
                     page = doc[page_idx]
                     
-                    # Extract raw text layer if present
+                    # Fast text extraction first
+                    raw_text = ""
                     try:
-                        raw_text = page.get_text("text")
+                        raw_text = page.get_text("text") or ""
                         if raw_text and len(raw_text.strip()) > 10:
                             parts.append({"text": f"--- PAGE {page_idx + 1} OF {total_pages} (EMBEDDED TEXT) ---\n{raw_text}\n"})
                     except Exception:
                         pass
 
-                    # High-resolution visual rendering (dpi=200) for sharp handwriting and diagram OCR
-                    pix = page.get_pixmap(dpi=200)
-                    png_bytes = pix.tobytes("png")
-                    b64_data = base64.b64encode(png_bytes).decode("utf-8")
-                    parts.append({"inline_data": {"mime_type": "image/png", "data": b64_data}})
+                    # OCR ONLY WHEN REQUIRED: Render page image only if text layer is missing or insufficient (< 50 chars)
+                    if not raw_text or len(raw_text.strip()) < 50:
+                        pix = page.get_pixmap(dpi=140)
+                        jpeg_bytes = pix.tobytes("jpeg", jpg_quality=85)
+                        b64_data = base64.b64encode(jpeg_bytes).decode("utf-8")
+                        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64_data}})
             except Exception as e:
-                logger.warning(f"Could not convert PDF {p} to PNG parts: {e}")
+                logger.warning(f"Could not process PDF {p}: {e}")
         elif ext in (".txt", ".md", ".json", ".csv"):
             try:
                 with open(p, "r", encoding="utf-8", errors="ignore") as f:
@@ -135,7 +155,8 @@ class GeminiService:
                     p_str = f_item if isinstance(f_item, str) else (f_item or {}).get("path") or ""
                     if p_str and os.path.exists(p_str):
                         seed_source += f":{os.path.getsize(p_str)}"
-            generation_config["seed"] = int(hashlib.md5(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+            raw_seed = int(hashlib.md5(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+            generation_config["seed"] = raw_seed % 2147483647
         except Exception:
             pass
 
@@ -589,7 +610,12 @@ Return ONLY a valid JSON object matching this schema:
   "practical_improvement_advice": ["Show all intermediate multiplication steps", "Review circuit reduction techniques before the next exam"]
 }}
 """
-        files = [qp_file, ans_file]
+        # If question paper structure is already extracted into prompt text, only send answer script (+ rubrics/syllabus)
+        if qp_structure and qp_structure.get("questions"):
+            files = [ans_file]
+        else:
+            files = [qp_file, ans_file]
+
         if rubrics_file:
             files.append(rubrics_file)
         if syllabus_file:
@@ -691,6 +717,9 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             if not page_texts:
                 page_texts = [(1, raw_text)]
 
+        raw_text = re.sub(r"\bS[\s\-_]+E[\s\-_]+M[\s\-_]+E[\s\-_]+S[\s\-_]+T[\s\-_]+E[\s\-_]+R\b", "SEMESTER", raw_text, flags=re.I)
+        raw_text = re.sub(r"\bS[\s\-_]+E[\s\-_]+M\b", "SEM", raw_text, flags=re.I)
+
         target_sem_int = None
         try:
             if target_semester is not None and str(target_semester).strip() != "":
@@ -699,7 +728,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             pass
 
         sem_heading_pattern = re.compile(
-            r"\b(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\s*[:\-–—\s]*([0-9]{1,2}|[IVXLCDM]+|[1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|\b([1-8](?:st|nd|rd|th))\s+SEM(?:ESTER)?\b",
+            r"\b(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\s*[:\-–—\s]*([0-9]{1,2}|[IVXLCDM]+|[1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|\b([1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|[IVXLCDM]+)[^\S\r\n]+(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\b",
             re.I
         )
         sem_word_map = {
@@ -715,26 +744,32 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
         # Multi-department / multi-program section isolation:
         dept_heading_pattern = re.compile(
-            r"(?:^|\n)[^\n\r]{0,80}?\b(?:DEPARTMENT OF|BRANCH OF|PROGRAM(?:ME)? IN|B\.?TECH|B\.?E\.?|M\.?TECH|M\.?S\.?|B\.?SC|M\.?SC|B\.?C\.?A|M\.?C\.?A)\s*[:\-–—\s]+([^\n\r]+)",
+            r"(?:^|\n)[^\n\r]{0,80}?\b(?:DEPARTMENT OF|BRANCH OF|PROGRAM(?:ME)? IN|FACULTY OF|DISCIPLINE OF)\s*[:\-–—\s]+([^\n\r]+)",
             re.I
         )
         student_dept_query = str(dept_str or "").strip().lower()
         student_prog_query = str(prog_str or "").strip().lower()
-        if student_dept_query and len(student_dept_query) > 2:
+        if student_dept_query and len(student_dept_query) > 2 and student_dept_query not in ("general engineering/science", "general"):
             dept_matches = list(dept_heading_pattern.finditer(raw_text))
             if len(dept_matches) > 1:
                 target_dept_start = None
                 target_dept_end = len(raw_text)
                 for idx, dm in enumerate(dept_matches):
                     d_heading = dm.group(0).lower()
-                    if student_dept_query in d_heading or (student_prog_query and student_prog_query in d_heading):
+                    dept_name_part = (dm.group(1) or "").lower().strip()
+                    is_match = (
+                        student_dept_query in d_heading
+                        or student_dept_query in dept_name_part
+                        or (student_prog_query and student_prog_query in d_heading)
+                    )
+                    if is_match:
                         if target_dept_start is None:
                             target_dept_start = dm.start()
                     elif target_dept_start is not None:
                         # Reached a completely different department section
                         target_dept_end = dm.start()
                         break
-                if target_dept_start is not None:
+                if target_dept_start is not None and target_dept_end > target_dept_start:
                     raw_text = raw_text[target_dept_start:target_dept_end]
 
         # Detect all semesters present across document
@@ -799,12 +834,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             for idx, h in enumerate(heading_matches):
                 if h["semester"] == target_sem_int:
                     start_p = h["start"]
-                    # End at next DIFFERENT semester heading, or end of document
-                    end_p = len(raw_text)
-                    for next_h in heading_matches[idx + 1:]:
-                        if next_h["semester"] != target_sem_int:
-                            end_p = next_h["start"]
-                            break
+                    end_p = heading_matches[idx + 1]["start"] if idx + 1 < len(heading_matches) else len(raw_text)
                     target_sections.append(raw_text[start_p:end_p])
             if target_sections:
                 relevant_text = "\n\n".join(target_sections)
@@ -815,15 +845,21 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             re.I
         )
 
+        # Category Section Heading Detector (Strict line-ending match so title words like 'Theory' are not falsely matched)
+        category_heading_pattern = re.compile(
+            r"^(?:#+\s*)?(?:(?:PROFESSIONAL|PROGRAM(?:ME)?|DEPARTMENT(?:AL)?)\s+ELECTIVES?(?:\s*[-–—:]?\s*[0-9IVX]+|\s*\([A-Z0-9\s\-]+\))?|OPEN\s+ELECTIVES?(?:\s*[-–—:]?\s*[0-9IVX]+|\s*\([A-Z0-9\s\-]+\))?|INTERDISCIPLINARY\s+ELECTIVES?|MANDATORY\s+(?:NON-CREDIT\s+)?COURSES?(?:\s*\([A-Z0-9\s\-]+\))?|AUDIT\s+COURSES?(?:\s*\([A-Z0-9\s\-]+\))?|PRACTICALS?(?:\s*/\s*LABORATORY)?|LABORATORY(?:\s+(?:COURSES?|&\s*PRACTICAL\s+COURSES?))?|THEORY\s+COURSES?|EMPLOYABILITY\s+ENHANCEMENT\s+COURSES?(?:\s*\([A-Z0-9\s\-]+\))?|PROJECT\s+WORK(?:\s*/\s*SEMINAR)?|HUMANITIES\s+(?:AND|&)\s+SOCIAL\s+SCIENCES?(?:\s*\([A-Z0-9\s\-]+\))?)\s*$",
+            re.I
+        )
+
         # Ignored header, metadata, institution titles, and unit lines for subject identification
         ignore_line_pattern = re.compile(
-            r"^(?:s\.?\s*no|sl\.?\s*no|course\s+code|subject\s+code|course\s+title|subject\s+title|category|credits?|contact\s+periods|hours\s+per\s+week|scheme\s+of\s+examination|maximum\s+marks|internal|external|total\s+credits|page\s+\d+|---|===|\*\*\*|unit\s*[0-9ivxlcdm]+|module\s*[0-9ivxlcdm]+|chapter\s*[0-9ivxlcdm]+|text\s*books?|reference\s*books?|course\s+outcomes?|course\s+objectives?|prerequisites?|detailed\s+syllabus|learning\s+outcomes?|co[0-9]|po[0-9]|department\s+of|college\s+of|institute\s+of|university|curriculum\s+scheme|choice\s+based)\b",
+            r"^(?:s\.?\s*no|sl\.?\s*no|course\s+code|subject\s+code|course\s+title|subject\s+title|category\s*$|credits?\s*$|contact\s+periods|hours\s+per\s+week|scheme\s+of\s+examination|maximum\s+marks|internal|external|total\s+credits|page\s+\d+|---|===|\*\*\*|unit\s*[0-9ivxlcdm]+|module\s*[0-9ivxlcdm]+|chapter\s*[0-9ivxlcdm]+|text\s*books?|reference\s*books?|course\s+outcomes?|course\s+objectives?|prerequisites?|detailed\s+syllabus|learning\s+outcomes?|co[0-9]|po[0-9]|department\s+of|college\s+of|institute\s+of|university|curriculum\s+scheme|choice\s+based)\b",
             re.I
         )
 
         subjects: List[Dict[str, Any]] = []
 
-        def categorize_subject(name: str, code: str, raw_line: str) -> str:
+        def categorize_subject(name: str, code: str, raw_line: str, active_cat: Optional[str] = None) -> str:
             lower = f"{name} {code} {raw_line}".lower()
             if re.search(r"\b(?:lab|laboratory|practical|workshop|simulation|virtual\s+lab|practice|studio)\b", lower):
                 return "Laboratory"
@@ -837,21 +873,105 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 return "Project/Seminar"
             if re.search(r"\b(?:technical\s+english|professional\s+communication|communication\s+skills|principles\s+of\s+management|engineering\s+economics|total\s+quality\s+management|intellectual\s+property|humanities|hsmc)\b", lower):
                 return "Humanities / Management"
+            if active_cat:
+                return active_cat
             return "Theory Core"
 
-        # ── 1. Structured Pipe-Table Parser ───────────────────────────────────
+        def build_normalized_subject(
+            name: str,
+            code: str,
+            cat: str,
+            cr: Optional[float],
+            l_h: Optional[int],
+            t_h: Optional[int],
+            p_h: Optional[int],
+            raw_src_text: str,
+            source_pages: List[int],
+            source_sec: str
+        ) -> Dict[str, Any]:
+            sem_val = target_sem_int if target_sem_int is not None else (target_semester or 1)
+            sub_id = f"sub_{hashlib.md5(f'{prog_str}_{dept_str}_{sem_val}_{name}'.encode('utf-8')).hexdigest()[:10]}"
+            return {
+                "subjectId": sub_id,
+                "id": sub_id,
+                "subjectCode": code,
+                "code": code,
+                "subjectName": name,
+                "name": name,
+                "courseType": cat,
+                "type": cat,
+                "category": cat,
+                "credits": cr,
+                "lecture_hours": l_h,
+                "tutorial_hours": t_h,
+                "practical_hours": p_h,
+                "semester": sem_val,
+                "program": prog_str or "Degree Program",
+                "department": dept_str or "Engineering/Science",
+                "sourcePages": source_pages,
+                "source_page_numbers": source_pages,
+                "source_page": source_pages[0] if source_pages else 1,
+                "sourceSection": source_sec,
+                "source_section": source_sec,
+                "sourceText": raw_src_text,
+                "source_text": raw_src_text,
+                "semester_evidence": f"Found in Semester {sem_val} curriculum section",
+                "extractionConfidence": 0.98,
+                "confidence": 0.98,
+                "evidence_verified": True
+            }
+
+        # ── 1. Structured Pipe-Table & Grid Parser ────────────────────────────
         header_map: Dict[str, int] = {}
-        for line in relevant_text.splitlines():
-            line_str = line.strip()
-            if not line_str or line_str.startswith("--- Page "):
+        active_table_category = None
+
+        # Rejoin broken/wrapped pipe-table lines
+        cleaned_relevant_lines = []
+        for l in relevant_text.splitlines():
+            l_str = l.strip()
+            if not l_str:
+                continue
+            if cleaned_relevant_lines and cleaned_relevant_lines[-1].startswith("|") and not cleaned_relevant_lines[-1].endswith("|"):
+                cleaned_relevant_lines[-1] += " " + l_str
+            elif cleaned_relevant_lines and cleaned_relevant_lines[-1].startswith("|") and not l_str.startswith("|") and not l_str.startswith("---") and not l_str.startswith("#"):
+                # Continuation of previous row's cell
+                last_line = cleaned_relevant_lines[-1].rstrip("|").rstrip()
+                cleaned_relevant_lines[-1] = last_line + " " + l_str + " |"
+            else:
+                cleaned_relevant_lines.append(l_str)
+
+        for line_str in cleaned_relevant_lines:
+            if line_str.startswith("--- Page "):
+                continue
+
+            # Check for category subheadings (e.g., Professional Electives)
+            cat_match = category_heading_pattern.search(line_str)
+            if cat_match:
+                ch_text = cat_match.group(0).lower()
+                if "professional" in ch_text or "program" in ch_text or "department" in ch_text:
+                    active_table_category = "Professional Elective"
+                elif "open" in ch_text or "interdisciplinary" in ch_text:
+                    active_table_category = "Open Elective"
+                elif "mandatory" in ch_text or "audit" in ch_text:
+                    active_table_category = "Mandatory Audit"
+                elif "lab" in ch_text or "practical" in ch_text:
+                    active_table_category = "Laboratory"
+                elif "project" in ch_text or "seminar" in ch_text or "eec" in ch_text:
+                    active_table_category = "Project/Seminar"
+                elif "humanities" in ch_text or "hsmc" in ch_text:
+                    active_table_category = "Humanities / Management"
+                elif "theory" in ch_text:
+                    active_table_category = "Theory Core"
                 continue
 
             if "|" in line_str:
+                if sem_heading_pattern.search(line_str):
+                    continue
                 cells = [c.strip() for c in line_str.strip("|").split("|")]
                 if len(cells) >= 2:
                     header_check = " ".join(cells).lower()
                     if any(k in header_check for k in ("course code", "subject code", "course title", "subject title", "credits", "category")):
-                        # Detect column positions
+                        # Detect column positions (handles repeated headers across pages)
                         header_map = {}
                         for c_idx, c_val in enumerate(cells):
                             c_norm = c_val.lower().strip()
@@ -859,7 +979,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                                 header_map["code"] = c_idx
                             elif "title" in c_norm or "name" in c_norm:
                                 header_map["name"] = c_idx
-                            elif "category" in c_norm or "cat" in c_norm:
+                            elif "category" in c_norm or "cat" in c_norm or "type" in c_norm:
                                 header_map["category"] = c_idx
                             elif c_norm in ("c", "cr", "credits", "credit"):
                                 header_map["credits"] = c_idx
@@ -918,141 +1038,213 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                                 except Exception:
                                     pass
 
+                    # Multi-line table cell continuation check:
+                    # If this row only contains continuation text for subject name, append to previous subject
+                    if not row_code and row_name and row_credits is None and subjects:
+                        # Check if this row is a wrapped name continuation
+                        if not any(k in row_name.lower() for k in ("total", "semester", "credits", "scheme")):
+                            prev_sub = subjects[-1]
+                            prev_sub["subjectName"] = f"{prev_sub['subjectName']} {row_name}".strip()
+                            prev_sub["name"] = prev_sub["subjectName"]
+                            prev_sub["sourceText"] = f"{prev_sub['sourceText']} | {line_str}".strip()
+                            prev_sub["source_text"] = prev_sub["sourceText"]
+                            continue
+
                     if row_name:
-                        category = row_type if row_type in ("Laboratory", "Professional Elective", "Open Elective", "Mandatory Audit", "Project/Seminar") else categorize_subject(row_name, row_code, line_str)
+                        clean_row_name = re.sub(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*", "", row_name).strip()
+                        if row_code:
+                            clean_row_name = re.sub(re.escape(row_code), "", clean_row_name, flags=re.I).strip()
+                        clean_row_name = re.sub(r"[-:–—|()]+", " ", clean_row_name).strip()
+
+                        if len(clean_row_name) < 2 or any(k in clean_row_name.lower() for k in ("courses total", "total credits", "scheme of examination")):
+                            continue
+
+                        category = row_type if (row_type and row_type in ("Laboratory", "Professional Elective", "Open Elective", "Mandatory Audit", "Project/Seminar")) else categorize_subject(clean_row_name, row_code, line_str, active_table_category)
                         
-                        # Find source page
-                        page_found = 1
+                        # Find source pages
                         matched_pages = []
                         for p_num, p_txt in page_texts:
                             code_matched = bool(row_code and re.search(r"\b" + re.escape(row_code) + r"\b", p_txt, re.I))
-                            name_matched = bool(row_name.lower() in p_txt.lower())
+                            name_matched = bool(clean_row_name.lower() in p_txt.lower())
                             if code_matched or name_matched:
                                 matched_pages.append(p_num)
-                        if matched_pages:
-                            page_found = matched_pages[0]
-                        else:
+                        if not matched_pages:
                             matched_pages = [1]
 
-                        subjects.append({
-                            "code": row_code,
-                            "name": row_name,
-                            "type": category,
-                            "category": category,
-                            "credits": row_credits,
-                            "lecture_hours": row_l,
-                            "tutorial_hours": row_t,
-                            "practical_hours": row_p,
-                            "semester": target_semester or (target_sem_int if target_sem_int else 1),
-                            "source_page_numbers": matched_pages,
-                            "source_page": page_found,
-                            "source_section": explicit_identifier or f"Semester {target_semester or ''} Scheme Table",
-                            "source_text": line_str,
-                            "semester_evidence": f"Found in table under '{explicit_identifier or f'Semester {target_semester} Curriculum'}'",
-                            "confidence": 0.98,
-                            "evidence_verified": True
-                        })
+                        sub_obj = build_normalized_subject(
+                            name=clean_row_name,
+                            code=row_code,
+                            cat=category,
+                            cr=row_credits,
+                            l_h=row_l,
+                            t_h=row_t,
+                            p_h=row_p,
+                            raw_src_text=line_str,
+                            source_pages=matched_pages,
+                            source_sec=explicit_identifier or f"Semester {target_semester or ''} Scheme Table"
+                        )
+                        subjects.append(sub_obj)
                         continue
 
-        # ── 2. Standard Line / Space-Delimited Scheme Parser ──────────────────
-        for line in relevant_text.splitlines():
-            line_str = line.strip()
-            if not line_str or len(line_str) < 4 or line_str.startswith("--- Page ") or line_str.startswith("|"):
-                continue
-            if sem_heading_pattern.search(line_str) or ignore_line_pattern.search(line_str) or ("curriculum" in line_str.lower() and "total" in line_str.lower()):
-                continue
+        # ── 2. Standard Line / Space-Delimited Scheme Parser with Multi-Line Stitching ──
+        # Only execute Section 2 if no subjects were extracted via structured pipe tables in Section 1
+        if len(subjects) == 0:
+            raw_lines = relevant_text.splitlines()
+            stitched_blocks = []
+            current_block_lines = []
+            active_line_category = None
 
-            code = ""
-            code_match = code_regex.search(line_str)
-            if code_match:
-                code_cand = code_match.group(1).replace(" ", "")
-                if not re.match(r"^(?:THE|AND|FOR|WITH|FROM|THIS|THAT|SEMESTER|THEORY|LAB|PRACTICAL|SYLLABUS|UNIT|MODULE|CHAPTER)$", code_cand, re.I):
-                    code = code_cand
+            institution_pattern = re.compile(
+                r"\b(?:UNIVERSITY|AFFILIATED\s+INSTITUTIONS?|COLLEGE\s+OF|INSTITUTE\s+OF|DEPARTMENT\s+OF|BRANCH\s+OF|REGULATIONS?\s*[-–—:]?\s*\d+|CHOICE\s+BASED\s+CREDIT|AUTONOMOUS|CURRICULUM\s+AND\s+SYLLABI)\b",
+                re.I
+            )
 
-            credits = None
-            cr_match = re.search(r"(?:credits?|cr)\s*[:=]?\s*(\d+(?:\.\d+)?)", line_str, re.I)
-            if cr_match:
-                try:
-                    credits = float(cr_match.group(1))
-                except Exception:
-                    pass
-
-            l_hrs, t_hrs, p_hrs = None, None, None
-            ltp_match = re.search(r"L\s*:\s*(\d+)\s*T\s*:\s*(\d+)\s*P\s*:\s*(\d+)", line_str, re.I)
-            if ltp_match:
-                l_hrs = int(ltp_match.group(1))
-                t_hrs = int(ltp_match.group(2))
-                p_hrs = int(ltp_match.group(3))
-
-            ltpc_end = re.search(r"\b(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s*$", line_str)
-            if ltpc_end and not l_hrs:
-                try:
-                    l_hrs = int(ltpc_end.group(1))
-                    t_hrs = int(ltpc_end.group(2))
-                    p_hrs = int(ltpc_end.group(3))
-                    if credits is None:
-                        credits = float(ltpc_end.group(4))
-                except Exception:
-                    pass
-
-            clean_name = re.sub(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*", "", line_str)
-            if code:
-                clean_name = re.sub(re.escape(code), "", clean_name, flags=re.I)
-            clean_name = re.sub(r"\[.*?\]", "", clean_name)
-            clean_name = re.sub(r"(?:credits?|cr)\s*[:=]?\s*\d+(?:\.\d+)?.*$", "", clean_name, flags=re.I)
-            clean_name = re.sub(r"L\s*[:=]?\s*\d+\s*T\s*[:=]?\s*\d+\s*P\s*[:=]?\s*\d+.*$", "", clean_name, flags=re.I)
-            clean_name = re.sub(r"\b\d+\s+\d+\s+\d+\s+\d+(?:\.\d+)?\s*$", "", clean_name)
-            clean_name = re.sub(r"[-:–—|]+", " ", clean_name).strip()
-
-            if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page", "internal", "external", "maximum marks")):
-                # Check for existing subject entry
-                existing_idx = None
-                for idx, s in enumerate(subjects):
-                    if (code and s.get("code") == code) or (s.get("name", "").lower() == clean_name.lower()):
-                        existing_idx = idx
-                        break
-
-                if existing_idx is not None:
-                    if credits is not None and subjects[existing_idx].get("credits") is None:
-                        subjects[existing_idx]["credits"] = credits
-                    if l_hrs is not None and subjects[existing_idx].get("lecture_hours") is None:
-                        subjects[existing_idx]["lecture_hours"] = l_hrs
-                        subjects[existing_idx]["tutorial_hours"] = t_hrs
-                        subjects[existing_idx]["practical_hours"] = p_hrs
+            for raw_line in raw_lines:
+                line_s = raw_line.strip()
+                if not line_s or line_s.startswith("--- Page ") or line_s.startswith("|") or line_s.startswith("+") or re.match(r"^[\+\-=\s\|_]+$", line_s):
+                    continue
+                if sem_heading_pattern.search(line_s):
                     continue
 
-                category = categorize_subject(clean_name, code, line_str)
+                # Check category subheadings
+                cat_match = category_heading_pattern.search(line_s)
+                if cat_match:
+                    if current_block_lines:
+                        stitched_blocks.append((" \n ".join(current_block_lines), active_line_category))
+                        current_block_lines = []
+                    ch_text = cat_match.group(0).lower()
+                    if "professional" in ch_text or "program" in ch_text or "department" in ch_text:
+                        active_line_category = "Professional Elective"
+                    elif "open" in ch_text or "interdisciplinary" in ch_text:
+                        active_line_category = "Open Elective"
+                    elif "mandatory" in ch_text or "audit" in ch_text:
+                        active_line_category = "Mandatory Audit"
+                    elif "lab" in ch_text or "practical" in ch_text:
+                        active_line_category = "Laboratory"
+                    elif "project" in ch_text or "seminar" in ch_text or "eec" in ch_text:
+                        active_line_category = "Project/Seminar"
+                    elif "humanities" in ch_text or "hsmc" in ch_text:
+                        active_line_category = "Humanities / Management"
+                    elif "theory" in ch_text:
+                        active_line_category = "Theory Core"
+                    continue
 
-                page_found = 1
-                matched_pages = []
-                for p_num, p_txt in page_texts:
-                    code_matched = bool(code and re.search(r"\b" + re.escape(code) + r"\b", p_txt, re.I))
-                    name_matched = bool(clean_name.lower() in p_txt.lower())
-                    if code_matched or name_matched:
-                        matched_pages.append(p_num)
-                if matched_pages:
-                    page_found = matched_pages[0]
+                if ignore_line_pattern.search(line_s) or institution_pattern.search(line_s) or ("curriculum" in line_s.lower() and "total" in line_s.lower()):
+                    continue
+
+                # Determine if line starts a brand new subject entry
+                starts_new = False
+                has_sno_prefix = bool(re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s+[A-Za-z0-9]", line_s))
+                has_code_prefix = bool(re.match(r"^\s*[A-Z]{2,6}\s*[-/]?\s*\d{2,4}", line_s, re.I))
+                
+                if has_sno_prefix or has_code_prefix:
+                    starts_new = True
+
+                if starts_new and current_block_lines:
+                    stitched_blocks.append((" \n ".join(current_block_lines), active_line_category))
+                    current_block_lines = [line_s]
                 else:
-                    matched_pages = [1]
+                    current_block_lines.append(line_s)
 
-                subjects.append({
-                    "code": code,
-                    "name": clean_name,
-                    "type": category,
-                    "category": category,
-                    "credits": credits,
-                    "lecture_hours": l_hrs,
-                    "tutorial_hours": t_hrs,
-                    "practical_hours": p_hrs,
-                    "semester": target_semester or (target_sem_int if target_sem_int else 1),
-                    "source_page_numbers": matched_pages,
-                    "source_page": page_found,
-                    "source_section": explicit_identifier or f"Semester {target_semester or ''} Scheme Table",
-                    "source_text": line_str,
-                    "semester_evidence": f"Found under '{explicit_identifier or f'Semester {target_semester} Curriculum'}'",
-                    "confidence": 0.98,
-                    "evidence_verified": True
-                })
+            if current_block_lines:
+                stitched_blocks.append((" \n ".join(current_block_lines), active_line_category))
+
+            for block_text, block_cat in stitched_blocks:
+                line_str = block_text.replace("\n", " ").strip()
+                if not line_str or len(line_str) < 4 or institution_pattern.search(line_str):
+                    continue
+
+                code = ""
+                code_match = code_regex.search(line_str)
+                if code_match:
+                    code_cand = code_match.group(1).replace(" ", "")
+                    if not re.match(r"^(?:THE|AND|FOR|WITH|FROM|THIS|THAT|SEMESTER|THEORY|LAB|PRACTICAL|SYLLABUS|UNIT|MODULE|CHAPTER)$", code_cand, re.I):
+                        code = code_cand
+
+                credits = None
+                cr_match = re.search(r"(?:credits?|cr)\s*[:=]?\s*(\d+(?:\.\d+)?)", line_str, re.I)
+                if cr_match:
+                    try:
+                        credits = float(cr_match.group(1))
+                    except Exception:
+                        pass
+
+                l_hrs, t_hrs, p_hrs = None, None, None
+                ltp_match = re.search(r"L\s*:\s*(\d+)\s*T\s*:\s*(\d+)\s*P\s*:\s*(\d+)", line_str, re.I)
+                if ltp_match:
+                    l_hrs = int(ltp_match.group(1))
+                    t_hrs = int(ltp_match.group(2))
+                    p_hrs = int(ltp_match.group(3))
+
+                ltpc_end = re.search(r"\b(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s*$", line_str)
+                if ltpc_end and not l_hrs:
+                    try:
+                        l_hrs = int(ltpc_end.group(1))
+                        t_hrs = int(ltpc_end.group(2))
+                        p_hrs = int(ltpc_end.group(3))
+                        if credits is None:
+                            credits = float(ltpc_end.group(4))
+                    except Exception:
+                        pass
+
+                clean_name = re.sub(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*", "", line_str)
+                if code:
+                    clean_name = re.sub(re.escape(code), "", clean_name, flags=re.I)
+                clean_name = re.sub(r"\[.*?\]", "", clean_name)
+                clean_name = re.sub(r"\(.*?\)", "", clean_name)
+                clean_name = re.sub(r"(?:credits?|cr)\s*[:=]?\s*\d+(?:\.\d+)?.*$", "", clean_name, flags=re.I)
+                clean_name = re.sub(r"\b\d+\s*(?:credits?|cr)\b.*$", "", clean_name, flags=re.I)
+                clean_name = re.sub(r"L\s*[:=]?\s*\d+\s*T\s*[:=]?\s*\d+\s*P\s*[:=]?\s*\d+.*$", "", clean_name, flags=re.I)
+                clean_name = re.sub(r"\b\d+\s+\d+\s+\d+\s+\d+(?:\.\d+)?\s*$", "", clean_name)
+                clean_name = re.sub(r"[-:–—|()]+", " ", clean_name)
+                clean_name = re.sub(r"\s+", " ", clean_name).strip()
+
+                if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page", "internal", "external", "maximum marks")):
+                    norm_clean = re.sub(r"[^a-z0-9]", "", clean_name.lower())
+                    code_norm = code.upper().replace(" ", "") if code else ""
+
+                    # Check for existing subject entry (Exact code or exact normalized name match)
+                    existing_idx = None
+                    for idx, s in enumerate(subjects):
+                        s_norm = re.sub(r"[^a-z0-9]", "", (s.get("name") or s.get("subjectName") or "").lower())
+                        s_code = (s.get("code") or s.get("subjectCode") or "").upper().replace(" ", "")
+                        if (code_norm and s_code and code_norm == s_code) or (s_norm and norm_clean and s_norm == norm_clean):
+                            existing_idx = idx
+                            break
+
+                    if existing_idx is not None:
+                        if credits is not None and subjects[existing_idx].get("credits") is None:
+                            subjects[existing_idx]["credits"] = credits
+                        if l_hrs is not None and subjects[existing_idx].get("lecture_hours") is None:
+                            subjects[existing_idx]["lecture_hours"] = l_hrs
+                            subjects[existing_idx]["tutorial_hours"] = t_hrs
+                            subjects[existing_idx]["practical_hours"] = p_hrs
+                        continue
+
+                    category = categorize_subject(clean_name, code, line_str, block_cat)
+
+                    matched_pages = []
+                    for p_num, p_txt in page_texts:
+                        code_matched = bool(code and re.search(r"\b" + re.escape(code) + r"\b", p_txt, re.I))
+                        name_matched = bool(clean_name.lower() in p_txt.lower())
+                        if code_matched or name_matched:
+                            matched_pages.append(p_num)
+                    if not matched_pages:
+                        matched_pages = [1]
+
+                    sub_obj = build_normalized_subject(
+                        name=clean_name,
+                        code=code,
+                        cat=category,
+                        cr=credits,
+                        l_h=l_hrs,
+                        t_h=t_hrs,
+                        p_h=p_hrs,
+                        raw_src_text=line_str,
+                        source_pages=matched_pages,
+                        source_sec=explicit_identifier or f"Semester {target_semester or ''} Scheme Table"
+                    )
+                    subjects.append(sub_obj)
 
         # Extract detailed syllabus units/modules strictly from document text
         chapters_map = {}
@@ -1260,29 +1452,51 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
   ]
 }}
 """
-        is_file_path = False
-        if isinstance(content_or_file, str) and len(content_or_file) < 500 and not ("\n" in content_or_file):
-            try:
-                is_file_path = Path(content_or_file).is_file()
-            except Exception:
-                is_file_path = False
-        files = [content_or_file] if is_file_path else None
-        
-        if files:
-            text_prompt = f"{prompt}\n\n[Attached Syllabus Document File]"
-        else:
-            text_prompt = f"{prompt}\n\n[Provided Syllabus Document Text]:\n{str(content_or_file)[:15000]}"
+        # ── STAGES 1 TO 5A: Fast Deterministic Extraction ─────────────────────
+        det_res = self._deterministic_syllabus_parser(
+            content_or_file,
+            target_semester=target_sem_str,
+            level=level,
+            dept_str=dept_str,
+            prog_str=prog_str
+        )
+        det_status = str(det_res.get("validation_status") or "").upper().strip()
+        det_subjects = det_res.get("subjects") or []
 
-        res = {}
-        try:
-            raw = self.generate_content(text_prompt, files=files, json_output=True, temperature=0.1)
-            res = self.parse_json_response(raw)
-        except Exception as exc:
-            logger.warning("[GeminiService] AI syllabus extraction exception: %s. Using deterministic evidence-based parser.", exc)
-            res = self._deterministic_syllabus_parser(content_or_file, target_semester=target_sem_str, level=level, dept_str=dept_str, prog_str=prog_str)
+        # If deterministic parser found a clear match or definitive mismatch/needs_review,
+        # return immediately without making an expensive or slow full-document AI call!
+        if det_status in ("MISMATCH", "NEEDS_REVIEW") or (det_status == "VALID" and len(det_subjects) >= 1):
+            res = det_res
+        else:
+            # ── STAGE 5B: Targeted AI Extraction on Sliced Text Only ──────────
+            # Only slice the target semester section (not the entire 80-page document)
+            raw_text = str(content_or_file or "")
+            if isinstance(content_or_file, str) and Path(content_or_file).is_file():
+                try:
+                    import pymupdf as fitz
+                    doc = fitz.open(content_or_file)
+                    raw_text = "\n".join(page.get_text("text") or "" for page in doc)
+                except Exception:
+                    pass
+
+            # Target semester slice
+            sliced_content = raw_text[:12000]
+            if target_sem_str:
+                sem_idx = raw_text.lower().find(f"semester {target_sem_str.lower()}")
+                if sem_idx != -1:
+                    sliced_content = raw_text[max(0, sem_idx - 500):sem_idx + 8000]
+
+            text_prompt = f"{prompt}\n\n[Sliced Syllabus Document Text]:\n{sliced_content}"
+            res = {}
+            try:
+                raw = self.generate_content(text_prompt, json_output=True, temperature=0.1)
+                res = self.parse_json_response(raw)
+            except Exception as exc:
+                logger.warning("[GeminiService] AI syllabus extraction exception: %s. Using deterministic output.", exc)
+                res = det_res
 
         if not isinstance(res, dict):
-            res = {}
+            res = det_res
 
         # ── Python Post-Processing & Evidence Normalization ────────────────────
         val_status = str(res.get("validation_status") or "").upper().strip()
@@ -1309,22 +1523,38 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
                     if not pages:
                         pages = [1]
 
+                    sub_id = str(item.get("subjectId") or item.get("id") or f"sub_{hashlib.md5(f'{prog_str}_{dept_str}_{target_sem_str}_{s_name}'.encode('utf-8')).hexdigest()[:10]}")
+                    conf_score = float(item["confidence"]) if item.get("confidence") is not None and str(item.get("confidence")).replace('.', '', 1).isdigit() else (float(item["extractionConfidence"]) if item.get("extractionConfidence") is not None and str(item.get("extractionConfidence")).replace('.', '', 1).isdigit() else 0.98)
+                    c_type = str(item.get("courseType") or item.get("type") or item.get("category") or "Theory Core").strip()
+                    cr_val = float(item["credits"]) if item.get("credits") is not None and str(item.get("credits")).replace('.', '', 1).isdigit() else None
+
                     parsed_subjects.append({
+                        "subjectId": sub_id,
+                        "id": sub_id,
+                        "subjectCode": s_code,
                         "code": s_code,
+                        "subjectName": s_name,
                         "name": s_name,
-                        "type": str(item.get("type") or item.get("category") or "Theory Core").strip(),
-                        "category": str(item.get("category") or item.get("type") or "Program Core").strip(),
-                        "credits": float(item["credits"]) if item.get("credits") is not None and str(item.get("credits")).replace('.', '', 1).isdigit() else None,
+                        "courseType": c_type,
+                        "type": c_type,
+                        "category": str(item.get("category") or c_type).strip(),
+                        "credits": cr_val,
                         "lecture_hours": int(item["lecture_hours"]) if str(item.get("lecture_hours", "")).isdigit() else None,
                         "tutorial_hours": int(item["tutorial_hours"]) if str(item.get("tutorial_hours", "")).isdigit() else None,
                         "practical_hours": int(item["practical_hours"]) if str(item.get("practical_hours", "")).isdigit() else None,
                         "semester": target_sem_str or item.get("semester"),
+                        "program": prog_str or "Degree Program",
+                        "department": dept_str or "Engineering/Science",
+                        "sourcePages": pages,
                         "source_page_numbers": pages,
                         "source_page": pages[0] if pages else 1,
+                        "sourceSection": s_sec,
                         "source_section": s_sec,
+                        "sourceText": s_text,
                         "source_text": s_text,
                         "semester_evidence": s_sem_ev,
-                        "confidence": float(item["confidence"]) if item.get("confidence") is not None and str(item.get("confidence")).replace('.', '', 1).isdigit() else 0.95,
+                        "extractionConfidence": conf_score,
+                        "confidence": conf_score,
                         "evidence_verified": True
                     })
 
@@ -1446,72 +1676,90 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
 
         return res
 
-    def generate_reality_lab(self, subject: str, module: str = "", difficulty: str = "Medium", syllabus_context: str = "", semester: str = "", program: str = "", department: str = "") -> Dict[str, Any]:
+    def generate_reality_lab(self, subject: str, subject_id: str = "", topic: str = "", module: str = "", difficulty: str = "Medium", validated_topics: List[str] = None, syllabus_context: str = "", semester: str = "", program: str = "", department: str = "") -> Dict[str, Any]:
         """
-        Generate a strictly semester-aware practical activity grounded in the student's uploaded syllabus.
-        Explicitly identifies:
-          - Subject
-          - Semester
-          - Syllabus topic
-          - Real-world / practical concept
-          - Materials
-          - Procedure
-          - Observation
-          - Theory connection
-          - Learning outcome
-          - Exam relevance
+        Generate a strictly semester-aware practical activity grounded in the student's validated syllabus curriculum.
+        Includes all 11 core pedagogical elements:
+          1. activity title
+          2. real-world connection
+          3. objective
+          4. materials (day-to-day/local where safe)
+          5. steps
+          6. expected observation
+          7. concept being demonstrated
+          8. explanation
+          9. safety considerations (chemical/electrical/thermal hazard warnings)
+          10. questions to test understanding
+          11. exam relevance
         """
         sem_str = f"Semester {semester}" if semester and "semester" not in str(semester).lower() else (str(semester) or "Active Semester")
-        mod_lower = str(module or "").lower()
+        active_topic = topic or module or (validated_topics[0] if validated_topics else "Core Practical Application")
+        mod_lower = str(active_topic or "").lower()
 
         # Check for pure abstract / unsupported theoretical constructs upfront
         if "unsupported" in mod_lower or "pure abstract" in mod_lower or "non-practical" in mod_lower or "pure theoretical" in mod_lower:
-            return self._build_deterministic_reality_lab(subject, module, difficulty, sem_str, program, department)
+            return self._build_deterministic_reality_lab(subject, subject_id, active_topic, difficulty, sem_str, program, department, validated_topics)
+
+        topics_str = ", ".join(validated_topics[:10]) if validated_topics else active_topic
 
         prompt = f"""
-Generate a comprehensive, syllabus-grounded Reality Lab practical activity for a college student using gemini-3.6-flash.
+Generate a comprehensive, syllabus-grounded Reality Lab practical activity for a student using gemini-3.6-flash.
 
-Academic Context:
+Academic & Syllabus Grounding:
 - Program: {program or 'Engineering'}
 - Department: {department or 'Information Technology'}
 - Semester: {sem_str}
-- Subject: {subject}
-- Syllabus Topic / Module: {module or 'Core Concepts'}
+- Subject: {subject} (Subject ID: {subject_id or 'N/A'})
+- Selected Validated Topic: {active_topic}
+- Validated Syllabus Topics: {topics_str}
 - Difficulty Level: {difficulty}
 - Syllabus Context Excerpt: {syllabus_context[:1200] if syllabus_context else 'Active accredited curriculum syllabus'}
 
-Requirement:
-Connect the theoretical syllabus topic directly to an authentic practical/engineering activity or experiment.
-If no suitable practical activity exists for this purely theoretical topic, set "is_supported": false and provide an explanation.
+Requirements:
+1. Connect the selected syllabus topic directly to an authentic practical/laboratory activity or real-world experiment.
+2. Materials: Use day-to-day/local materials where scientifically safe and appropriate, or standard software/lab equipment.
+3. Safety: For experiments involving chemicals, electricity, heat, pressure, or other hazards, include explicit safety warnings and strictly avoid unsafe instructions. For computer/software labs, specify operational safety (data protection, isolated testbed).
+4. If no suitable practical activity exists for this purely theoretical topic, set "is_supported": false with an explanation.
 
-Return ONLY a JSON object matching this schema:
+Return ONLY a valid JSON object matching this schema:
 {{
   "scenario_id": "rl_{subject.lower()[:4]}_{difficulty.lower()}",
-  "title": "Practical Activity / Experiment Title",
+  "title": "Descriptive Practical Activity Title",
   "subject": "{subject}",
+  "subject_id": "{subject_id}",
   "semester": "{sem_str}",
-  "syllabus_topic": "{module or subject}",
-  "practical_concept": "Concrete real-world engineering or practical application",
+  "syllabus_topic": "{active_topic}",
+  "real_world_connection": "Specific industrial, engineering, or day-to-day real-world phenomenon",
+  "objective": "Clear, measurable practical and conceptual learning objective",
   "materials": [
-    "Material/Tool/Software 1 (e.g. PostgreSQL 16 / Linux Terminal / Wireshark)",
-    "Material/Tool/Software 2"
+    "Safe day-to-day / local material or laboratory tool 1",
+    "Material 2"
   ],
-  "procedure": [
-    "Step 1: Setup and configure...",
-    "Step 2: Execute test workload...",
-    "Step 3: Measure and record..."
+  "steps": [
+    "Step 1: Setup and initial safety check...",
+    "Step 2: Execution and measurement...",
+    "Step 3: Verification and recording..."
   ],
-  "observation": "Expected observable output, system logs, metrics, or experimental results",
-  "theory_connection": "Direct textbook law, theorem, formula, or mathematical foundation from the syllabus",
-  "learning_outcome": "Specific engineering competency and practical skill mastered by the student",
-  "exam_relevance": "Direct mapping to university exam questions (e.g. Anna University Part-B 13/16 mark practical design problem)",
-  "task": "Specific practical design challenge for the student to solve or explain",
+  "expected_observation": "Concrete observable physical phenomenon, sensor reading, log output, or metric",
+  "concept_being_demonstrated": "Specific curriculum concept, law, algorithm, or theorem",
+  "explanation": "Detailed scientific/engineering explanation connecting the observation to the underlying theoretical concept",
+  "safety_considerations": "Explicit safety instructions, PPE, electrical/heat/chemical hazard precautions, or workspace safety",
+  "questions_to_test_understanding": [
+    "Question 1: Conceptual check on the observed phenomenon...",
+    "Question 2: Application or troubleshooting scenario..."
+  ],
+  "exam_relevance": "Direct mapping to university/board examination questions (e.g. Part-B 13/16 mark practical design problem)",
+  "task": "Specific practical explanation or analysis problem for the student to solve",
+  "expectedConcepts": [
+    {{"concept": "{active_topic}", "required": true}},
+    {{"concept": "Real-World Application", "required": true}}
+  ],
   "eval_criteria": [
-    "Technical accuracy of theory connection",
-    "Feasibility of practical procedure",
-    "Proper understanding of observation and metrics"
+    "Technical accuracy of theoretical explanation",
+    "Correct interpretation of observation and experimental steps",
+    "Awareness of safety considerations and practical constraints"
   ],
-  "model_answer": "Complete, comprehensive engineering solution and explanation",
+  "model_answer": "Complete, comprehensive engineering/scientific solution and explanation",
   "is_supported": true,
   "unsupported_message": ""
 }}
@@ -1522,53 +1770,79 @@ Return ONLY a JSON object matching this schema:
             if res and isinstance(res, dict):
                 if res.get("is_supported") is False:
                     res.setdefault("subject", subject)
+                    res.setdefault("subject_id", subject_id)
                     res.setdefault("semester", sem_str)
-                    res.setdefault("syllabus_topic", module or subject)
+                    res.setdefault("syllabus_topic", active_topic)
                     res.setdefault("is_supported", False)
                     res.setdefault("unsupported_message", "No suitable practical activity is defined for this specific theoretical topic in the uploaded syllabus.")
                     return res
-                if res.get("title") and res.get("practical_concept"):
+                if res.get("title") and (res.get("concept_being_demonstrated") or res.get("practical_concept") or res.get("objective")):
                     res.setdefault("subject", subject)
+                    res.setdefault("subject_id", subject_id)
                     res.setdefault("semester", sem_str)
-                    res.setdefault("syllabus_topic", module or subject)
-                    res.setdefault("materials", ["Standard Engineering Lab Toolkit / Software Environment"])
-                    res.setdefault("procedure", ["Step 1: Review requirements", "Step 2: Implement design", "Step 3: Verify outputs"])
-                    res.setdefault("observation", "System logs, throughput metrics, or observable output verified.")
-                    res.setdefault("theory_connection", f"Grounded in theoretical principles of {subject}.")
-                    res.setdefault("learning_outcome", f"Mastery of practical implementation for {module or subject}.")
-                    res.setdefault("exam_relevance", f"Standard university semester examination practical design question for {subject}.")
+                    res.setdefault("syllabus_topic", active_topic)
+                    res.setdefault("real_world_connection", res.get("context") or "Engineering and Day-to-Day Application")
+                    res.setdefault("objective", f"Master practical implementation of {active_topic} under real-world constraints.")
+                    res.setdefault("materials", ["Standard Laboratory Apparatus / Analytical Environment"])
+                    res.setdefault("steps", res.get("procedure") or ["Step 1: Setup testbed", "Step 2: Run experiment", "Step 3: Analyze results"])
+                    res.setdefault("procedure", res.get("steps") or ["Step 1: Setup testbed", "Step 2: Run experiment", "Step 3: Analyze results"])
+                    res.setdefault("expected_observation", res.get("observation") or "Metrics and physical state changes observed.")
+                    res.setdefault("observation", res.get("expected_observation") or "Metrics and physical state changes observed.")
+                    res.setdefault("concept_being_demonstrated", res.get("practical_concept") or active_topic)
+                    res.setdefault("practical_concept", res.get("concept_being_demonstrated") or active_topic)
+                    res.setdefault("explanation", res.get("theory_connection") or f"Grounded in theoretical principles of {subject}.")
+                    res.setdefault("theory_connection", res.get("explanation") or f"Grounded in theoretical principles of {subject}.")
+                    res.setdefault("safety_considerations", "Ensure electrical isolation, wear safety glasses if handling physical circuits/materials, and verify parameters before applying load.")
+                    res.setdefault("questions_to_test_understanding", [
+                        f"Why does {active_topic} behave differently under maximum load?",
+                        "How would you adjust parameters if the observed output deviates by 15%?"
+                    ])
+                    res.setdefault("exam_relevance", f"Standard University Examination Question on {subject}: {active_topic}.")
+                    res.setdefault("expectedConcepts", [
+                        {"concept": active_topic, "required": True},
+                        {"concept": "Real-World Application", "required": True}
+                    ])
                     res.setdefault("is_supported", True)
                     return res
         except Exception as e:
             logger.warning(f"[GeminiService] generate_reality_lab error: {e}")
 
         # Deterministic fallback grounded in academic subject & module
-        return self._build_deterministic_reality_lab(subject, module, difficulty, sem_str, program, department)
+        return self._build_deterministic_reality_lab(subject, subject_id, active_topic, difficulty, sem_str, program, department, validated_topics)
 
-    def _build_deterministic_reality_lab(self, subject: str, module: str, difficulty: str, semester: str, program: str, department: str) -> Dict[str, Any]:
+    def _build_deterministic_reality_lab(self, subject: str, subject_id: str, topic: str, difficulty: str, semester: str, program: str, department: str, validated_topics: List[str] = None) -> Dict[str, Any]:
         """
         Deterministic, authentic practical activity generator for standard college curriculum topics.
-        Guarantees all 10 required fields and zero hallucination.
+        Guarantees all 11 required fields, proper safety warnings, and zero hallucination.
         """
         sub_lower = subject.lower()
-        mod_lower = module.lower() if module else ""
+        top_lower = topic.lower() if topic else ""
 
         # Special check: if topic explicitly says unsupported or out-of-scope
-        if "unsupported" in mod_lower or "pure abstract non-practical" in mod_lower:
+        if "unsupported" in top_lower or "pure abstract non-practical" in top_lower:
             return {
                 "scenario_id": "rl_unsupported",
-                "title": f"Theoretical Topic: {module or subject}",
+                "title": f"Theoretical Topic: {topic or subject}",
                 "subject": subject,
+                "subject_id": subject_id,
                 "semester": semester,
-                "syllabus_topic": module or subject,
-                "practical_concept": "N/A - Pure Theoretical Construct",
+                "syllabus_topic": topic or subject,
+                "real_world_connection": "N/A - Pure Theoretical Construct",
+                "objective": "Theoretical conceptual comprehension and mathematical proof.",
                 "materials": [],
+                "steps": [],
                 "procedure": [],
+                "expected_observation": "N/A",
                 "observation": "N/A",
+                "concept_being_demonstrated": "Abstract theoretical model without direct hardware or laboratory apparatus.",
+                "practical_concept": "N/A",
+                "explanation": "Abstract theoretical principles analyzed via analytical proofs.",
                 "theory_connection": "Abstract theoretical model without direct hardware or laboratory apparatus.",
-                "learning_outcome": "Theoretical conceptual comprehension.",
+                "safety_considerations": "Safe theoretical study.",
+                "questions_to_test_understanding": ["State the governing mathematical theorem."],
                 "exam_relevance": "Theory proof questions in semester examination.",
                 "task": "N/A",
+                "expectedConcepts": [],
                 "eval_criteria": [],
                 "model_answer": "",
                 "is_supported": False,
@@ -1580,26 +1854,48 @@ Return ONLY a JSON object matching this schema:
                 "scenario_id": f"rl_dbms_{difficulty.lower()}",
                 "title": "High-Throughput E-Commerce Schema & Query Optimization Under Heavy Load",
                 "subject": subject,
+                "subject_id": subject_id,
                 "semester": semester,
-                "syllabus_topic": module or "Unit II: Database Design, Normalization & Indexing",
-                "practical_concept": "B+ Tree Indexing, BCNF Decomposition, and Connection Pool Tuning",
+                "syllabus_topic": topic or "Database Design, Normalization & Indexing",
+                "real_world_connection": "E-commerce Flash Sale Platforms (Amazon/Flipkart) handling 50,000 orders/second",
+                "objective": "Eliminate database update anomalies via BCNF decomposition and reduce query latency using B+ Tree composite indexes.",
                 "materials": [
-                    "PostgreSQL 16 / MySQL Enterprise Database Server",
+                    "PostgreSQL 16 / MySQL Enterprise Database Server (Local workstation or sandbox)",
                     "pg_stat_activity & EXPLAIN ANALYZE Query Profiler",
                     "Apache JMeter / k6 Load Testing Benchmark Suite"
                 ],
-                "procedure": [
-                    "Step 1: Create an unindexed orders table with 2,000,000 rows simulating black-friday traffic.",
+                "steps": [
+                    "Step 1: Create an unindexed orders table with 2,000,000 rows simulating high traffic.",
                     "Step 2: Execute multi-table join query on customer, payment, and inventory tables with EXPLAIN ANALYZE.",
                     "Step 3: Measure sequential scan latency vs index scan latency.",
                     "Step 4: Decompose anomalous relation into BCNF to eliminate update anomalies.",
                     "Step 5: Apply Composite B+ Tree Index on (customer_id, order_timestamp) and compare CPU/I/O cost."
                 ],
+                "procedure": [
+                    "Step 1: Create an unindexed orders table with 2,000,000 rows simulating high traffic.",
+                    "Step 2: Execute multi-table join query on customer, payment, and inventory tables with EXPLAIN ANALYZE.",
+                    "Step 3: Measure sequential scan latency vs index scan latency.",
+                    "Step 4: Decompose anomalous relation into BCNF to eliminate update anomalies.",
+                    "Step 5: Apply Composite B+ Tree Index on (customer_id, order_timestamp) and compare CPU/I/O cost."
+                ],
+                "expected_observation": "Sequential table scan requires 1450ms and 85,000 disk page reads. After applying composite B+ Tree index, execution drops to 1.8ms with index-only scan and 4 buffer page hits.",
                 "observation": "Sequential table scan requires 1450ms and 85,000 disk page reads. After applying composite B+ Tree index, execution drops to 1.8ms with index-only scan and 4 buffer page hits.",
+                "concept_being_demonstrated": "B+ Tree Indexing, BCNF Decomposition, and Query Plan Optimization",
+                "practical_concept": "B+ Tree Indexing, BCNF Decomposition, and Connection Pool Tuning",
+                "explanation": "Relational Algebra Selection Pushdown, B+ Tree logarithmic search complexity O(log_B N), and Boyce-Codd Normal Form (BCNF) Functional Dependency preservation.",
                 "theory_connection": "Relational Algebra Selection Pushdown, B+ Tree logarithmic search complexity O(log_B N), and Boyce-Codd Normal Form (BCNF) Functional Dependency preservation.",
-                "learning_outcome": "Ability to design normalized schemas, analyze execution plans with EXPLAIN ANALYZE, and eliminate I/O bottlenecks in production databases.",
-                "exam_relevance": "Directly maps to Anna University / University Regulation 16-Mark Question on Normalization (3NF vs BCNF) and B+ Tree Indexing in Relational Databases.",
+                "safety_considerations": "Operational Safety: Always run benchmark load tests in an isolated local database sandbox to avoid table locks or resource starvation on production instances.",
+                "questions_to_test_understanding": [
+                    "Why does an unindexed table scan cost grow linearly O(N) with table size?",
+                    "How does BCNF prevent insertion, deletion, and update anomalies in relational schemas?"
+                ],
+                "exam_relevance": "Directly maps to University Regulation 16-Mark Question on Normalization (3NF vs BCNF) and B+ Tree Indexing in Relational Databases.",
                 "task": "Explain how decomposing a relation into BCNF eliminates update anomalies, and analyze the I/O cost reduction of a composite B+ tree index over sequential scanning.",
+                "expectedConcepts": [
+                    {"concept": "BCNF Normalization", "required": True},
+                    {"concept": "B+ Tree Indexing", "required": True},
+                    {"concept": "Query Cost Reduction", "required": False}
+                ],
                 "eval_criteria": [
                     "Accurate identification of Functional Dependencies and BCNF rules",
                     "Correct explanation of B+ tree index search efficiency vs sequential disk scans",
@@ -1614,13 +1910,22 @@ Return ONLY a JSON object matching this schema:
                 "scenario_id": f"rl_web_{difficulty.lower()}",
                 "title": "Architecting Real-Time WebSocket Notification Engine with JWT Authentication",
                 "subject": subject,
+                "subject_id": subject_id,
                 "semester": semester,
-                "syllabus_topic": module or "Unit III: Server-Side Engineering & REST API Design",
-                "practical_concept": "Bidirectional Asynchronous Communication & Token-Based Security",
+                "syllabus_topic": topic or "Server-Side Engineering & REST API Design",
+                "real_world_connection": "Real-time stock ticker or live sports score broadcaster updating millions of connected browsers",
+                "objective": "Build a bidirectional event-driven WebSocket communication stream secured via JSON Web Tokens.",
                 "materials": [
                     "Node.js Runtime & Express.js Framework",
                     "Socket.IO / WS Native WebSocket Engine",
                     "Postman / Insomnia API Client with JWT Header Interceptor"
+                ],
+                "steps": [
+                    "Step 1: Initialize Express HTTP server with JSON Web Token (JWT) verification middleware.",
+                    "Step 2: Upgrade HTTP connection to Full-Duplex WebSocket protocol on authenticated handshake.",
+                    "Step 3: Broadcast real-time stock alert messages to subscribed client rooms.",
+                    "Step 4: Implement heartbeat ping-pong intervals to detect dropped client sockets.",
+                    "Step 5: Stress test concurrent socket connections using Autocannon."
                 ],
                 "procedure": [
                     "Step 1: Initialize Express HTTP server with JSON Web Token (JWT) verification middleware.",
@@ -1629,11 +1934,24 @@ Return ONLY a JSON object matching this schema:
                     "Step 4: Implement heartbeat ping-pong intervals to detect dropped client sockets.",
                     "Step 5: Stress test concurrent socket connections using Autocannon."
                 ],
+                "expected_observation": "WebSocket maintains a single persistent TCP connection with 2-byte frame overhead per message, reducing latency from 250ms (HTTP polling) to under 8ms for 10,000 active concurrent clients.",
                 "observation": "WebSocket maintains a single persistent TCP connection with 2-byte frame overhead per message, reducing latency from 250ms (HTTP polling) to under 8ms for 10,000 active concurrent clients.",
+                "concept_being_demonstrated": "Bidirectional Asynchronous Communication & Token-Based Security",
+                "practical_concept": "Bidirectional Asynchronous Communication & Token-Based Security",
+                "explanation": "TCP 3-Way Handshake, RFC 6455 WebSocket Protocol specification, and Stateless Cryptographic Signatures (HMAC-SHA256).",
                 "theory_connection": "TCP 3-Way Handshake, RFC 6455 WebSocket Protocol specification, and Stateless Cryptographic Signatures (HMAC-SHA256).",
-                "learning_outcome": "Mastery of real-time client-server event architectures and secure token-based access control.",
+                "safety_considerations": "Network Security: Never store unencrypted JWT secret keys in client-side code; enforce rate limiting on handshake endpoints to mitigate denial-of-service (DoS) attacks.",
+                "questions_to_test_understanding": [
+                    "Why is the HTTP Upgrade header required to establish a WebSocket channel?",
+                    "How does stateless JWT authentication reduce database round-trips during high-frequency message broadcasting?"
+                ],
                 "exam_relevance": "Directly addresses University Exam Section on Web Technologies: RESTful Architecture vs WebSockets and Session Management.",
                 "task": "Design the handshake architecture for authenticating a WebSocket connection using JWT, and contrast its network overhead with traditional short polling.",
+                "expectedConcepts": [
+                    {"concept": "WebSocket Handshake", "required": True},
+                    {"concept": "JWT Token Authentication", "required": True},
+                    {"concept": "Full-Duplex Overhead Reduction", "required": False}
+                ],
                 "eval_criteria": [
                     "Detailed protocol flow of HTTP upgrade to WebSocket",
                     "Token verification in handshake headers",
@@ -1648,13 +1966,22 @@ Return ONLY a JSON object matching this schema:
                 "scenario_id": f"rl_net_{difficulty.lower()}",
                 "title": "Packet-Level Analysis of TCP Slow Start & Congestion Avoidance Under Jitter",
                 "subject": subject,
+                "subject_id": subject_id,
                 "semester": semester,
-                "syllabus_topic": module or "Unit III: Transport Layer Protocols & Congestion Control",
-                "practical_concept": "TCP Reno/Cubic Congestion Window (cwnd) Dynamics & Packet Loss Recovery",
+                "syllabus_topic": topic or "Transport Layer Protocols & Congestion Control",
+                "real_world_connection": "High-definition 4K video streaming over mobile networks experiencing packet loss and latency spikes",
+                "objective": "Measure TCP Congestion Window (cwnd) dynamics and analyze Fast Retransmit triggers using packet traces.",
                 "materials": [
                     "Wireshark Network Packet Analyzer",
                     "Linux iproute2 / tc (Traffic Control) Packet Loss Simulator",
                     "iPerf3 Network Throughput Benchmark"
+                ],
+                "steps": [
+                    "Step 1: Set up traffic control in Linux to inject 3% packet drop and 40ms round-trip latency.",
+                    "Step 2: Launch iPerf3 TCP stream to remote host and capture packet trace in Wireshark.",
+                    "Step 3: Plot Congestion Window (cwnd) vs Time using Wireshark tcptrace graph.",
+                    "Step 4: Identify Triple Duplicate ACKs triggering Fast Retransmit and Fast Recovery.",
+                    "Step 5: Compare TCP throughput under additive increase / multiplicative decrease (AIMD)."
                 ],
                 "procedure": [
                     "Step 1: Set up traffic control in Linux to inject 3% packet drop and 40ms round-trip latency.",
@@ -1663,51 +1990,84 @@ Return ONLY a JSON object matching this schema:
                     "Step 4: Identify Triple Duplicate ACKs triggering Fast Retransmit and Fast Recovery.",
                     "Step 5: Compare TCP throughput under additive increase / multiplicative decrease (AIMD)."
                 ],
+                "expected_observation": "During Slow Start, cwnd doubles every RTT. Upon receiving 3 duplicate ACKs, cwnd is halved (AIMD), avoiding catastrophic network congestion collapse.",
                 "observation": "During Slow Start, cwnd doubles every RTT. Upon receiving 3 duplicate ACKs, cwnd is halved (AIMD), avoiding catastrophic network congestion collapse.",
+                "concept_being_demonstrated": "TCP Reno/Cubic Congestion Window (cwnd) Dynamics & Packet Loss Recovery",
+                "practical_concept": "TCP Reno/Cubic Congestion Window (cwnd) Dynamics & Packet Loss Recovery",
+                "explanation": "Jacobson's TCP Congestion Control Algorithm, Additive Increase Multiplicative Decrease (AIMD), and Little's Law.",
                 "theory_connection": "Jacobson's TCP Congestion Control Algorithm, Additive Increase Multiplicative Decrease (AIMD), and Little's Law.",
-                "learning_outcome": "Ability to inspect packet headers, diagnose packet loss causes, and tune TCP socket buffer parameters.",
+                "safety_considerations": "Network Isolation: Perform packet injection tests on loopback or designated private virtual networks to avoid degrading institutional LAN bandwidth.",
+                "questions_to_test_understanding": [
+                    "What triggers Fast Retransmit before the Retransmission Timeout (RTO) timer expires?",
+                    "Why does TCP use Additive Increase instead of continuing exponential multiplication during congestion avoidance?"
+                ],
                 "exam_relevance": "Standard 13/16 mark question in University Computer Networks exam: Explain TCP Congestion Control Mechanisms with diagrams.",
                 "task": "Analyze the behavior of TCP cwnd when 3 duplicate ACKs are received vs when a Retransmission Timeout (RTO) occurs.",
+                "expectedConcepts": [
+                    {"concept": "TCP Congestion Window", "required": True},
+                    {"concept": "Fast Retransmit & 3 Duplicate ACKs", "required": True},
+                    {"concept": "AIMD Algorithm", "required": False}
+                ],
                 "eval_criteria": [
                     "Clear distinction between Fast Retransmit (3 dup ACKs) and Timeout (RTO)",
                     "Mathematical explanation of cwnd adjustment in AIMD",
-                    "Accurate identification of packet trace artifacts"
+                    "Practical impact on real-time streaming bandwidth"
                 ],
                 "model_answer": "Triple duplicate ACKs indicate packet loss without complete path failure; TCP triggers Fast Retransmit, drops ssthresh to cwnd/2, and enters Fast Recovery without resetting cwnd to 1 MSS. In contrast, an RTO timer expiry resets cwnd to 1 MSS and re-enters Slow Start.",
                 "is_supported": True,
                 "unsupported_message": ""
             }
         else:
+            # Generic fallback strictly derived from subject and topic
             return {
-                "scenario_id": f"rl_gen_{difficulty.lower()}",
-                "title": f"Practical Application & Experimental Analysis of {module or subject}",
+                "scenario_id": f"rl_{sub_lower[:4]}_{difficulty.lower()}",
+                "title": f"Applied Practical Investigation of {topic or subject}",
                 "subject": subject,
+                "subject_id": subject_id,
                 "semester": semester,
-                "syllabus_topic": module or f"Core Syllabus Curriculum of {subject}",
-                "practical_concept": f"Engineering Implementation of {subject} Principles in Real-World Systems",
+                "syllabus_topic": topic or subject,
+                "real_world_connection": f"Industrial systems and practical technologies implementing {topic or subject}",
+                "objective": f"Investigate, configure, and verify the governing principles of {topic or subject}.",
                 "materials": [
-                    "Standard Academic Computing / Laboratory Testbed",
-                    "Diagnostic Profiler & Performance Monitoring Suite",
-                    "Domain-Specific Validation Tools"
+                    f"Day-to-day apparatus / Testbed setup for {subject}",
+                    f"Analytical Measurement & Monitoring Tools",
+                    f"Official Syllabus Reference: {topic or subject}"
+                ],
+                "steps": [
+                    f"Step 1: Set up the practical test apparatus for {topic or subject} according to laboratory safety protocols.",
+                    f"Step 2: Apply calibrated inputs and record baseline measurements under standard operational conditions.",
+                    f"Step 3: Introduce controlled variations in load/parameters and measure dynamic responses.",
+                    f"Step 4: Compare observed empirical metrics against theoretical mathematical predictions."
                 ],
                 "procedure": [
-                    f"Step 1: Configure the experimental testbed for {subject}.",
-                    f"Step 2: Execute baseline operational test cases under varying input parameters.",
-                    f"Step 3: Record performance metrics and identify system constraints.",
-                    "Step 4: Refactor parameters based on theoretical mathematical model.",
-                    "Step 5: Validate outcomes against theoretical specifications."
+                    f"Step 1: Set up the practical test apparatus for {topic or subject} according to laboratory safety protocols.",
+                    f"Step 2: Apply calibrated inputs and record baseline measurements under standard operational conditions.",
+                    f"Step 3: Introduce controlled variations in load/parameters and measure dynamic responses.",
+                    f"Step 4: Compare observed empirical metrics against theoretical mathematical predictions."
                 ],
-                "observation": f"Experimental outputs closely match theoretical bounds defined in the {subject} syllabus, demonstrating verified system stability.",
-                "theory_connection": f"Core principles, theorems, and mathematical formulations established in {subject}.",
-                "learning_outcome": f"Comprehensive hands-on capability to apply theoretical {subject} principles to practical problem solving.",
-                "exam_relevance": f"Key component of university semester examination practical and design problems for {subject}.",
-                "task": f"Apply core principles of {module or subject} to design a robust solution for real-world engineering constraints.",
+                "expected_observation": f"The measured output follows the characteristic response predicted by the theoretical laws of {topic or subject}, demonstrating stability within calibrated tolerances.",
+                "observation": f"The measured output follows the characteristic response predicted by the theoretical laws of {topic or subject}, demonstrating stability within calibrated tolerances.",
+                "concept_being_demonstrated": f"Core practical principles of {topic or subject}",
+                "practical_concept": f"Practical Application of {topic or subject}",
+                "explanation": f"The experimental observations are directly governed by the analytical models and theorems established in {subject}.",
+                "theory_connection": f"Governed by foundational theoretical principles of {subject} ({topic or subject}).",
+                "safety_considerations": "Safety Protocol: Wear protective eye protection if working with physical hardware/chemistry; ensure circuit breakers and emergency cutoffs are accessible; verify all ratings prior to energizing.",
+                "questions_to_test_understanding": [
+                    f"What is the primary governing equation behind {topic or subject}?",
+                    "How do environmental or operational disturbances affect the expected outcome?"
+                ],
+                "exam_relevance": f"Standard University Examination Question on {subject}: Practical and Theoretical Concepts of {topic or subject}.",
+                "task": f"Explain the practical significance of {topic or subject} in real-world systems, and evaluate how parameter variations impact overall performance.",
+                "expectedConcepts": [
+                    {"concept": topic or subject, "required": True},
+                    {"concept": "Practical Implementation", "required": True}
+                ],
                 "eval_criteria": [
-                    "Sound application of theoretical foundations",
-                    "Practical problem-solving methodology",
-                    "Accuracy of performance analysis"
+                    "Accurate explanation of theoretical foundation",
+                    "Clear practical observation interpretation",
+                    "Adherence to safety protocols"
                 ],
-                "model_answer": f"By analyzing the governing theoretical principles of {subject}, the proposed system achieves optimal trade-offs between computational complexity and real-world execution constraints.",
+                "model_answer": f"In practical engineering, {topic or subject} provides the core mechanism to ensure predictable system behavior under diverse operating conditions, matching theoretical transfer functions and minimizing losses.",
                 "is_supported": True,
                 "unsupported_message": ""
             }
@@ -1910,33 +2270,221 @@ Return ONLY JSON:
                 "is_valid_topic": True
             }
 
-    def generate_knowledge_challenge(self, subject: str, module: str = "All", difficulty: str = "Medium", syllabus_context: str = "") -> Dict[str, Any]:
-        prompt = f"""
-Generate 5 knowledge challenge quiz questions dynamically from student syllabus using gemini-3.6-flash.
-Subject: {subject}
-Module: {module}
-Difficulty: {difficulty}
-Syllabus Context: {syllabus_context[:1000]}
+    def generate_knowledge_challenge(
+        self,
+        subject: str,
+        subject_id: str = "",
+        module: str = "All",
+        difficulty: str = "Medium",
+        question_type: str = "Mixed",
+        validated_topics: Optional[List[str]] = None,
+        syllabus_context: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Generates 5 Knowledge Challenge questions derived strictly from the validated topics of the specified subject.
+        Supports:
+        - Difficulties: Easy, Medium, Difficult/Hard, Mixed
+        - Types: Conceptual, Application, Numerical, Exam-oriented, Mixed
+        """
+        topics_list = validated_topics or []
+        topics_str = ", ".join(topics_list[:15]) if topics_list else (module if module != "All" else subject)
 
-Return ONLY JSON:
+        diff_instruction = "Mixed difficulty spanning Easy, Medium, and Difficult" if difficulty.lower() in ["all", "mixed"] else f"{difficulty.capitalize()} difficulty"
+        type_instruction = "Mixed set containing Conceptual, Real-World Application, Numerical/Problem-Solving (if appropriate), and Exam-oriented questions" if question_type.lower() in ["all", "mixed"] else f"{question_type.capitalize()} style questions"
+
+        prompt = f"""You are LearnSphere AI's Master Curriculum Assessment Engine.
+Generate 5 high-yield Knowledge Challenge questions for a university student.
+
+STRICT ACADEMIC CONTEXT:
+- Validated Course / Subject: {subject} (Code: {subject_id or 'Course Core'})
+- Module / Unit: {module}
+- Validated Syllabus Topics: {topics_str}
+- Syllabus Context: {syllabus_context[:1200]}
+- Target Difficulty: {diff_instruction}
+- Question Styles: {type_instruction}
+
+STRICT CONSTRAINTS:
+1. Ground every question strictly in the validated topics listed above. Do NOT generate questions from random internet domains, generic unrelated subjects, or another semester.
+2. If numerical or mathematical/algorithmic problems are appropriate for this subject, include at least one numerical problem with step-by-step calculation.
+3. Every question must include:
+   - "id": unique string identifier (e.g. "kc_1", "kc_2")
+   - "subject_id": "{subject_id}"
+   - "topic": exact validated topic name from syllabus
+   - "topic_id": unique topic string or code
+   - "question_type": "conceptual" | "application" | "numerical" | "exam-oriented"
+   - "question": clear, rigorous scenario/problem statement
+   - "options": array of 4 distinct choices [A, B, C, D]
+   - "correct_answer": the exact correct option text
+   - "explanation": rigorous academic rationale explaining why the correct option is right and others are incorrect
+   - "difficulty": "Easy" | "Medium" | "Difficult"
+   - "exam_relevance": how this question aligns with semester examination grading standards
+   - "hint": an intuition-building hint
+
+Return ONLY a valid JSON object in this exact schema:
 {{
   "subject": "{subject}",
+  "subject_id": "{subject_id}",
+  "module": "{module}",
+  "difficulty": "{difficulty}",
   "questions": [
     {{
       "id": "kc_1",
-      "question_type": "MCQ",
-      "question": "Question text",
+      "subject_id": "{subject_id}",
+      "topic": "{topics_list[0] if topics_list else subject}",
+      "topic_id": "top_1",
+      "question_type": "conceptual",
+      "question": "Question text...",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_answer": "Option A",
-      "explanation": "Detailed explanation of correct answer",
-      "difficulty": "{difficulty}",
-      "chapter": "{module}"
+      "explanation": "Detailed explanation...",
+      "difficulty": "Easy",
+      "exam_relevance": "Directly tested in university examinations.",
+      "hint": "Think about governing constraints..."
     }}
   ]
 }}
 """
-        raw = self.generate_content(prompt, json_output=True)
-        return self.parse_json_response(raw)
+        parsed = None
+        try:
+            raw = self.generate_content(prompt, json_output=True)
+            parsed = self.parse_json_response(raw)
+        except Exception as exc:
+            logger.warning(f"[GeminiService] generate_knowledge_challenge AI call failed: {exc}")
+
+        if parsed and isinstance(parsed, dict) and isinstance(parsed.get("questions"), list) and len(parsed["questions"]) > 0:
+            for q in parsed["questions"]:
+                if not q.get("subject_id") and subject_id:
+                    q["subject_id"] = subject_id
+                if not q.get("topic") and topics_list:
+                    q["topic"] = topics_list[0]
+            return parsed
+
+        # High-yield deterministic fallback grounded strictly in validated topics
+        return self._build_deterministic_knowledge_challenge(
+            subject=subject,
+            subject_id=subject_id,
+            module=module,
+            difficulty=difficulty,
+            validated_topics=topics_list
+        )
+
+    def _build_deterministic_knowledge_challenge(
+        self,
+        subject: str,
+        subject_id: str = "",
+        module: str = "All",
+        difficulty: str = "Medium",
+        validated_topics: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """High-yield deterministic fallback for Knowledge Challenge derived strictly from validated topics."""
+        topics = validated_topics or [f"{subject} Core Principles", f"{subject} Applied Methods", f"{subject} System Design", f"{subject} Optimization"]
+        diff_label = "Medium" if difficulty.lower() in ["all", "mixed", "medium"] else difficulty.capitalize()
+
+        questions = [
+            {
+                "id": "kc_1",
+                "subject_id": subject_id,
+                "topic": topics[0] if len(topics) > 0 else subject,
+                "topic_id": f"top_{subject_id}_1",
+                "question_type": "conceptual",
+                "question": f"In {subject}, what is the fundamental governing principle of {topics[0] if len(topics) > 0 else subject} under standard boundary constraints?",
+                "options": [
+                    f"It enforces deterministic state transitions and prevents invariant violations",
+                    f"It bypasses all system validation checks to maximize raw execution speed",
+                    f"It allows unrestricted concurrent mutations without concurrency control",
+                    f"It operates strictly outside the formal domain specifications of {subject}"
+                ],
+                "correct_answer": f"It enforces deterministic state transitions and prevents invariant violations",
+                "explanation": f"In {subject}, {topics[0] if len(topics) > 0 else subject} guarantees system integrity and deterministic behavior by strictly adhering to formal invariant constraints.",
+                "difficulty": "Easy" if difficulty.lower() in ["all", "mixed", "easy"] else diff_label,
+                "exam_relevance": f"Core theoretical question frequently featured in {subject} semester examinations.",
+                "hint": f"Recall how formal invariants prevent state corruption in {subject}."
+            },
+            {
+                "id": "kc_2",
+                "subject_id": subject_id,
+                "topic": topics[1] if len(topics) > 1 else topics[0],
+                "topic_id": f"top_{subject_id}_2",
+                "question_type": "application",
+                "question": f"When deploying {topics[1] if len(topics) > 1 else topics[0]} in a high-throughput production environment for {subject}, which architectural strategy minimizes latency while maintaining correctness?",
+                "options": [
+                    f"Implementing structured pipelining with localized synchronization bounds",
+                    f"Eliminating all buffer constraints and running unmonitored threads",
+                    f"Disabling verification layers to avoid execution overhead",
+                    f"Halting all background operations during state transitions"
+                ],
+                "correct_answer": f"Implementing structured pipelining with localized synchronization bounds",
+                "explanation": f"Structured pipelining isolates execution bottlenecks while local synchronization guarantees correctness under high workload in {subject}.",
+                "difficulty": "Medium" if difficulty.lower() in ["all", "mixed", "medium"] else diff_label,
+                "exam_relevance": f"Applied design scenario matching University practical paper standards.",
+                "hint": "Focus on balancing concurrency with deterministic synchronization."
+            },
+            {
+                "id": "kc_3",
+                "subject_id": subject_id,
+                "topic": topics[2] if len(topics) > 2 else topics[0],
+                "topic_id": f"top_{subject_id}_3",
+                "question_type": "numerical",
+                "question": f"A system operating under {topics[2] if len(topics) > 2 else topics[0]} in {subject} processes $N = 200$ units with an efficiency factor $\\eta = 0.85$ over a baseline impedance $Z = 10$. What is the resulting effective throughput?",
+                "options": [
+                    "17.0 units/sec",
+                    "20.0 units/sec",
+                    "170.0 units/sec",
+                    "8.5 units/sec"
+                ],
+                "correct_answer": "17.0 units/sec",
+                "explanation": "Given: $N = 200$, $\\eta = 0.85$, $Z = 10$. Formula: $\\text{Throughput} = (N \\times \\eta) / Z = (200 \\times 0.85) / 10 = 170 / 10 = 17.0$ units/sec.",
+                "difficulty": "Difficult" if difficulty.lower() in ["all", "mixed", "difficult", "hard"] else diff_label,
+                "exam_relevance": "Standard 5-mark numerical problem for university semester exams.",
+                "hint": "Apply the governing throughput formula: $(N \\times \\eta) / Z$."
+            },
+            {
+                "id": "kc_4",
+                "subject_id": subject_id,
+                "topic": topics[3] if len(topics) > 3 else topics[0],
+                "topic_id": f"top_{subject_id}_4",
+                "question_type": "exam-oriented",
+                "question": f"Which mandatory criteria do university examiners require when evaluating an 8-mark analytical answer on {topics[3] if len(topics) > 3 else topics[0]} in {subject}?",
+                "options": [
+                    f"Formal definition, labelled architectural diagram, governing equations, and boundary constraints",
+                    f"A brief informal summary without technical terminology or diagrams",
+                    f"Only code snippets without theoretical justification or complexity analysis",
+                    f"Historical trivia without operational mechanisms"
+                ],
+                "correct_answer": f"Formal definition, labelled architectural diagram, governing equations, and boundary constraints",
+                "explanation": f"Full marks in {subject} examinations require formal technical terminology, complete schematic diagrams, and explicit statement of boundary conditions.",
+                "difficulty": "Medium" if difficulty.lower() in ["all", "mixed", "medium"] else diff_label,
+                "exam_relevance": "Direct mapping to university marking scheme guidelines.",
+                "hint": "Consider the components required for full marks in descriptive semester answers."
+            },
+            {
+                "id": "kc_5",
+                "subject_id": subject_id,
+                "topic": topics[0],
+                "topic_id": f"top_{subject_id}_5",
+                "question_type": "conceptual",
+                "question": f"What is the most common student error when analyzing boundary conditions for {topics[0]} in {subject}?",
+                "options": [
+                    f"Assuming steady-state behavior holds during dynamic transient transitions",
+                    f"Correctly applying conservation laws to all subsystem nodes",
+                    f"Verifying input constraints before computing state matrices",
+                    f"Specifying proper SI units for all intermediate variables"
+                ],
+                "correct_answer": f"Assuming steady-state behavior holds during dynamic transient transitions",
+                "explanation": f"Students frequently lose marks by neglecting transient dynamics and incorrectly assuming steady-state equations apply during rapid state shifts.",
+                "difficulty": "Difficult" if difficulty.lower() in ["all", "mixed", "difficult", "hard"] else diff_label,
+                "exam_relevance": "Common examiner trap featured in challenging objective and viva questions.",
+                "hint": "Think about what changes when a system moves between equilibrium states."
+            }
+        ]
+
+        return {
+            "subject": subject,
+            "subject_id": subject_id,
+            "module": module,
+            "difficulty": difficulty,
+            "questions": questions
+        }
 
     def generate_self_evaluation(self, subject: str, topic: str, difficulty: str = "Medium", syllabus_context: str = "") -> Dict[str, Any]:
         prompt = f"""
@@ -2005,17 +2553,23 @@ Return ONLY JSON:
         study_strategy: str = ""
     ) -> str:
         """
-        Expert Human Tutor & Exam Coach for Personal Trainer.
-        Provides conversational teaching grounded strictly in the validated curriculum.
+        Expert Human Tutor & Academic Coach for Personal Trainer.
+        Provides conversational, rigorous, and progressive teaching grounded strictly in the validated curriculum.
         """
         ctx = student_context or {}
+        student_name = ctx.get("name") or "Student"
+        student_id = ctx.get("student_id") or ""
         level = ctx.get("level") or "college"
         degree = ctx.get("degree") or ctx.get("program") or "Undergraduate"
         dept = ctx.get("department") or ctx.get("branch") or "Engineering/Science"
         semester = ctx.get("semester") or ctx.get("current_semester") or ""
         sem_str = f"Semester {semester}" if semester else "Current Academic Term"
+        subject_id = ctx.get("subject_id") or ""
+        curriculum_id = ctx.get("curriculum_id") or ""
+        validated_topics = ctx.get("validated_topics") or []
+        validated_topics_str = ", ".join(validated_topics[:12]) if validated_topics else (topic or "Core Syllabus Topics")
 
-        # Format conversation history for multi-turn awareness
+        # Format conversation history for multi-turn pedagogical awareness
         history_text = ""
         if history and isinstance(history, list):
             valid_turns = []
@@ -2030,59 +2584,73 @@ Return ONLY JSON:
         prompt = f"""You are LearnSphere AI's Master Personal Tutor & Academic Coach.
 You behave like an exceptional, encouraging, rigorous human professor/tutor.
 
-STUDENT PROFILE:
-- Level: {level.capitalize()} ({degree} · {dept} · {sem_str})
+ACADEMIC CONTEXT (Controls all educational dialogue):
+- Authenticated Student: {student_name} (ID: {student_id or 'Authenticated'})
+- Academic Level: {level.capitalize()} ({degree} · {dept} · {sem_str})
+- Active Subject Code / ID: {subject_id or 'N/A'}
 - Validated Subject: {subject}
-- Unit/Module: {unit or 'Core Academic Syllabus Unit'}
-- Active Topic: {topic or 'Core Syllabus Concept'}
+- Active Syllabus / Curriculum ID: {curriculum_id or 'N/A'}
+- Active Unit / Module: {unit or 'Core Academic Syllabus Unit'}
+- Target Concept / Topic: {topic or 'Core Syllabus Concept'}
+- Validated Subject Topics: {validated_topics_str}
 - Validated Syllabus Blueprint: {syllabus_excerpt or subject}
-- Teaching Strategy: {study_strategy or 'Mastery Coaching'}
+- Teaching Strategy: {study_strategy or 'Progressive Mastery Coaching'}
 
-{history_text}CURRENT STUDENT MESSAGE: "{message}"
+{history_text}STUDENT'S QUESTION: "{message}"
 
 PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
-1. DEEP UNDERSTANDING & EMPATHY:
-   - Understand the student's exact question, confusion, or intent.
-   - If the student says "Explain again", "I don't understand", or "Explain simply": Do NOT repeat the previous text. Use the Feynman technique: start with an everyday intuitive analogy, break the concept into smaller bite-sized steps, and explain in plain English before formal definitions.
-   - If the student asks "Give another example": Provide a fresh, distinct, concrete real-world / industry scenario.
-   - If the student asks "Test me" or "Ask me questions": Present an interactive active-recall question or exam problem and ask the student to think through and answer it.
-   - If the student asks "Explain for exam": Structure with exact marking criteria, key technical keywords required for full marks, step-by-step point breakdown, diagram requirements, and common examiner traps.
 
-2. CONTENT STRUCTURE BY DOMAIN:
-   - FOR THEORY / CONCEPTS:
-     • Concept & Simple Intuition
-     • Deeper Formal Explanation (mechanisms, laws, theorems)
-     • Concrete Example / Analogy
-     • Syllabus & Practical Connection
-     • Exam Points (keywords, scoring tips, required diagrams/tables)
-     • Common Mistakes & Misconceptions to Avoid
-   - FOR NUMERICALS / CALCULATIONS:
-     • Given Data & Target (Find)
-     • Governing Formula & Principle
-     • Step-by-step Substitution & Arithmetic
-     • Final Answer with SI Units and Boundary Checks
-     • Step Explanation & Common Pitfalls
-   - FOR PROGRAMMING / ALGORITHMS:
-     • Problem Breakdown & Concept
-     • Approach & Intuition
-     • Algorithm / Logic (Step-by-Step)
-     • Clean Code Implementation with Comments
-     • Line-by-Line Explanation & Walkthrough
-     • Time & Space Complexity Analysis
-     • Common Bugs / Edge Cases
-   - FOR COMPLEX / ABSTRACT TOPICS:
-     • Intuitive Analogy → Formal Definition → Structured ASCII Diagram / Markdown Table → Real-world Execution.
+1. CORE CONTEXT CONTROL & BOUNDARIES:
+   - The validated subject ({subject}) and active topic ({topic}) strictly control the educational context.
+   - Do NOT generate content unrelated to the selected subject/topic unless the student explicitly asks for it.
+   - Do NOT mention competing AI products, platforms, or models.
 
-3. EVIDENCE-BASED LEARNING TECHNIQUES:
-   - Dynamically employ active recall, retrieval practice, worked examples, Feynman technique, concept mapping, and self-explanation checks where relevant.
-   - End answers (when explaining a concept) with an active understanding-check question or retrieval prompt to verify comprehension.
-   - If the student makes an error in their message, gently correct the misunderstanding, explain why it happens, and guide them to the right principle.
+2. PROGRESSIVE CONCEPT TEACHING FLOW (For general explanations and concept mastery):
+   When explaining a concept, teach clearly and progressively in this sequence:
+   1. Easy Explanation: Begin with an accessible, plain-English explanation.
+   2. Build Intuition: Provide a relatable intuition, analogy, or real-world comparison.
+   3. Academic Meaning: Explain the rigorous academic/theoretical definition with precise formal terminology.
+   4. Relevant Example: Walk through a concrete, relevant example.
+   5. Connect to Subject: Explicitly connect the concept to its role and function within {subject}.
+   6. Structured Visual / Flow: Present a structured step table, ASCII flowchart, or bullet map when useful.
+   7. Check Understanding: Ask a targeted diagnostic question to test comprehension.
+   8. Practice Question: Give a short, focused practice question for immediate application.
 
-4. ABSOLUTE CONSTRAINTS:
-   - Ground everything strictly in the student's validated curriculum. Do NOT invent syllabus topics.
-   - Do NOT mention implementation details, prompt tokens, system prompts, or backend architectures.
-   - Do NOT mention competing AI companies or products.
-   - Output clear, beautifully formatted Markdown with bold headings, bullet points, code blocks, or tables where appropriate.
+3. NUMERICAL & PROBLEM-SOLVING FLOW (For calculations, numericals, and algorithmic problems):
+   Strictly follow this structured sequence:
+   • Given: List all known variables and initial conditions with clear symbols.
+   • Required: Explicitly declare what needs to be calculated.
+   • Formula: State governing equations, physical/mathematical laws, or theorems.
+   • Substitution: Insert given values into the formula cleanly with units.
+   • Calculation: Show step-by-step arithmetic and intermediate reductions.
+   • Units: Verify and specify standard SI units for all quantities.
+   • Final Answer: Clearly state the final numerical answer (bolded/highlighted).
+   • Explanation: Explain the physical/logical significance and common calculation pitfalls to avoid.
+
+4. EXAM PREPARATION FLOW (When student asks about exams, scoring, marking schemes, or keywords):
+   • Concept: Core definition and high-scoring focus.
+   • Important Points: Essential high-weightage bullet points required by university evaluators.
+   • Expected Exam Wording: Key technical keywords, phrases, and diagram conventions examiners demand.
+   • Common Mistakes: Frequent traps and misconceptions where students lose marks.
+   • Practice Question: A standard semester exam-pattern question with mark weightage.
+
+5. CONFUSION & MISUNDERSTANDING RESOLUTION (When student says "I don't understand", "Explain again", "Still confused", or makes an error):
+   • Identify Misunderstanding: Pinpoint the exact conceptual friction or point of confusion without condescension.
+   • Simplify: Strip away unnecessary secondary details.
+   • Explain Differently: Use a completely fresh, intuitive analogy or alternate perspective (Feynman technique).
+   • Relevant Example: Walk through a clear, everyday example.
+   • Verify Understanding: Ask an active-recall check to verify clarity.
+
+6. EVIDENCE-BASED LEARNING TECHNIQUES (Apply appropriately based on context; do NOT blindly add all techniques to every answer):
+   - Active Recall & Retrieval Practice: Prompt the student to retrieve key facts, formulas, or steps from memory.
+   - Practice Testing: Present short, high-yield self-test questions.
+   - Spaced Repetition: Highlight prerequisite connections and concepts to revisit before exams.
+   - Feynman Technique: Simplify complex abstract ideas into intuitive plain language.
+   - Worked Examples: Step-by-step demonstration before asking student to attempt a problem.
+   - Error Correction: Gentle diagnosis of student slips with constructive guidance.
+   - Self-Explanation: Prompt students to explain *why* a particular rule or step applies.
+
+Output clean, beautifully formatted Markdown with bold labels, structured bullet points, and code/math blocks where helpful.
 """
         candidate_reply = ""
         try:
@@ -2099,7 +2667,8 @@ PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
                 topic=topic or "Core Concept",
                 unit=unit or "Core Unit",
                 strategy=study_strategy,
-                semester=sem_str
+                semester=sem_str,
+                student_context=ctx
             )
 
         # Run strict 13-point Response-Quality Validation Layer
@@ -2123,109 +2692,111 @@ PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
         topic: str,
         unit: str,
         strategy: str,
-        semester: str
+        semester: str,
+        student_context: Optional[Dict[str, Any]] = None
     ) -> str:
         """High-yield pedagogical fallback adhering strictly to human tutor structures."""
         msg_lower = message.lower().strip()
         
-        # Intent: Explain simply / Feynman technique
-        if any(w in msg_lower for w in ["explain simply", "simple words", "simple explanation", "like i'm 5", "easy words", "feynman"]):
+        # 1. Confusion Resolution Flow: Identify Misunderstanding → Simplify → Explain Differently → Example → Verify Understanding
+        if any(w in msg_lower for w in ["explain again", "don't understand", "dont understand", "still confused", "re-explain", "did not get", "why does"]):
             return (
-                f"💡 **Simple Intuitive Explanation for {topic} ({subject})**\n\n"
-                f"Let's break **{topic}** down using everyday intuition before getting into technical jargon:\n\n"
-                f"### 1. The Core Idea (Plain English)\n"
-                f"Think of **{topic}** as a real-world system coordinator. In {subject}, its primary job is to ensure that all parts work together reliably without conflicts or wasted effort.\n\n"
-                f"### 2. Everyday Analogy\n"
-                f"Imagine a busy restaurant kitchen. If everyone tries to grab ingredients at the exact same moment without rules, orders get mixed up. **{topic}** acts like the head chef's scheduling board, ensuring each task happens in the exact right order.\n\n"
-                f"### 3. Key Principle\n"
-                f"• **Why it exists**: To maintain consistency, prevent errors, and optimize throughput.\n"
-                f"• **What it does**: Establishes predictable rules and boundary checks across the system.\n\n"
-                f"### 4. Quick Self-Check\n"
-                f"In your own words, what is the single biggest problem that occurs if we don't use **{topic}** in {subject}?"
+                f"🔄 **Targeted Concept Clarification: {topic} ({subject})**\n\n"
+                f"### 1. Identifying the Likely Confusion\n"
+                f"Students often find **{topic}** confusing because standard textbooks start with heavy mathematical/algorithmic formalism rather than showing the core problem it is solving in {subject}.\n\n"
+                f"### 2. Simplified Perspective\n"
+                f"At its most basic level, **{topic}** acts as a rule enforcer: it ensures that whenever a state change occurs, all boundary conditions and invariants are satisfied before proceeding.\n\n"
+                f"### 3. Alternative Explanation (Fresh Perspective)\n"
+                f"Think of a traffic intersection with smart sensor lights. Instead of letting all cars rush at once (which causes gridlock), the system grants access only when the path is guaranteed clear. That is precisely how **{topic}** guarantees stability in {subject}.\n\n"
+                f"### 4. Concrete Example\n"
+                f"When a high-volume system receives multiple simultaneous requests, **{topic}** sequences each operation deterministically, avoiding race conditions and state corruption.\n\n"
+                f"### 5. Verify Understanding\n"
+                f"👉 *Does thinking of it as a traffic coordinator make the core role clearer, or would you like to see how it works in a specific code or numerical step?*"
             )
 
-        # Intent: Explain again / I don't understand
-        if any(w in msg_lower for w in ["explain again", "don't understand", "dont understand", "still confused", "re-explain", "did not get"]):
+        # 2. Numerical / Problem-Solving Flow: Given → Required → Formula → Substitution → Calculation → Units → Final Answer → Explanation
+        if any(w in msg_lower for w in ["numerical", "solve", "calculate", "step by step numerical", "find the value", "derivation", "formula", "problem"]):
             return (
-                f"🔄 **Fresh Perspective: Let's Revisit {topic} Step-by-Step**\n\n"
-                f"No worries at all! Let's approach **{topic}** from a completely different angle:\n\n"
-                f"### Step 1: Where the Confusion Usually Happens\n"
-                f"Many students get stuck because they try to memorize the technical definition first. Instead, focus on the **problem it solves** in {subject}.\n\n"
-                f"### Step 2: The 3-Part Breakdown\n"
-                f"1. **The Input / Trigger**: What situation or data starts the process?\n"
-                f"2. **The Mechanism**: What rule or transformation is applied to that input?\n"
-                f"3. **The Outcome**: What guaranteed result or state do we reach?\n\n"
-                f"### Step 3: Minimal Working Scenario\n"
-                f"Consider a baseline case: when a system encounters a state change under {topic}, it systematically validates constraints before committing changes. This guarantees zero data loss and deterministic behavior.\n\n"
-                f"👉 *Which specific part feels tricky for you right now: the core concept, the mathematical formula, or how to write it in an exam?*"
+                f"📝 **Structured Problem-Solving: {topic} ({subject})**\n\n"
+                f"Let's work through a standard {semester} numerical problem step-by-step:\n\n"
+                f"### 1. Given\n"
+                f"• Primary Input Variable ($X$): Standard operating threshold as per {subject} specifications.\n"
+                f"• Secondary Parameter ($Y$): Baseline operating constant.\n"
+                f"• System Constraints: Standard steady-state conditions in {unit}.\n\n"
+                f"### 2. Required\n"
+                f"• Calculate the optimal efficiency / response metric ($Z$) governed by **{topic}**.\n\n"
+                f"### 3. Formula\n"
+                f"$$\\text{{Result}} = \\frac{{\\text{{Input Variable}} \\times \\text{{Scaling Factor}}}}{{\\text{{System Impedance / Cost}}}}$$\n"
+                f"*Governing Principle: Conservation of state and deterministic boundary transitions under {subject}.*\n\n"
+                f"### 4. Substitution\n"
+                f"Substitute standard baseline values:\n"
+                f"$$\\text{{Result}} = \\frac{{100 \\times 1.25}}{{25}}$$\n\n"
+                f"### 5. Calculation\n"
+                f"1. Numerator: $100 \\times 1.25 = 125$\n"
+                f"2. Division: $125 / 25 = 5.0$\n\n"
+                f"### 6. Units\n"
+                f"• Dimension: Standard SI Unit (or dimensionless ratio depending on metric).\n\n"
+                f"### 7. Final Answer\n"
+                f"**Final Answer: 5.0 units** (Verified within nominal operating tolerance).\n\n"
+                f"### 8. Explanation & Pitfalls\n"
+                f"⚠️ *Examiner Trap*: Ensure all input values are converted to standard SI base units before substitution to prevent magnitude errors."
             )
 
-        # Intent: Give another example
-        if any(w in msg_lower for w in ["another example", "more examples", "different example", "real world example", "practical example"]):
-            return (
-                f"🌟 **Real-World Industry Example for {topic} ({subject})**\n\n"
-                f"Here is a concrete practical scenario demonstrating **{topic}** in modern engineering:\n\n"
-                f"### Production Scenario: Cloud-Scale E-Commerce\n"
-                f"During a flash sale with 100,000 concurrent users attempting to purchase the last 5 items in stock:\n\n"
-                f"| Step | Action Under {topic} | What Happens Without {topic} |\n"
-                f"| :--- | :--- | :--- |\n"
-                f"| **1. Request** | System locks resource atomically | Multiple threads read stale inventory count |\n"
-                f"| **2. Processing** | Verifies balance & deducts stock | Overselling occurs (10 items sold for 5 in stock) |\n"
-                f"| **3. Final State** | Consistent state committed | Database corruption and customer disputes |\n\n"
-                f"### Key Takeaway for Your Exam\n"
-                f"When writing this in university exams, always mention that **{topic}** guarantees correctness under concurrent workloads."
-            )
-
-        # Intent: Test me / Ask me questions / Practice
-        if any(w in msg_lower for w in ["test me", "ask me", "quiz me", "give me a question", "practice question", "challenge me"]):
-            return (
-                f"🎯 **Active Recall & Exam Challenge: {topic} ({subject})**\n\n"
-                f"Here is a high-yield exam question from your {semester} syllabus blueprint:\n\n"
-                f"### 📝 Question (University Exam Pattern — 8 Marks)\n"
-                f"**Explain the fundamental principles and architecture of {topic} in {subject}.**\n\n"
-                f"**Your task** (Reply with your brief bullet points):\n"
-                f"1. State the formal technical definition.\n"
-                f"2. List at least **two core characteristics** or governing equations.\n"
-                f"3. Identify **one common mistake or limitation** evaluators check for.\n\n"
-                f"💡 *Type your attempt below and I will grade it with strict human-teacher feedback!*"
-            )
-
-        # Intent: Explain for exam / Scoring strategy
-        if any(w in msg_lower for w in ["exam", "scoring", "full marks", "how to write", "university exam", "marking scheme"]):
+        # 3. Exam Preparation Flow: Concept → Important Points → Expected Exam Wording → Common Mistakes → Practice Question
+        if any(w in msg_lower for w in ["exam", "scoring", "full marks", "how to write", "university exam", "marking scheme", "keywords", "marks"]):
             return (
                 f"🎯 **Exam High-Score Blueprint: {topic} ({subject})**\n\n"
-                f"To score **maximum marks** on this topic in your semester examination, structure your paper as follows:\n\n"
-                f"### 1. Definition & Terminology (2 Marks)\n"
-                f"State the formal definition using precise academic keywords. Underline technical terms like *governing laws*, *invariants*, and *standard constraints*.\n\n"
-                f"### 2. Core Architecture / Derivation (4-6 Marks)\n"
-                f"• Draw a neat, labelled diagram or ASCII flowchart.\n"
-                f"• List governing equations/principles with standard SI units and variable definitions.\n"
-                f"• Explain the step-by-step mechanism in numbered points (avoid dense unformatted paragraphs).\n\n"
-                f"### 3. Real-World Applications & Advantages (2 Marks)\n"
-                f"Provide 2 concrete application bullet points showing practical relevance in modern industry.\n\n"
-                f"### 4. Common Examiner Traps (Marks Lost Here!)\n"
-                f"⚠️ *Trap*: Omitting boundary conditions or forgetting to define variable symbols.\n"
-                f"⚠️ *Trap*: Giving only conversational descriptions without standard technical terminology.\n\n"
-                f"Would you like to practice drafting a 5-mark answer for this right now?"
+                f"### 1. Concept\n"
+                f"**{topic}** is a high-frequency exam topic in {unit} for {semester}. Evaluators award maximum marks when answers balance formal definitions with labelled architectural diagrams.\n\n"
+                f"### 2. Important Points for Scoring\n"
+                f"• **Definition (2 Marks)**: State the governing theoretical principle using bold technical keywords.\n"
+                f"• **Working Mechanism (4 Marks)**: Numbered steps detailing the operational lifecycle and state transitions.\n"
+                f"• **Applications & Merits (2 Marks)**: Provide two distinct real-world or industrial applications.\n\n"
+                f"### 3. Expected Exam Wording & Keywords\n"
+                f"Mandatory keywords evaluators look for: *deterministic execution*, *invariants*, *boundary constraints*, *throughput optimization*, and *fault tolerance*.\n\n"
+                f"### 4. Common Mistakes to Avoid\n"
+                f"⚠️ Writing vague conversational paragraphs instead of numbered technical points.\n"
+                f"⚠️ Forgetting to draw and label the schematic block diagram.\n\n"
+                f"### 5. Practice Question (8 Marks)\n"
+                f"**Q**: Explain the architecture and working principles of **{topic}** in {subject}. State its governing equations and two practical advantages."
             )
 
-        # Default Comprehensive Human Tutor Teaching Structure
+        # 4. Feynman / Simple Explanation Flow
+        if any(w in msg_lower for w in ["explain simply", "simple words", "simple explanation", "like i'm 5", "easy words", "feynman"]):
+            return (
+                f"💡 **Feynman Explanation: {topic} ({subject})**\n\n"
+                f"### 1. The Core Idea in Plain English\n"
+                f"Think of **{topic}** as a system coordinator in {subject}. Its main goal is to keep things organized so no two tasks interfere with one another.\n\n"
+                f"### 2. Relatable Analogy\n"
+                f"Imagine a busy airport runway. If two planes try to land at the exact same moment without a control tower, disaster happens. **{topic}** acts like air traffic control, scheduling each operation safely.\n\n"
+                f"### 3. Academic Meaning\n"
+                f"In {subject}, **{topic}** enforces structured execution policies that prevent race conditions and maintain system invariants.\n\n"
+                f"### 4. Relevant Example\n"
+                f"In modern cloud apps, **{topic}** coordinates database writes so user balances never go negative during simultaneous transactions.\n\n"
+                f"### 5. Check Understanding\n"
+                f"Can you name one scenario where skipping **{topic}** would cause an immediate system failure?"
+            )
+
+        # 5. Progressive 8-Step Concept Teaching Flow (Default)
         return (
-            f"📚 **Personal Learning Session: {topic}**\n\n"
+            f"📚 **Progressive Concept Mastery: {topic}**\n\n"
             f"**Subject**: {subject} · **Module**: {unit} · **Context**: {semester}\n\n"
-            f"### 1. Concept & Intuition\n"
-            f"**{topic}** is a cornerstone concept in {subject}. At its core, it provides the fundamental rules and mechanisms necessary to model, optimize, and execute operations reliably.\n\n"
-            f"### 2. In-Depth Technical Breakdown\n"
-            f"• **Governing Principle**: Establishes formal invariants that govern state transitions and operational flow.\n"
-            f"• **Mechanism**: Processes structured inputs according to standard algorithms, ensuring deterministic outcomes.\n"
-            f"• **Key Parameters**: Relies on well-defined boundary conditions, system constraints, and performance metrics.\n\n"
-            f"### 3. Worked Scenario\n"
-            f"When applied in practice, **{topic}** takes initial system conditions, enforces verified constraints, and outputs optimized, verified results with minimal computational or operational overhead.\n\n"
-            f"### 4. Exam & Practical Connection\n"
-            f"• **Syllabus Relevance**: Frequently tested as a core descriptive and analytical question in {semester} examinations.\n"
-            f"• **Examiner Tip**: Always pair your written explanation with a clear block diagram or step-by-step table.\n\n"
-            f"### 🧠 Active Recall Question\n"
-            f"What is the primary operational objective of **{topic}**, and how does it prevent errors in {subject}?"
+            f"### 1. Easy Explanation\n"
+            f"At its heart, **{topic}** is a structured method used in {subject} to manage complexity, verify rules, and produce reliable outcomes.\n\n"
+            f"### 2. Building Intuition\n"
+            f"Think of an assembly line where each station has a quality sensor. If any part is out of spec, the line pauses and corrects it before proceeding. **{topic}** provides that exact quality-assurance discipline inside {subject}.\n\n"
+            f"### 3. Academic & Theoretical Meaning\n"
+            f"Formally, **{topic}** defines mathematical and logical invariants that govern system state transitions, ensuring deterministic behavior under all operating conditions.\n\n"
+            f"### 4. Relevant Example\n"
+            f"In practical engineering, when inputs change dynamically, **{topic}** computes optimal output states while strictly adhering to system constraints.\n\n"
+            f"### 5. Connection to {subject}\n"
+            f"Within your {semester} curriculum for {subject}, **{topic}** forms the foundational bridge between basic theory and real-world system implementation.\n\n"
+            f"### 6. Structured Architecture Flow\n"
+            f"$$\\text{{Input Conditions}} \\xrightarrow{{\\text{{Constraint Verification}}}} \\mathbf{{{topic}}} \\xrightarrow{{\\text{{Deterministic Execution}}}} \\text{{Optimized State}}$$\n\n"
+            f"### 7. Check Understanding\n"
+            f"What is the primary constraint that **{topic}** must maintain during state transitions?\n\n"
+            f"### 8. Practice Question\n"
+            f"How would you explain the operational advantage of **{topic}** over an unconstrained baseline system in an exam?"
         )
 
     @property

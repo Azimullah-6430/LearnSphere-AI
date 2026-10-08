@@ -307,20 +307,136 @@ def _lookup_user_by_id(user_id: str):
     return None
 
 
-def _get_authoritative_curriculum(user_id: str, user: dict = None) -> dict | None:
+def _normalize_curriculum_doc(doc: dict, user_id: str, user: dict = None) -> dict:
+    """
+    Standardize the validated curriculum schema consumed identically by:
+    1. Personal Trainer
+    2. Knowledge Challenge
+    3. Reality Lab
+    4. Active Curriculum API (/api/curriculum/active)
+    """
+    d = dict(doc)
+    syl_id = str(d.get("syllabus_id") or d.get("syllabusId") or d.get("_id") or "")
+    d["syllabus_id"] = syl_id
+    d["syllabusId"] = syl_id
+    d["curriculum_id"] = syl_id
+    d["curriculumId"] = syl_id
+    d["student_id"] = str(user_id)
+    d["studentId"] = str(user_id)
+    d["curriculumStatus"] = "VALID"
+    d["validation_status"] = "VALID"
+    d["validationStatus"] = "VALID"
+    d["status"] = "VALID"
+    d["is_valid"] = True
+    d["is_active"] = True
+
+    # Normalize chapters / units
+    chapters_dict = d.get("chapters") or d.get("units") or {}
+    if isinstance(chapters_dict, str):
+        try:
+            chapters_dict = json.loads(chapters_dict)
+        except Exception:
+            chapters_dict = {}
+
+    # Normalize subjects
+    raw_subjects = d.get("subjects") or []
+    if isinstance(raw_subjects, str):
+        try:
+            raw_subjects = json.loads(raw_subjects)
+        except Exception:
+            raw_subjects = []
+
+    normalized_subjects = []
+    all_topics = []
+
+    for idx, s in enumerate(raw_subjects):
+        if isinstance(s, dict):
+            s_name = str(s.get("name") or "").strip()
+            s_code = str(s.get("code") or s.get("subject_id") or s.get("subjectId") or s.get("id") or f"SUB{idx+1:02d}").strip()
+            s_id = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s_code).strip()
+            s_topics = list(s.get("topics") or [])
+            s_units = list(s.get("units") or [])
+
+            # Pull topics from chapters_dict if available
+            if s_name in chapters_dict:
+                sub_chaps = chapters_dict[s_name]
+                if isinstance(sub_chaps, list):
+                    for u in sub_chaps:
+                        if isinstance(u, dict):
+                            if u.get("name"):
+                                s_topics.append(u["name"])
+                            if isinstance(u.get("concepts"), list):
+                                s_topics.extend(u["concepts"])
+                        elif isinstance(u, str):
+                            s_topics.append(u)
+
+            deduped_topics = list(dict.fromkeys(s_topics))
+            normalized_subjects.append({
+                "id": s_id,
+                "subject_id": s_id,
+                "subjectId": s_id,
+                "code": s_code,
+                "name": s_name,
+                "topics": deduped_topics,
+                "units": s_units or (chapters_dict.get(s_name) if isinstance(chapters_dict.get(s_name), list) else []),
+                "type": s.get("type") or s.get("category") or "Core Theory",
+                "credits": s.get("credits")
+            })
+            all_topics.extend(deduped_topics)
+        elif isinstance(s, str) and s.strip():
+            s_name = s.strip()
+            s_code = f"SUB{idx+1:02d}"
+            s_topics = []
+            if s_name in chapters_dict:
+                sub_chaps = chapters_dict[s_name]
+                if isinstance(sub_chaps, list):
+                    for u in sub_chaps:
+                        if isinstance(u, dict):
+                            if u.get("name"):
+                                s_topics.append(u["name"])
+                            if isinstance(u.get("concepts"), list):
+                                s_topics.extend(u["concepts"])
+                        elif isinstance(u, str):
+                            s_topics.append(u)
+            deduped_topics = list(dict.fromkeys(s_topics))
+            normalized_subjects.append({
+                "id": s_code,
+                "subject_id": s_code,
+                "subjectId": s_code,
+                "code": s_code,
+                "name": s_name,
+                "topics": deduped_topics,
+                "units": chapters_dict.get(s_name) if isinstance(chapters_dict.get(s_name), list) else [],
+                "type": "Core Theory",
+                "credits": 4
+            })
+            all_topics.extend(deduped_topics)
+
+    d["subjects"] = normalized_subjects
+    d["extracted_subjects"] = [s["name"] for s in normalized_subjects]
+    d["chapters"] = chapters_dict
+    d["units"] = chapters_dict
+    d["topics"] = list(dict.fromkeys(all_topics or d.get("topics") or d.get("key_topics") or []))
+
+    return d
+
+
+def _get_authoritative_curriculum(user_id: str, user: dict = None, syllabus_id: str = None) -> dict | None:
     """
     Single Authoritative Backend Curriculum Service for:
     1. Personal Trainer
-    2. Reality Lab
-    3. Knowledge Transfer
+    2. Knowledge Challenge
+    3. Reality Lab
     4. Active Curriculum API
     
     Flow:
-    Authenticated Student -> Student Profile -> Syllabus -> Semester Section -> Validated Curriculum
+    Authenticated Student -> Active Validated Syllabus -> Validated Subjects -> Associated Topics
     
-    Strict Rule:
-    If curriculum status is NOT VALID (e.g. NEEDS_REVIEW, NOT_UPLOADED, EXTRACTION_FAILED, MISMATCH):
-    Returns None. No partial or fallback subjects are ever returned.
+    Strict Rules:
+    1. Only loads curriculum for the specific authenticated user_id (Zero cross-user leakage).
+    2. Gated strictly by curriculumStatus == 'VALID' / validation_status == 'VALID'.
+    3. Extraction occurs ONCE upon upload and is saved to MongoDB/SQLite.
+    4. Personal Trainer, Knowledge Challenge, and Reality Lab all consume this exact normalized curriculum.
     """
     if not user_id:
         return None
@@ -332,9 +448,22 @@ def _get_authoritative_curriculum(user_id: str, user: dict = None) -> dict | Non
     mongo_db = get_mongodb()
     if mongo_db is not None:
         conditions = [
-            {"is_active": True},
-            {"status": {"$in": ["ACTIVE", "READY", "VALID"]}}
+            {"$or": [{"is_active": True}, {"isActive": True}]},
+            {"$or": [
+                {"status": {"$in": ["ACTIVE", "READY", "VALID"]}},
+                {"curriculumStatus": "VALID"},
+                {"validation_status": "VALID"},
+                {"validationStatus": "VALID"}
+            ]}
         ]
+        if syllabus_id:
+            conditions.append({
+                "$or": [
+                    {"syllabus_id": str(syllabus_id)},
+                    {"syllabusId": str(syllabus_id)},
+                    {"_id": str(syllabus_id)}
+                ]
+            })
         if level == "college" and current_sem is not None:
             sem_int = int(current_sem) if str(current_sem).isdigit() else current_sem
             sem_str = str(current_sem)
@@ -343,26 +472,37 @@ def _get_authoritative_curriculum(user_id: str, user: dict = None) -> dict | Non
                     {"semester": sem_int},
                     {"semester": sem_str},
                     {"current_semester": sem_int},
-                    {"current_semester": sem_str}
+                    {"current_semester": sem_str},
+                    {"currentSemester": sem_int},
+                    {"currentSemester": sem_str}
                 ]
             })
-        query_filter = {"student_id": str(user_id), "$and": conditions}
-        doc = mongo_db["syllabi"].find_one(query_filter, sort=[("updated_at", -1), ("version", -1)])
+        query_filter = {
+            "$or": [{"student_id": str(user_id)}, {"studentId": str(user_id)}],
+            "$and": conditions
+        }
+        doc = mongo_db["syllabi"].find_one(query_filter, sort=[("updated_at", -1), ("updatedAt", -1), ("version", -1)])
         if doc:
-            val_status = str(doc.get("validation_status") or doc.get("status") or "").upper().strip()
+            val_status = str(doc.get("curriculumStatus") or doc.get("validation_status") or doc.get("validationStatus") or doc.get("status") or "").upper().strip()
             if val_status in ["VALID", "MANUALLY_CONFIRMED", "ACTIVE"]:
                 subs = doc.get("subjects") or []
                 ext_subs = doc.get("extracted_subjects") or []
                 if subs or ext_subs:
-                    return doc
+                    return _normalize_curriculum_doc(doc, user_id, user)
         return None
     else:
         conn = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM syllabi WHERE student_id=? AND (is_active=1 OR status IN ('ACTIVE', 'READY', 'VALID')) ORDER BY version DESC LIMIT 1",
-            (str(user_id),)
-        )
+        if syllabus_id:
+            cursor.execute(
+                "SELECT * FROM syllabi WHERE student_id=? AND syllabus_id=? AND (is_active=1 OR status IN ('ACTIVE', 'READY', 'VALID') OR validation_status='VALID') ORDER BY version DESC LIMIT 1",
+                (str(user_id), str(syllabus_id))
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM syllabi WHERE student_id=? AND (is_active=1 OR status IN ('ACTIVE', 'READY', 'VALID') OR validation_status='VALID') ORDER BY version DESC LIMIT 1",
+                (str(user_id),)
+            )
         row = cursor.fetchone()
         conn.close()
         if row:
@@ -377,7 +517,7 @@ def _get_authoritative_curriculum(user_id: str, user: dict = None) -> dict | Non
                 subs = d.get("subjects") or []
                 ext_subs = d.get("extracted_subjects") or []
                 if subs or ext_subs:
-                    return d
+                    return _normalize_curriculum_doc(d, user_id, user)
         return None
 
 
@@ -1323,8 +1463,84 @@ def analyze_syllabus():
         elif syllabus_text:
             file_input = syllabus_text
             file_name  = "text_input"
+            file_hash  = hashlib.sha256(syllabus_text.strip().encode("utf-8")).hexdigest()
         else:
             return jsonify({"success": False, "error": "No syllabus file or text provided."}), 400
+
+        # Check if a valid curriculum already exists for the same syllabus and semester to avoid duplicate processing
+        if file_hash:
+            mongo_db = get_mongodb()
+            if mongo_db is not None:
+                existing_valid = mongo_db["syllabi"].find_one({
+                    "$and": [
+                        {"$or": [{"student_id": str(user_id)}, {"studentId": str(user_id)}]},
+                        {"$or": [{"file_hash": file_hash}, {"fileHash": file_hash}]},
+                        {"$or": [{"semester": target_semester}, {"semester": str(target_semester)}]},
+                        {"$or": [{"validation_status": "VALID"}, {"curriculumStatus": "VALID"}, {"status": {"$in": ["ACTIVE", "VALID"]}}]}
+                    ]
+                }, sort=[("updated_at", -1), ("updatedAt", -1), ("version", -1)])
+
+                if existing_valid and existing_valid.get("subjects"):
+                    now = datetime.utcnow()
+                    # Atomically archive older active records and ensure this existing valid doc is active
+                    mongo_db["syllabi"].update_many(
+                        {"$or": [{"student_id": str(user_id)}, {"studentId": str(user_id)}], "_id": {"$ne": existing_valid["_id"]}},
+                        {"$set": {"is_active": False, "isActive": False, "status": "ARCHIVED", "updated_at": now, "updatedAt": now}}
+                    )
+                    mongo_db["syllabi"].update_one(
+                        {"_id": existing_valid["_id"]},
+                        {"$set": {"is_active": True, "isActive": True, "status": "ACTIVE", "curriculumStatus": "VALID", "validation_status": "VALID", "validationStatus": "VALID", "updated_at": now, "updatedAt": now}}
+                    )
+                    existing_valid["is_active"] = True
+                    existing_valid["isActive"] = True
+                    existing_valid["status"] = "ACTIVE"
+                    existing_valid["curriculumStatus"] = "VALID"
+                    existing_valid["validation_status"] = "VALID"
+                    existing_valid["validationStatus"] = "VALID"
+
+                    resp_doc = mongo_serialize(existing_valid)
+                    return jsonify({
+                        "success": True,
+                        "syllabus_id": existing_valid.get("syllabus_id") or existing_valid.get("syllabusId"),
+                        "validation_status": "VALID",
+                        "validationStatus": "VALID",
+                        "curriculumStatus": "VALID",
+                        "is_active": True,
+                        "reused": True,
+                        "detected_semesters": existing_valid.get("detected_semesters", []),
+                        "explicit_semester_identifier": existing_valid.get("explicit_semester_identifier", ""),
+                        "analysis": existing_valid.get("analysis", {}),
+                        "syllabus": resp_doc
+                    }), 200
+            else:
+                conn = get_sqlite_db()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM syllabi WHERE student_id=? AND file_hash=? AND (validation_status='VALID' OR status IN ('ACTIVE', 'VALID')) ORDER BY version DESC LIMIT 1",
+                    (str(user_id), file_hash)
+                )
+                row = cursor.fetchone()
+                if row:
+                    row_dict = dict(row)
+                    now_iso = datetime.utcnow().isoformat()
+                    cursor.execute("UPDATE syllabi SET is_active=0, status='ARCHIVED', updated_at=? WHERE student_id=? AND id!=?", (now_iso, str(user_id), row_dict["id"]))
+                    cursor.execute("UPDATE syllabi SET is_active=1, status='ACTIVE', updated_at=? WHERE id=?", (now_iso, row_dict["id"]))
+                    conn.commit()
+                    conn.close()
+                    analysis_data = json.loads(row_dict.get("analysis_json") or "{}")
+                    row_dict.update(analysis_data)
+                    return jsonify({
+                        "success": True,
+                        "syllabus_id": row_dict.get("syllabus_id"),
+                        "validation_status": "VALID",
+                        "validationStatus": "VALID",
+                        "curriculumStatus": "VALID",
+                        "is_active": True,
+                        "reused": True,
+                        "analysis": analysis_data,
+                        "syllabus": row_dict
+                    }), 200
+                conn.close()
 
         # Execute Gemini analysis with authoritative academic profile context
         analysis = gemini_service.analyze_syllabus(
@@ -1343,23 +1559,10 @@ def analyze_syllabus():
         if not analysis or not isinstance(analysis, dict):
             return jsonify({"success": False, "error": "Syllabus analysis failed to return structured data."}), 500
 
-        # Execute dedicated Curriculum Completeness Validator BEFORE activating
-        validation_report = CurriculumCompletenessValidator.validate(
-            user=user,
-            analysis=analysis,
-            raw_content_or_file=file_input,
-            target_semester=target_semester
-        )
-
-        detected_semesters = analysis.get("detected_semesters") or []
-        explicit_identifier = analysis.get("explicit_semester_identifier") or ""
-        validation_status = str(validation_report.get("status") or "VALID").upper().strip()
-        is_active = bool(validation_report.get("is_valid", False))
-        status_label = "ACTIVE" if is_active else validation_status
-        mismatch_reason = validation_report.get("summary") or analysis.get("mismatch_reason")
-
         syllabus_id = str(uuid.uuid4())
         now = datetime.utcnow()
+        detected_semesters = analysis.get("detected_semesters") or []
+        explicit_identifier = analysis.get("explicit_semester_identifier") or ""
 
         # Enrich every subject with authoritative document source evidence
         raw_subjects_list = analysis.get("subjects") or [{"name": s} for s in analysis.get("extracted_subjects", [])]
@@ -1372,15 +1575,15 @@ def analyze_syllabus():
             else:
                 continue
 
-            s_name = str(s_dict.get("name") or "").strip()
+            s_name = str(s_dict.get("name") or s_dict.get("subjectName") or "").strip()
             if not s_name:
                 continue
-            s_code = str(s_dict.get("code") or "").strip()
-            s_sec = str(s_dict.get("source_section") or s_dict.get("source_page") or explicit_identifier or f"Semester {target_semester or ''} Scheme Table").strip()
-            s_txt = str(s_dict.get("source_text") or f"{s_code} {s_name}".strip()).strip()
+            s_code = str(s_dict.get("code") or s_dict.get("subjectCode") or "").strip()
+            s_sec = str(s_dict.get("source_section") or s_dict.get("sourceSection") or s_dict.get("source_page") or explicit_identifier or f"Semester {target_semester or ''} Scheme Table").strip()
+            s_txt = str(s_dict.get("source_text") or s_dict.get("sourceText") or f"{s_code} {s_name}".strip()).strip()
             s_ev = str(s_dict.get("semester_evidence") or f"Found in Semester {target_semester or ''} curriculum blueprint").strip()
 
-            pages_raw = s_dict.get("source_page_numbers") or [s_dict.get("source_page", 1)]
+            pages_raw = s_dict.get("source_page_numbers") or s_dict.get("sourcePages") or [s_dict.get("source_page", 1)]
             if isinstance(pages_raw, list):
                 pages = [int(p) for p in pages_raw if str(p).isdigit()]
             elif isinstance(pages_raw, (int, str)) and str(pages_raw).isdigit():
@@ -1390,31 +1593,65 @@ def analyze_syllabus():
             if not pages:
                 pages = [1]
 
+            sub_id = str(s_dict.get("subjectId") or s_dict.get("id") or f"sub_{hashlib.md5(f'{degree}_{department}_{target_semester}_{s_name}'.encode('utf-8')).hexdigest()[:10]}")
+            c_type = str(s_dict.get("courseType") or s_dict.get("type") or s_dict.get("category") or "Theory Core").strip()
+            conf_val = float(s_dict.get("confidence", 0.98)) if str(s_dict.get("confidence", "")).replace('.', '', 1).isdigit() else (float(s_dict.get("extractionConfidence", 0.98)) if str(s_dict.get("extractionConfidence", "")).replace('.', '', 1).isdigit() else 0.98)
+            cr_val = float(s_dict["credits"]) if s_dict.get("credits") is not None and str(s_dict.get("credits")).replace('.', '', 1).isdigit() else None
+
             enriched_subjects.append({
+                "subjectId": sub_id,
+                "id": sub_id,
+                "subjectCode": s_code,
                 "code": s_code,
+                "subjectName": s_name,
                 "name": s_name,
-                "type": str(s_dict.get("type") or s_dict.get("category") or "Theory Core").strip(),
-                "category": str(s_dict.get("category") or s_dict.get("type") or "Program Core").strip(),
-                "credits": float(s_dict["credits"]) if s_dict.get("credits") is not None and str(s_dict.get("credits")).replace('.', '', 1).isdigit() else None,
+                "courseType": c_type,
+                "type": c_type,
+                "category": str(s_dict.get("category") or c_type).strip(),
+                "credits": cr_val,
                 "lecture_hours": int(s_dict["lecture_hours"]) if str(s_dict.get("lecture_hours", "")).isdigit() else None,
                 "tutorial_hours": int(s_dict["tutorial_hours"]) if str(s_dict.get("tutorial_hours", "")).isdigit() else None,
                 "practical_hours": int(s_dict["practical_hours"]) if str(s_dict.get("practical_hours", "")).isdigit() else None,
                 "semester": target_semester or s_dict.get("semester"),
+                "program": degree or "Degree Program",
+                "department": department or "Engineering/Science",
                 "source_document_id": syllabus_id,
                 "source_document_name": file_name or "Official Syllabus Document",
                 "source_document_hash": file_hash or "",
+                "sourcePages": pages,
                 "source_page_numbers": pages,
                 "source_page": pages[0] if pages else 1,
+                "sourceSection": s_sec,
                 "source_section": s_sec,
+                "sourceText": s_txt,
                 "source_text": s_txt,
                 "semester_evidence": s_ev,
-                "confidence": float(s_dict.get("confidence", 0.98)) if str(s_dict.get("confidence", "")).replace('.', '', 1).isdigit() else 0.98,
+                "extractionConfidence": conf_val,
+                "confidence": conf_val,
                 "evidence_verified": True
             })
 
+        analysis["subjects"] = enriched_subjects
+
+        # Execute dedicated Curriculum Completeness Validator BEFORE activating
+        validation_report = CurriculumCompletenessValidator.validate(
+            user=user,
+            analysis=analysis,
+            raw_content_or_file=file_input,
+            target_semester=target_semester
+        )
+
+        validation_status = str(validation_report.get("status") or "VALID").upper().strip()
+        is_active = bool(validation_report.get("is_valid", False))
+        status_label = "ACTIVE" if is_active else validation_status
+        mismatch_reason = validation_report.get("summary") or analysis.get("mismatch_reason")
+
         syllabus_doc = {
-            "syllabus_id":                  syllabus_id,
+            "studentId":                    user_id,
             "student_id":                   user_id,
+            "syllabusId":                   syllabus_id,
+            "syllabus_id":                  syllabus_id,
+            "studentName":                  user.get("name", ""),
             "student_name":                 user.get("name", ""),
             "program":                      degree,
             "degree":                       degree,
@@ -1422,15 +1659,21 @@ def analyze_syllabus():
             "branch":                       department,
             "semester":                     target_semester,
             "current_semester":             target_semester,
+            "currentSemester":              target_semester,
             "class_level":                  class_level,
+            "classLevel":                   class_level,
             "grade_level":                  class_level,
             "stream":                       stream,
             "regulation":                   regulation,
             "academic_year":                academic_year,
+            "academicYear":                 academic_year,
             "file_path":                    file_path or "",
             "file_hash":                    file_hash or "",
+            "fileHash":                     file_hash or "",
             "file_name":                    file_name or "",
+            "fileName":                     file_name or "",
             "level":                        level,
+            "curriculumStatus":             validation_status,
             "validation_status":            validation_status,
             "validationStatus":             validation_status,
             "validation_report":            validation_report,
@@ -1453,33 +1696,41 @@ def analyze_syllabus():
             "topics":                       analysis.get("key_topics") or [],
             "analysis":                     analysis,
             "is_active":                    is_active,
+            "isActive":                     is_active,
             "status":                       status_label,
             "version":                      1,
             "created_at":                   now,
+            "createdAt":                    now,
             "updated_at":                   now,
+            "updatedAt":                    now,
         }
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
             if is_active:
-                # Archive older active syllabi for this student
+                # Atomically archive older active syllabi for this student
                 mongo_db["syllabi"].update_many(
-                    {"student_id": user_id, "is_active": True},
-                    {"$set": {"is_active": False, "status": "ARCHIVED", "updated_at": now}}
+                    {
+                        "$and": [
+                            {"$or": [{"student_id": str(user_id)}, {"studentId": str(user_id)}, {"student_id": user_id}, {"studentId": user_id}]},
+                            {"$or": [{"is_active": True}, {"isActive": True}, {"status": {"$in": ["ACTIVE", "READY", "VALID"]}}, {"curriculumStatus": "VALID"}, {"validation_status": "VALID"}]}
+                        ]
+                    },
+                    {"$set": {"is_active": False, "isActive": False, "status": "ARCHIVED", "curriculumStatus": "ARCHIVED", "validation_status": "ARCHIVED", "updated_at": now, "updatedAt": now}}
                 )
             existing = mongo_db["syllabi"].find_one(
-                {"student_id": user_id},
+                {"$or": [{"student_id": user_id}, {"studentId": user_id}]},
                 sort=[("version", -1)]
             )
             version = (existing.get("version", 0) + 1) if existing else 1
             syllabus_doc["version"] = version
             mongo_db["syllabi"].insert_one(syllabus_doc)
 
-            # If active with extracted subjects, optionally update user's quick subject list
+            # If active with extracted subjects, update user's quick subject list
             if is_active and analysis.get("extracted_subjects"):
                 mongo_db["users"].update_one(
                     {"$or": [{"_id": ObjectId(user_id)} if (ObjectId and len(str(user_id)) == 24) else {"id": str(user_id)}, {"user_id": str(user_id)}]},
-                    {"$set": {"subjects": analysis["extracted_subjects"], "updated_at": now}}
+                    {"$set": {"subjects": analysis["extracted_subjects"], "updated_at": now, "updatedAt": now}}
                 )
         else:
             conn   = get_sqlite_db()
@@ -1512,6 +1763,7 @@ def analyze_syllabus():
             "syllabus_id": syllabus_id,
             "validation_status": validation_status,
             "validationStatus": validation_status,
+            "curriculumStatus": validation_status,
             "validation_report": validation_report,
             "validationReport": validation_report,
             "is_active": is_active,
@@ -1576,6 +1828,59 @@ def confirm_syllabus_override():
 
     except Exception as exc:
         logger.error("Confirm syllabus error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/syllabus/status/<syllabus_id>", methods=["GET"])
+@require_auth
+def get_syllabus_status(syllabus_id: str):
+    """
+    Get processing or validation status for an uploaded syllabus.
+    Enforces student-level ownership isolation.
+    """
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            doc = mongo_db["syllabi"].find_one({"syllabus_id": syllabus_id, "student_id": user_id})
+            if not doc:
+                return jsonify({"success": False, "error": "Syllabus not found.", "status": "NOT_FOUND"}), 404
+            return jsonify({
+                "success": True,
+                "syllabus_id": syllabus_id,
+                "status": doc.get("status") or doc.get("validation_status", "VALID"),
+                "validation_status": doc.get("validation_status", "VALID"),
+                "is_active": doc.get("is_active", False),
+                "mismatch_reason": doc.get("mismatch_reason"),
+                "detected_semesters": doc.get("detected_semesters", []),
+                "extracted_subject_count": doc.get("extracted_subject_count", len(doc.get("subjects", []))),
+                "syllabus": mongo_serialize(doc)
+            }), 200
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM syllabi WHERE syllabus_id=? AND student_id=?", (syllabus_id, user_id))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({"success": False, "error": "Syllabus not found.", "status": "NOT_FOUND"}), 404
+            d = dict(row)
+            if d.get("analysis_json"):
+                try:
+                    d["analysis"] = json.loads(d["analysis_json"])
+                except Exception:
+                    pass
+            return jsonify({
+                "success": True,
+                "syllabus_id": syllabus_id,
+                "status": d.get("status") or d.get("validation_status", "VALID"),
+                "validation_status": d.get("validation_status", "VALID"),
+                "is_active": bool(d.get("is_active", 0)),
+                "mismatch_reason": d.get("mismatch_reason"),
+                "syllabus": d
+            }), 200
+    except Exception as exc:
+        logger.error("Syllabus status error: %s", traceback.format_exc())
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -1644,79 +1949,50 @@ def get_active_curriculum():
     current_sem = user.get("semester") if user.get("semester") is not None else user.get("current_semester")
     degree = user.get("degree") or user.get("program") or ""
     department = user.get("department") or user.get("branch") or user.get("domain") or ""
-    level = user.get("level") or "college"
+    auth_curriculum = _get_authoritative_curriculum(user_id, user)
+    if auth_curriculum:
+        return jsonify({
+            "success": True,
+            "is_valid": True,
+            "is_active": True,
+            "status": "VALID",
+            "curriculumStatus": "VALID",
+            "curriculum_id": auth_curriculum.get("curriculum_id"),
+            "curriculumId": auth_curriculum.get("curriculumId"),
+            "syllabus_id": auth_curriculum.get("syllabus_id"),
+            "syllabusId": auth_curriculum.get("syllabusId"),
+            "student_id": auth_curriculum.get("student_id"),
+            "studentId": auth_curriculum.get("studentId"),
+            "program": auth_curriculum.get("program") or auth_curriculum.get("degree") or degree,
+            "degree": auth_curriculum.get("degree") or auth_curriculum.get("program") or degree,
+            "department": auth_curriculum.get("department") or auth_curriculum.get("branch") or department,
+            "semester": auth_curriculum.get("semester") or current_sem,
+            "subjects": auth_curriculum.get("subjects") or [],
+            "extracted_subjects": auth_curriculum.get("extracted_subjects") or [],
+            "units": auth_curriculum.get("units") or {},
+            "chapters": auth_curriculum.get("chapters") or {},
+            "topics": auth_curriculum.get("topics") or [],
+            "validation_report": auth_curriculum.get("validation_report") or auth_curriculum.get("validationReport"),
+            "source_document_name": auth_curriculum.get("file_name") or auth_curriculum.get("fileName"),
+            "source_document_id": auth_curriculum.get("syllabus_id"),
+            "evidence_retained": True
+        }), 200
 
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        conditions = [{"$or": [{"is_active": True}, {"status": {"$in": ["ACTIVE", "READY", "VALID"]}}]}]
-        if level == "college" and current_sem is not None:
-            sem_int = int(current_sem) if str(current_sem).isdigit() else current_sem
-            sem_str = str(current_sem)
-            conditions.append({
-                "$or": [
-                    {"semester": sem_int},
-                    {"semester": sem_str},
-                    {"current_semester": sem_int},
-                    {"current_semester": sem_str}
-                ]
-            })
-        query_filter = {"student_id": user_id, "$and": conditions}
-        doc = mongo_db["syllabi"].find_one(
-            query_filter,
-            sort=[("updated_at", -1), ("version", -1)]
-        )
-
-        if doc:
-            subjects = doc.get("subjects") or []
-            extracted_subjects = doc.get("extracted_subjects") or [s.get("name") for s in subjects if isinstance(s, dict)]
-            
-            # If active document has zero extracted subjects, gate as EXTRACTION_FAILED
-            if not subjects and not extracted_subjects:
-                return jsonify({
-                    "success": True,
-                    "is_valid": False,
-                    "is_active": False,
-                    "status": "EXTRACTION_FAILED",
-                    "curriculumStatus": "EXTRACTION_FAILED",
-                    "reason": "Syllabus parsing failed: No valid academic subjects could be extracted from the document.",
-                    "semester": current_sem,
-                    "degree": degree,
-                    "department": department,
-                    "subjects": [],
-                    "extracted_subjects": [],
-                    "units": {},
-                    "chapters": {},
-                    "topics": []
-                }), 200
-
-            return jsonify({
-                "success": True,
-                "is_valid": True,
-                "is_active": True,
-                "status": "VALID",
-                "curriculumStatus": "VALID",
-                "syllabus_id": doc.get("syllabus_id"),
-                "student_id": user_id,
-                "program": doc.get("program") or degree,
-                "degree": doc.get("degree") or degree,
-                "department": doc.get("department") or department,
-                "semester": doc.get("semester") or current_sem,
-                "subjects": subjects,
-                "extracted_subjects": extracted_subjects,
-                "units": doc.get("chapters") or doc.get("units") or {},
-                "chapters": doc.get("chapters") or {},
-                "topics": doc.get("topics") or doc.get("key_topics") or [],
-                "validation_report": doc.get("validation_report"),
-                "source_document_name": doc.get("file_name"),
-                "source_document_id": doc.get("syllabus_id"),
-                "evidence_retained": True
-            }), 200
-
         # No active valid doc found. Check other syllabus states.
+        user_filter = {
+            "$or": [
+                {"student_id": str(user_id)},
+                {"studentId": str(user_id)},
+                {"student_id": user_id},
+                {"studentId": user_id}
+            ]
+        }
         # Check for PROCESSING state
         proc_doc = mongo_db["syllabi"].find_one(
-            {"student_id": user_id, "status": {"$in": ["PROCESSING", "ANALYZING", "PARSING"]}},
-            sort=[("updated_at", -1)]
+            {"$and": [user_filter, {"status": {"$in": ["PROCESSING", "ANALYZING", "PARSING"]}}]},
+            sort=[("updated_at", -1), ("updatedAt", -1)]
         )
         if proc_doc:
             return jsonify({
@@ -1738,8 +2014,8 @@ def get_active_curriculum():
 
         # Check for EXTRACTION_FAILED state
         failed_doc = mongo_db["syllabi"].find_one(
-            {"student_id": user_id, "status": {"$in": ["EXTRACTION_FAILED", "FAILED", "ERROR"]}},
-            sort=[("updated_at", -1)]
+            {"$and": [user_filter, {"status": {"$in": ["EXTRACTION_FAILED", "FAILED", "ERROR"]}}]},
+            sort=[("updated_at", -1), ("updatedAt", -1)]
         )
         if failed_doc:
             return jsonify({
@@ -1761,8 +2037,8 @@ def get_active_curriculum():
 
         # Check for NEEDS_REVIEW / MISMATCH state
         pending_doc = mongo_db["syllabi"].find_one(
-            {"student_id": user_id, "status": {"$in": ["NEEDS_REVIEW", "MISMATCH"]}},
-            sort=[("updated_at", -1)]
+            {"$and": [user_filter, {"status": {"$in": ["NEEDS_REVIEW", "MISMATCH"]}}]},
+            sort=[("updated_at", -1), ("updatedAt", -1)]
         )
         if pending_doc:
             return jsonify({
@@ -1773,7 +2049,7 @@ def get_active_curriculum():
                 "curriculumStatus": "NEEDS_REVIEW",
                 "reason": pending_doc.get("mismatch_reason", "Syllabus validation requires review."),
                 "mismatch_reason": pending_doc.get("mismatch_reason", "Syllabus validation requires review."),
-                "validation_report": pending_doc.get("validation_report"),
+                "validation_report": pending_doc.get("validation_report") or pending_doc.get("validationReport"),
                 "semester": current_sem,
                 "degree": degree,
                 "department": department,
@@ -1806,46 +2082,6 @@ def get_active_curriculum():
     else:
         conn = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM syllabi WHERE student_id=? AND (is_active=1 OR status IN ('ACTIVE', 'READY', 'VALID')) ORDER BY version DESC LIMIT 1",
-            (user_id,)
-        )
-        row = cursor.fetchone()
-        if row:
-            d = dict(row)
-            analysis = json.loads(d.get("analysis_json") or "{}") if d.get("analysis_json") else {}
-            subjects = analysis.get("subjects") or []
-            conn.close()
-            if not subjects and not analysis.get("extracted_subjects"):
-                return jsonify({
-                    "success": True,
-                    "is_valid": False,
-                    "is_active": False,
-                    "status": "EXTRACTION_FAILED",
-                    "curriculumStatus": "EXTRACTION_FAILED",
-                    "reason": "Syllabus parsing failed: No valid academic subjects could be extracted.",
-                    "semester": current_sem,
-                    "subjects": [],
-                    "extracted_subjects": [],
-                    "units": {},
-                    "chapters": {},
-                    "topics": []
-                }), 200
-            return jsonify({
-                "success": True,
-                "is_valid": True,
-                "status": "VALID",
-                "curriculumStatus": "VALID",
-                "syllabus_id": d.get("syllabus_id"),
-                "semester": d.get("semester") or current_sem,
-                "subjects": subjects,
-                "extracted_subjects": analysis.get("extracted_subjects", []),
-                "units": analysis.get("chapters", {}),
-                "chapters": analysis.get("chapters", {}),
-                "topics": analysis.get("key_topics", []),
-                "source_document_name": d.get("file_name")
-            }), 200
-
         # Check for any pending or failed records
         cursor.execute("SELECT * FROM syllabi WHERE student_id=? ORDER BY id DESC LIMIT 1", (user_id,))
         last_row = cursor.fetchone()
@@ -1897,16 +2133,16 @@ def delete_my_syllabus():
     mongo_db = get_mongodb()
     if mongo_db is not None:
         mongo_db["syllabi"].update_many(
-            {"student_id": user_id},
-            {"$set": {"is_active": False, "status": "ARCHIVED", "updated_at": now}}
+            {"$or": [{"student_id": str(user_id)}, {"studentId": str(user_id)}, {"student_id": user_id}, {"studentId": user_id}]},
+            {"$set": {"is_active": False, "isActive": False, "status": "ARCHIVED", "curriculumStatus": "ARCHIVED", "updated_at": now, "updatedAt": now}}
         )
         return jsonify({"success": True, "message": "Syllabus archived successfully."}), 200
 
     conn = get_sqlite_db()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE syllabi SET is_active=0, status='ARCHIVED', updated_at=? WHERE student_id=?",
-        (now.isoformat(), user_id)
+        "UPDATE syllabi SET is_active=0, status='ARCHIVED', validation_status='ARCHIVED', updated_at=? WHERE student_id=?",
+        (now.isoformat(), str(user_id))
     )
     conn.commit()
     conn.close()
@@ -2232,6 +2468,111 @@ def get_students():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TEACHER CLASSES (MongoDB Persistence)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/teacher/classes", methods=["GET"])
+@require_auth
+def get_teacher_classes():
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            classes_cursor = mongo_db["teacher_classes"].find({"teacher_id": str(user_id)}).sort("created_at", -1)
+            classes = [mongo_serialize(c) for c in classes_cursor]
+            return jsonify({"success": True, "classes": classes}), 200
+        return jsonify({"success": True, "classes": []}), 200
+    except Exception as exc:
+        logger.error(f"[TeacherClasses] get_teacher_classes error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/teacher/classes", methods=["POST"])
+@require_auth
+def create_teacher_class():
+    try:
+        user_id = _current_user_id()
+        data = request.get_json(force=True) or {}
+        class_id = str(data.get("id") or f"cls_{int(time.time() * 1000)}")
+        
+        class_doc = {
+            "id": class_id,
+            "teacher_id": str(user_id),
+            "name": str(data.get("name") or "New Class").strip(),
+            "level": str(data.get("level") or "school").strip(),
+            "type": str(data.get("type") or "School Class").strip(),
+            "board": str(data.get("board") or "").strip(),
+            "gradeLevel": str(data.get("gradeLevel") or data.get("grade_level") or "").strip(),
+            "grade_level": str(data.get("gradeLevel") or data.get("grade_level") or "").strip(),
+            "section": str(data.get("section") or "").strip(),
+            "department": str(data.get("department") or "").strip(),
+            "semester": data.get("semester"),
+            "subjects": data.get("subjects") or [],
+            "students": data.get("students") or [],
+            "students_count": int(data.get("students_count") or len(data.get("students") or [])),
+            "created_at": data.get("created_at") or datetime.utcnow().strftime("%Y-%m-%d"),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["teacher_classes"].update_one(
+                {"id": class_id, "teacher_id": str(user_id)},
+                {"$set": class_doc},
+                upsert=True
+            )
+
+        return jsonify({"success": True, "class": class_doc}), 201
+    except Exception as exc:
+        logger.error(f"[TeacherClasses] create_teacher_class error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/teacher/classes/<class_id>", methods=["PUT"])
+@require_auth
+def update_teacher_class(class_id):
+    try:
+        user_id = _current_user_id()
+        data = request.get_json(force=True) or {}
+        
+        update_fields = {"updated_at": datetime.utcnow().isoformat()}
+        for k in ["name", "level", "type", "board", "gradeLevel", "grade_level", "section", "department", "semester", "subjects", "students", "students_count"]:
+            if k in data:
+                update_fields[k] = data[k]
+
+        if "students" in data and "students_count" not in data:
+            update_fields["students_count"] = len(data["students"])
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["teacher_classes"].update_one(
+                {"id": class_id, "teacher_id": str(user_id)},
+                {"$set": update_fields}
+            )
+            updated_doc = mongo_db["teacher_classes"].find_one({"id": class_id, "teacher_id": str(user_id)})
+            return jsonify({"success": True, "class": mongo_serialize(updated_doc)}), 200
+
+        return jsonify({"success": True, "class": update_fields}), 200
+    except Exception as exc:
+        logger.error(f"[TeacherClasses] update_teacher_class error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/teacher/classes/<class_id>", methods=["DELETE"])
+@require_auth
+def delete_teacher_class(class_id):
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["teacher_classes"].delete_one({"id": class_id, "teacher_id": str(user_id)})
+        return jsonify({"success": True, "deleted_id": class_id}), 200
+    except Exception as exc:
+        logger.error(f"[TeacherClasses] delete_teacher_class error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ANALYTICS DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2534,8 +2875,11 @@ def trainer_chat():
         class_level  = str(data.get("class_level") or stored_cls or "").strip()
         board        = str((user or {}).get("board") or "").strip()
 
+        subject_id   = str(data.get("subject_id") or data.get("subjectId") or data.get("subjectCode") or data.get("subject_code") or "").strip()
+        syllabus_id  = str(data.get("syllabus_id") or data.get("syllabusId") or data.get("curriculum_id") or data.get("curriculumId") or "").strip()
+
         # Fetch authoritative active validated syllabus
-        active_syllabus = _get_authoritative_curriculum(user_id, user)
+        active_syllabus = _get_authoritative_curriculum(user_id, user, syllabus_id=syllabus_id or None)
 
         # Check if student is asking for their semester subjects list
         lower_msg = message.lower().strip()
@@ -2586,8 +2930,20 @@ def trainer_chat():
             )
             return jsonify({"success": True, "reply": reply}), 200
 
-        # Validate that requested subject is in the active syllabus
-        matched_subj = next((s for s in valid_subjects if subject.lower() in s.lower() or s.lower() in subject.lower()), None)
+        # Validate that requested subject is in the active syllabus using subjectId/subjectCode or subjectName
+        matched_subj = None
+        if subject_id:
+            for s in raw_subjects:
+                if isinstance(s, dict):
+                    sid = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s.get("code") or "").strip().lower()
+                    if sid and sid == subject_id.lower():
+                        matched_subj = s.get("name")
+                        break
+        if not matched_subj:
+            matched_subj = next((s for s in valid_subjects if s.lower() == subject.lower()), None)
+        if not matched_subj:
+            matched_subj = next((s for s in valid_subjects if subject.lower() in s.lower() or s.lower() in subject.lower()), None)
+
         if not matched_subj and subject and subject != "General Academic":
             return jsonify({
                 "success": False,
@@ -2597,8 +2953,9 @@ def trainer_chat():
         if matched_subj:
             subject = matched_subj
 
-        # Retrieve relevant syllabus excerpt for coaching context
+        # Retrieve relevant syllabus excerpt and validated topics for coaching context
         syllabus_excerpt = ""
+        validated_topics = []
         if active_syllabus:
             chapters_dict = active_syllabus.get("chapters") or active_syllabus.get("units") or {}
             if subject in chapters_dict:
@@ -2608,21 +2965,28 @@ def trainer_chat():
                         if isinstance(u, dict):
                             u_name = u.get("name", "")
                             concepts_list = u.get("concepts", [])
+                            validated_topics.extend(concepts_list)
                             if (unit and unit.lower() in u_name.lower()) or (topic and topic.lower() in " ".join(concepts_list).lower()):
                                 syllabus_excerpt = f"{u_name}: {', '.join(concepts_list)}"
-                                break
+                        elif isinstance(u, str):
+                            validated_topics.append(u)
                     if not syllabus_excerpt and sub_units:
                         first_u = sub_units[0] if isinstance(sub_units[0], dict) else {}
                         syllabus_excerpt = f"{first_u.get('name', '')}: {', '.join(first_u.get('concepts', []))}"
 
         history = data.get("history") or []
         student_ctx = {
+            "student_id": user_id,
+            "name": (user or {}).get("name", "Student"),
             "level": level or "college",
             "degree": degree,
             "department": dept,
             "semester": semester,
             "class_level": class_level,
-            "board": board
+            "board": board,
+            "subject_id": subject_id,
+            "curriculum_id": syllabus_id or str((active_syllabus or {}).get("syllabus_id") or ""),
+            "validated_topics": validated_topics
         }
 
         ai_reply = gemini_service.generate_trainer_response(
@@ -2706,8 +3070,11 @@ def generate_reality_lab_endpoint():
         user    = _lookup_user_by_id(user_id) or {}
         data    = request.get_json(force=True) or {}
 
+        subject_id  = str(data.get("subject_id") or data.get("subjectId") or data.get("id") or data.get("code") or "").strip()
+        syllabus_id = str(data.get("syllabus_id") or data.get("syllabusId") or data.get("curriculum_id") or data.get("curriculumId") or "").strip()
+
         # Fetch authoritative active validated curriculum
-        curriculum_doc = _get_authoritative_curriculum(user_id, user)
+        curriculum_doc = _get_authoritative_curriculum(user_id, user, syllabus_id=syllabus_id or None)
 
         active_semester = user.get("semester") or user.get("current_semester")
         program         = user.get("degree") or user.get("program") or "Engineering"
@@ -2715,6 +3082,7 @@ def generate_reality_lab_endpoint():
 
         # Validated subjects check
         valid_subjects = []
+        raw_subs = []
         syllabus_ctx = str(data.get("syllabus_context") or "")
         if curriculum_doc:
             raw_subs = curriculum_doc.get("subjects") or []
@@ -2727,37 +3095,109 @@ def generate_reality_lab_endpoint():
             if not syllabus_ctx and curriculum_doc.get("blueprint"):
                 syllabus_ctx = str(curriculum_doc.get("blueprint"))[:1200]
 
-        requested_subject = str(data.get("subject") or "").strip()
-        
-        # If user has validated subjects, ensure requested_subject matches or falls back to first valid subject
-        if not valid_subjects:
+        if not curriculum_doc or not valid_subjects:
             return jsonify({
                 "success": False,
-                "error": "No active validated syllabus found. Please upload your syllabus to generate Reality Lab scenarios."
+                "error": "No active validated syllabus found. Please upload your syllabus to generate Reality Lab activities.",
+                "subjects": []
             }), 400
 
-        selected_subject = requested_subject
-        matched = next((s for s in valid_subjects if requested_subject.lower() in s.lower() or s.lower() in requested_subject.lower()), None)
-        if matched:
-            selected_subject = matched
-        elif requested_subject and requested_subject not in valid_subjects:
-            selected_subject = valid_subjects[0]
-        elif not selected_subject:
-            selected_subject = valid_subjects[0]
+        requested_subject = str(data.get("subject") or data.get("subject_name") or "").strip()
+        matched_subj = None
+        matched_sub_id = subject_id
+        matched_sub_obj = None
 
-        module     = str(data.get("module") or data.get("topic") or "Core Application")
+        if subject_id:
+            for s in raw_subs:
+                if isinstance(s, dict):
+                    sid = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s.get("code") or "").strip().lower()
+                    if sid and sid == subject_id.lower():
+                        matched_subj = s.get("name")
+                        matched_sub_id = s.get("subject_id") or s.get("subjectId") or s.get("code") or subject_id
+                        matched_sub_obj = s
+                        break
+
+        if not matched_subj and requested_subject:
+            for s in raw_subs:
+                if isinstance(s, dict):
+                    s_name = str(s.get("name") or "")
+                    if s_name.lower() == requested_subject.lower() or requested_subject.lower() in s_name.lower():
+                        matched_subj = s_name
+                        matched_sub_id = s.get("subject_id") or s.get("subjectId") or s.get("code") or matched_sub_id
+                        matched_sub_obj = s
+                        break
+                elif str(s).lower() == requested_subject.lower() or requested_subject.lower() in str(s).lower():
+                    matched_subj = str(s)
+                    break
+
+        if not matched_subj and requested_subject:
+            return jsonify({
+                "success": False,
+                "error": f"The subject '{requested_subject}' is not in your validated active curriculum.",
+                "valid_subjects": valid_subjects
+            }), 400
+
+        selected_subject = matched_subj or (valid_subjects[0] if valid_subjects else "")
+        if not matched_sub_obj and raw_subs:
+            first_s = raw_subs[0]
+            if isinstance(first_s, dict):
+                matched_sub_obj = first_s
+                matched_sub_id = first_s.get("subject_id") or first_s.get("subjectId") or first_s.get("code") or matched_sub_id
+
+        # Extract validated topics for this specific subject
+        subject_topics = []
+        chapters_dict = curriculum_doc.get("chapters") or curriculum_doc.get("units") or {}
+        if selected_subject in chapters_dict:
+            sub_units = chapters_dict[selected_subject]
+            if isinstance(sub_units, list):
+                for u in sub_units:
+                    if isinstance(u, dict):
+                        u_name = u.get("name", "")
+                        c_list = u.get("concepts", [])
+                        if u_name:
+                            subject_topics.append(u_name)
+                        subject_topics.extend(c_list)
+                    elif isinstance(u, str):
+                        subject_topics.append(u)
+        elif matched_sub_obj and isinstance(matched_sub_obj, dict):
+            if matched_sub_obj.get("topics"):
+                subject_topics.extend(matched_sub_obj["topics"])
+            if matched_sub_obj.get("units"):
+                for u in matched_sub_obj["units"]:
+                    if isinstance(u, dict):
+                        subject_topics.append(u.get("name", ""))
+                        subject_topics.extend(u.get("concepts", []))
+                    elif isinstance(u, str):
+                        subject_topics.append(u)
+
+        requested_topic = str(data.get("topic") or data.get("module") or "").strip()
+        selected_topic = requested_topic
+        if not selected_topic and subject_topics:
+            selected_topic = subject_topics[0]
+
         difficulty = str(data.get("difficulty") or "Medium")
 
         lab_data = gemini_service.generate_reality_lab(
             subject=selected_subject,
-            module=module,
+            subject_id=str(matched_sub_id or ""),
+            topic=selected_topic,
+            module=selected_topic,
             difficulty=difficulty,
+            validated_topics=subject_topics,
             syllabus_context=syllabus_ctx,
             semester=str(active_semester or ""),
             program=program,
             department=department
         )
-        return jsonify({"success": True, "lab": lab_data, "active_semester": active_semester, "subject": selected_subject}), 200
+        return jsonify({
+            "success": True,
+            "lab": lab_data,
+            "active_semester": active_semester,
+            "subject": selected_subject,
+            "subject_id": matched_sub_id,
+            "topic": selected_topic,
+            "validated_topics": subject_topics
+        }), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
@@ -2896,12 +3336,16 @@ def generate_knowledge_transfer_endpoint():
 def get_challenge_quiz():
     try:
         user_id = _current_user_id()
-        curriculum_doc = _get_authoritative_curriculum(user_id)
+        user = _lookup_user_by_id(user_id)
+        syllabus_id = request.args.get("syllabus_id") or request.args.get("curriculum_id")
+        curriculum_doc = _get_authoritative_curriculum(user_id, user=user, syllabus_id=syllabus_id)
 
         if not curriculum_doc:
             return jsonify({
                 "success": False,
-                "error": "No active validated syllabus found. Please upload your syllabus to take challenges."
+                "error": "No active validated syllabus found. Please upload your syllabus to take challenges.",
+                "subjects": [],
+                "topics": []
             }), 400
 
         raw_subs = curriculum_doc.get("subjects") or []
@@ -2912,12 +3356,77 @@ def get_challenge_quiz():
                 raw_subs = []
         valid_subjects = [s.get("name") if isinstance(s, dict) else str(s) for s in raw_subs]
 
-        subject    = request.args.get("subject", valid_subjects[0] if valid_subjects else "General Academic")
-        module     = request.args.get("module", "All")
+        if not valid_subjects:
+            return jsonify({
+                "success": False,
+                "error": "No validated subjects found in active curriculum.",
+                "subjects": [],
+                "topics": []
+            }), 400
+
+        req_subject = request.args.get("subject", "").strip()
+        req_subject_id = request.args.get("subject_id") or request.args.get("subjectId") or ""
+        module = request.args.get("module", "All")
         difficulty = request.args.get("difficulty", "Medium")
-        quiz_data  = gemini_service.generate_knowledge_challenge(subject, module, difficulty)
-        return jsonify({"success": True, "quiz": quiz_data}), 200
+        question_type = request.args.get("question_type", "Mixed")
+
+        matched_subj_obj = None
+        if req_subject_id:
+            for s in raw_subs:
+                if isinstance(s, dict):
+                    sid = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s.get("code") or "").strip().lower()
+                    if sid and sid == req_subject_id.lower():
+                        matched_subj_obj = s
+                        break
+        if not matched_subj_obj and req_subject:
+            matched_subj_obj = next((s for s in raw_subs if isinstance(s, dict) and s.get("name", "").lower() == req_subject.lower()), None)
+            if not matched_subj_obj:
+                matched_subj_obj = next((s for s in raw_subs if isinstance(s, dict) and (req_subject.lower() in s.get("name", "").lower() or s.get("name", "").lower() in req_subject.lower())), None)
+
+        if not matched_subj_obj:
+            matched_subj_obj = raw_subs[0] if isinstance(raw_subs[0], dict) else {"name": str(raw_subs[0]), "code": ""}
+
+        subject_name = matched_subj_obj.get("name") if isinstance(matched_subj_obj, dict) else str(matched_subj_obj)
+        subject_code = matched_subj_obj.get("code") or matched_subj_obj.get("subject_id") or req_subject_id if isinstance(matched_subj_obj, dict) else ""
+
+        # Extract validated topics for this specific subject
+        validated_topics = []
+        syllabus_excerpt = ""
+        chapters_dict = curriculum_doc.get("chapters") or curriculum_doc.get("units") or {}
+        if subject_name in chapters_dict:
+            sub_units = chapters_dict[subject_name]
+            if isinstance(sub_units, list):
+                for u in sub_units:
+                    if isinstance(u, dict):
+                        u_name = u.get("name", "")
+                        concepts_list = u.get("concepts", [])
+                        validated_topics.extend(concepts_list)
+                        if module != "All" and module.lower() in u_name.lower():
+                            syllabus_excerpt = f"{u_name}: {', '.join(concepts_list)}"
+                    elif isinstance(u, str):
+                        validated_topics.append(u)
+                if not syllabus_excerpt and sub_units:
+                    first_u = sub_units[0] if isinstance(sub_units[0], dict) else {}
+                    syllabus_excerpt = f"{first_u.get('name', '')}: {', '.join(first_u.get('concepts', []))}"
+
+        quiz_data = gemini_service.generate_knowledge_challenge(
+            subject=subject_name,
+            subject_id=subject_code,
+            module=module,
+            difficulty=difficulty,
+            question_type=question_type,
+            validated_topics=validated_topics,
+            syllabus_context=syllabus_excerpt
+        )
+        return jsonify({
+            "success": True,
+            "quiz": quiz_data,
+            "subjects": valid_subjects,
+            "topics": validated_topics,
+            "subject_id": subject_code
+        }), 200
     except Exception as exc:
+        logger.error(f"[Challenge] get_challenge_quiz error: {exc}")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -2929,34 +3438,60 @@ def submit_challenge():
         user    = _lookup_user_by_id(user_id)
         data    = request.get_json(force=True) or {}
         subject = str(data.get("subject") or "General Academic")
+        subject_id = str(data.get("subject_id") or data.get("subjectId") or "")
+        topic_id   = str(data.get("topic_id") or data.get("topicId") or "")
+        question   = str(data.get("question") or "")
+        student_ans= str(data.get("student_answer") or data.get("studentAnswer") or data.get("answer") or "")
+        correct_ans= str(data.get("correct_answer") or data.get("correctAnswer") or "")
+        explanation= str(data.get("explanation") or "")
+        difficulty = str(data.get("difficulty") or "Medium")
         score   = int(data.get("score", 0))
         total   = int(data.get("total_questions", 5))
         pct     = round((score / total) * 100, 2) if total > 0 else 0.0
         student_name = (user or {}).get("name", "Student")
+        now = datetime.utcnow()
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
             mongo_db["knowledge_challenges"].insert_one({
-                "student_name": student_name,
-                "student_id":   user_id,
-                "subject":      subject,
-                "score":        score,
+                "student_name":   student_name,
+                "student_id":     user_id,
+                "subject":        subject,
+                "subject_id":     subject_id,
+                "topic_id":       topic_id,
+                "question":       question,
+                "student_answer": student_ans,
+                "correct_answer": correct_ans,
+                "explanation":    explanation,
+                "difficulty":     difficulty,
+                "score":          score,
                 "total_questions": total,
-                "percentage":   pct,
-                "completed_at": datetime.utcnow(),
+                "percentage":     pct,
+                "completed_at":   now,
             })
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO knowledge_challenges (student_name, subject, title, score, total_questions, percentage) VALUES (?,?,?,?,?,?)",
-                (student_name, subject, f"{subject} Challenge", score, total, pct)
+                """INSERT INTO knowledge_challenges 
+                   (student_name, student_id, subject, subject_id, topic_id, question, student_answer, correct_answer, explanation, difficulty, title, score, total_questions, percentage, completed_at) 
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (student_name, user_id, subject, subject_id, topic_id, question, student_ans, correct_ans, explanation, difficulty, f"{subject} Challenge", score, total, pct, now)
             )
             conn.commit()
             conn.close()
 
-        return jsonify({"success": True, "percentage": pct, "score": score, "total": total}), 200
+        return jsonify({
+            "success": True,
+            "percentage": pct,
+            "score": score,
+            "total": total,
+            "subject_id": subject_id,
+            "topic_id": topic_id,
+            "timestamp": now.isoformat()
+        }), 200
     except Exception as exc:
+        logger.error(f"[Challenge] submit_challenge error: {exc}")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

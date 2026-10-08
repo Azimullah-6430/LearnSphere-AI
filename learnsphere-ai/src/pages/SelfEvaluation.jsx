@@ -4,7 +4,6 @@ import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { getDynamicSubjects } from '../data/syllabusData.js'
 import { api } from '../services/api.js'
-import SyllabusModal from '../components/SyllabusModal.jsx'
 import {
   UploadCloud, FileText, CheckCircle2, AlertTriangle, Loader2,
   Award, Brain, RotateCcw, ChevronRight, BookOpen, AlertCircle,
@@ -25,9 +24,12 @@ export default function SelfEvaluation() {
   const navigate = useNavigate()
   const activeProfile = user
 
-  const subjects = getDynamicSubjects(activeProfile, syllabusData)
-  const hasSubjects = subjects.length > 0
-  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
+  const dynamicSubjects = getDynamicSubjects(activeProfile, syllabusData)
+  const subjects = dynamicSubjects.length > 0
+    ? dynamicSubjects
+    : (activeProfile?.subjects?.length > 0
+        ? activeProfile.subjects
+        : ['Mathematics', 'Physics', 'Chemistry', 'Computer Science', 'General'])
 
   // Upload state
   const [qpRawFile, setQpRawFile] = useState(null)
@@ -37,7 +39,7 @@ export default function SelfEvaluation() {
   const [rubricRawFile, setRubricRawFile] = useState(null)
   const [rubricFileName, setRubricFileName] = useState('')
 
-  const [selectedSubject, setSelectedSubject] = useState(user?.subjects?.[0] || '')
+  const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
   const [customSubject, setCustomSubject] = useState('')
 
   // Status & Results
@@ -168,33 +170,13 @@ export default function SelfEvaluation() {
         </div>
       </div>
 
-      {!hasSubjects ? (
-        <div className="p-8 max-w-[600px] mx-auto text-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mx-auto text-2xl">
-            <BookOpen size={32} />
+      <div className="max-w-[880px] space-y-6">
+        {errorMsg && (
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center gap-2">
+            <AlertTriangle size={18} className="shrink-0" />
+            <span>{errorMsg}</span>
           </div>
-          <h2 className="text-xl font-extrabold text-[var(--text)]">Syllabus Document Required</h2>
-          <p className="text-sm text-[var(--text-soft)]">
-            Self Evaluation uses your curriculum structure to accurately evaluate exam answer scripts. Please upload your syllabus document to unlock Self Evaluation.
-          </p>
-          <div className="pt-2">
-            <button
-              onClick={() => setIsSyllabusModalOpen(true)}
-              className="px-5 py-2.5 bg-[var(--accent)] text-white text-xs font-bold rounded-xl hover:bg-[var(--accent-dim)] inline-flex items-center gap-2 shadow-md"
-            >
-              <UploadCloud size={16} /> Upload Syllabus Document
-            </button>
-          </div>
-          <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
-        </div>
-      ) : (
-        <div className="max-w-[880px] space-y-6">
-          {errorMsg && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center gap-2">
-              <AlertTriangle size={18} className="shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
+        )}
 
           {/* Form / Upload Section */}
           {!evalResult && !processing && (
@@ -584,9 +566,6 @@ export default function SelfEvaluation() {
             </div>
           )}
         </div>
-      )}
-
-      <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>
   )
 }
