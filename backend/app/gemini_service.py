@@ -1407,6 +1407,10 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         })
 
             chapters_map[s_name] = units
+            s["modules"] = units
+            s["units"] = units
+            s["chapters"] = units
+            s["topics"] = [c for u in units for c in u.get("concepts", [])]
 
         return {
             "validation_status": "VALID" if subjects else "NEEDS_REVIEW",

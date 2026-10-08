@@ -1598,6 +1598,9 @@ def analyze_syllabus():
             conf_val = float(s_dict.get("confidence", 0.98)) if str(s_dict.get("confidence", "")).replace('.', '', 1).isdigit() else (float(s_dict.get("extractionConfidence", 0.98)) if str(s_dict.get("extractionConfidence", "")).replace('.', '', 1).isdigit() else 0.98)
             cr_val = float(s_dict["credits"]) if s_dict.get("credits") is not None and str(s_dict.get("credits")).replace('.', '', 1).isdigit() else None
 
+            subj_units = (analysis.get("chapters") or {}).get(s_name) or (analysis.get("units") or {}).get(s_name) or s_dict.get("units") or s_dict.get("modules") or []
+            subj_topics = [c for u in subj_units for c in u.get("concepts", [])] if subj_units else (s_dict.get("topics") or [])
+
             enriched_subjects.append({
                 "subjectId": sub_id,
                 "id": sub_id,
@@ -1615,6 +1618,10 @@ def analyze_syllabus():
                 "semester": target_semester or s_dict.get("semester"),
                 "program": degree or "Degree Program",
                 "department": department or "Engineering/Science",
+                "modules": subj_units,
+                "units": subj_units,
+                "chapters": subj_units,
+                "topics": subj_topics,
                 "source_document_id": syllabus_id,
                 "source_document_name": file_name or "Official Syllabus Document",
                 "source_document_hash": file_hash or "",
