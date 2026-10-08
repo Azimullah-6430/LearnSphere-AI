@@ -717,8 +717,11 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             if not page_texts:
                 page_texts = [(1, raw_text)]
 
-        raw_text = re.sub(r"\bS[\s\-_]+E[\s\-_]+M[\s\-_]+E[\s\-_]+S[\s\-_]+T[\s\-_]+E[\s\-_]+R\b", "SEMESTER", raw_text, flags=re.I)
-        raw_text = re.sub(r"\bS[\s\-_]+E[\s\-_]+M\b", "SEM", raw_text, flags=re.I)
+        # DEBUG PRINTS
+        # print(f"[DEBUG 1] page_texts count: {len(page_texts)}", flush=True)
+
+        raw_text = re.sub(r"\bS\s+E\s+M\s+E\s+S\s+T\s+E\s+R\b", "SEMESTER", raw_text, flags=re.I)
+        raw_text = re.sub(r"\bS\s+E\s+M\b", "SEM", raw_text, flags=re.I)
 
         target_sem_int = None
         try:
@@ -728,7 +731,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             pass
 
         sem_heading_pattern = re.compile(
-            r"\b(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\s*[:\-–—\s]*([0-9]{1,2}|[IVXLCDM]+|[1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|\b([1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|[IVXLCDM]+)[^\S\r\n]+(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\b",
+            r"\b(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\s*[:\-–—\s]*([0-9]{1,2}|VIII|VII|VI|IV|V|III|II|I|[1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH)\b|\b([1-8](?:st|nd|rd|th)?|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|VIII|VII|VI|IV|V|III|II|I)[^\S\r\n]+(?:SEMESTER|SEM(?:ESTER)?|TRIMESTER)\b",
             re.I
         )
         sem_word_map = {
@@ -833,9 +836,15 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
             explicit_identifier = f"Semester {target_sem_int}"
             for idx, h in enumerate(heading_matches):
                 if h["semester"] == target_sem_int:
-                    start_p = h["start"]
-                    end_p = heading_matches[idx + 1]["start"] if idx + 1 < len(heading_matches) else len(raw_text)
-                    target_sections.append(raw_text[start_p:end_p])
+                    # Find end boundary: start of the first subsequent heading belonging to a DIFFERENT semester
+                    end_p = len(raw_text)
+                    for next_h in heading_matches[idx + 1:]:
+                        if next_h["semester"] != target_sem_int:
+                            end_p = next_h["start"]
+                            break
+                    target_sections.append(raw_text[h["start"]:end_p])
+                    break  # Captured the entire multi-page curriculum block for this semester
+
             if target_sections:
                 relevant_text = "\n\n".join(target_sections)
 
@@ -853,7 +862,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
         # Ignored header, metadata, institution titles, and unit lines for subject identification
         ignore_line_pattern = re.compile(
-            r"^(?:s\.?\s*no|sl\.?\s*no|course\s+code|subject\s+code|course\s+title|subject\s+title|category\s*$|credits?\s*$|contact\s+periods|hours\s+per\s+week|scheme\s+of\s+examination|maximum\s+marks|internal|external|total\s+credits|page\s+\d+|---|===|\*\*\*|unit\s*[0-9ivxlcdm]+|module\s*[0-9ivxlcdm]+|chapter\s*[0-9ivxlcdm]+|text\s*books?|reference\s*books?|course\s+outcomes?|course\s+objectives?|prerequisites?|detailed\s+syllabus|learning\s+outcomes?|co[0-9]|po[0-9]|department\s+of|college\s+of|institute\s+of|university|curriculum\s+scheme|choice\s+based)\b",
+            r"^(?:s\.?\s*no|sl\.?\s*no|course\s+code|subject\s+code|course\s+title|subject\s+title|course\s+group|category\s*$|credits?\s*$|contact\s+periods|hours\s+per\s+week|scheme\s+of\s+examination|maximum\s+marks|internal|external|total\s+credits|page\s+\d+|---|===|\*\*\*|unit\s*[0-9ivxlcdm]+|module\s*[0-9ivxlcdm]+|chapter\s*[0-9ivxlcdm]+|text\s*books?|reference\s*books?|course\s+outcomes?|course\s+objectives?|prerequisites?|detailed\s+syllabus|learning\s+outcomes?|co[0-9]|po[0-9]|department\s+of|college\s+of|institute\s+of|university|curriculum\s+scheme|choice\s+based)\b",
             re.I
         )
 
@@ -1059,17 +1068,11 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         if len(clean_row_name) < 2 or any(k in clean_row_name.lower() for k in ("courses total", "total credits", "scheme of examination")):
                             continue
 
+                        # Filter out generic elective placeholder rows without a specific course code
+                        if not row_code and re.match(r"^(?:professional\s+electives?|open\s+electives?|program\s+electives?|department(?:al)?\s+electives?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_row_name, re.I):
+                            continue
+
                         category = row_type if (row_type and row_type in ("Laboratory", "Professional Elective", "Open Elective", "Mandatory Audit", "Project/Seminar")) else categorize_subject(clean_row_name, row_code, line_str, active_table_category)
-                        
-                        # Find source pages
-                        matched_pages = []
-                        for p_num, p_txt in page_texts:
-                            code_matched = bool(row_code and re.search(r"\b" + re.escape(row_code) + r"\b", p_txt, re.I))
-                            name_matched = bool(clean_row_name.lower() in p_txt.lower())
-                            if code_matched or name_matched:
-                                matched_pages.append(p_num)
-                        if not matched_pages:
-                            matched_pages = [1]
 
                         sub_obj = build_normalized_subject(
                             name=clean_row_name,
@@ -1080,7 +1083,7 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                             t_h=row_t,
                             p_h=row_p,
                             raw_src_text=line_str,
-                            source_pages=matched_pages,
+                            source_pages=[1],
                             source_sec=explicit_identifier or f"Semester {target_semester or ''} Scheme Table"
                         )
                         subjects.append(sub_obj)
@@ -1134,10 +1137,10 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
                 # Determine if line starts a brand new subject entry
                 starts_new = False
-                has_sno_prefix = bool(re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s+[A-Za-z0-9]", line_s))
+                has_sno_prefix = bool(re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*$", line_s) or re.match(r"^\s*(?:\d+[\.\)]|\[\d+\])\s+[A-Za-z0-9]", line_s))
                 has_code_prefix = bool(re.match(r"^\s*[A-Z]{2,6}\s*[-/]?\s*\d{2,4}", line_s, re.I))
                 
-                if has_sno_prefix or has_code_prefix:
+                if has_sno_prefix or (has_code_prefix and not current_block_lines):
                     starts_new = True
 
                 if starts_new and current_block_lines:
@@ -1153,6 +1156,9 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                 line_str = block_text.replace("\n", " ").strip()
                 if not line_str or len(line_str) < 4 or institution_pattern.search(line_str):
                     continue
+
+                # Strip trailing footer credits
+                line_str = re.sub(r"\b(?:credits?|total\s+credits?)\s*[:=]?\s*\d+.*$", "", line_str, flags=re.I).strip()
 
                 code = ""
                 code_match = code_regex.search(line_str)
@@ -1188,18 +1194,33 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         pass
 
                 clean_name = re.sub(r"^\s*(?:\d+[\.\)]|\[\d+\])\s*", "", line_str)
+                # Remove Course Group prefix (e.g. PCC, HSC, PROJ, PEC, BSC, ESC, MC, OEC, HSMC, EEC)
+                clean_name = re.sub(r"^\s*(?:PCC|HSC|PROJ|PEC|BSC|ESC|MC|OEC|HSMC|EEC)\s+", "", clean_name, flags=re.I)
                 if code:
-                    clean_name = re.sub(re.escape(code), "", clean_name, flags=re.I)
+                    clean_name = re.sub(r"\b" + re.escape(code) + r"\b", "", clean_name, flags=re.I)
+                    if code_match:
+                        clean_name = re.sub(r"\b" + re.escape(code_match.group(1)) + r"\b", "", clean_name, flags=re.I)
                 clean_name = re.sub(r"\[.*?\]", "", clean_name)
                 clean_name = re.sub(r"\(.*?\)", "", clean_name)
                 clean_name = re.sub(r"(?:credits?|cr)\s*[:=]?\s*\d+(?:\.\d+)?.*$", "", clean_name, flags=re.I)
                 clean_name = re.sub(r"\b\d+\s*(?:credits?|cr)\b.*$", "", clean_name, flags=re.I)
                 clean_name = re.sub(r"L\s*[:=]?\s*\d+\s*T\s*[:=]?\s*\d+\s*P\s*[:=]?\s*\d+.*$", "", clean_name, flags=re.I)
-                clean_name = re.sub(r"\b\d+\s+\d+\s+\d+\s+\d+(?:\.\d+)?\s*$", "", clean_name)
+                if ltpc_end:
+                    clean_name = re.sub(r"\s+\d+\s+\d+\s+\d+\s+\d+(?:\.\d+)?\s*$", "", clean_name)
+                clean_name = re.sub(r"\s+\d+(?:\.\d+)?\s*$", "", clean_name)
                 clean_name = re.sub(r"[-:–—|()]+", " ", clean_name)
+                clean_name = re.sub(r"[\*\#]+", "", clean_name)
                 clean_name = re.sub(r"\s+", " ", clean_name).strip()
 
+                is_header_noise = any(k in clean_name.lower() for k in ("course group", "course code", "course title", "subject code", "subject title", "sl. no", "contact periods", "hours per week"))
+                if is_header_noise:
+                    continue
+
                 if len(clean_name) >= 3 and not any(k in clean_name.lower() for k in ("semester", "scheme", "courses total", "credits", "hours", "page", "internal", "external", "maximum marks")):
+                    # Filter out generic elective placeholder rows without a specific course code
+                    if not code and re.match(r"^(?:professional\s+electives?(?:\s+courses?)?|open\s+electives?(?:\s+courses?)?|program\s+electives?(?:\s+courses?)?|department(?:al)?\s+electives?(?:\s+courses?)?|elective\s+courses?)(?:\s*[-–—:]?\s*[0-9ivx]+|\s*\([a-z0-9\s\-]+\))?$", clean_name, re.I):
+                        continue
+
                     norm_clean = re.sub(r"[^a-z0-9]", "", clean_name.lower())
                     code_norm = code.upper().replace(" ", "") if code else ""
 
@@ -1223,15 +1244,6 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
 
                     category = categorize_subject(clean_name, code, line_str, block_cat)
 
-                    matched_pages = []
-                    for p_num, p_txt in page_texts:
-                        code_matched = bool(code and re.search(r"\b" + re.escape(code) + r"\b", p_txt, re.I))
-                        name_matched = bool(clean_name.lower() in p_txt.lower())
-                        if code_matched or name_matched:
-                            matched_pages.append(p_num)
-                    if not matched_pages:
-                        matched_pages = [1]
-
                     sub_obj = build_normalized_subject(
                         name=clean_name,
                         code=code,
@@ -1241,57 +1253,126 @@ If any contradiction, mark inflation, or bounds violation is detected, set "veri
                         t_h=t_hrs,
                         p_h=p_hrs,
                         raw_src_text=line_str,
-                        source_pages=matched_pages,
+                        source_pages=[1],
                         source_sec=explicit_identifier or f"Semester {target_semester or ''} Scheme Table"
                     )
                     subjects.append(sub_obj)
 
-        # Extract detailed syllabus units/modules strictly from document text
-        chapters_map = {}
-        current_subject_key = None
-        current_units = []
+        # ── 3. High-Speed Exact Source Page Matching for Extracted Subjects ──
+        for s in subjects:
+            s_code = s.get("code", "")
+            s_name = s.get("name", "")
+            code_flex = ""
+            if s_code:
+                c_clean = re.sub(r"\s+", "", s_code)
+                code_flex = re.sub(r"([A-Za-z]+)(\d+)", r"\1\\s*\2", c_clean)
+            matched_pages = []
+            for p_num, p_txt in page_texts:
+                code_matched = bool(code_flex and re.search(r"\b" + code_flex + r"\b", p_txt, re.I))
+                name_matched = bool(s_name and len(s_name) >= 4 and s_name.lower() in p_txt.lower())
+                if code_matched or name_matched:
+                    matched_pages.append(p_num)
+            if not matched_pages:
+                matched_pages = [1]
+            s["sourcePages"] = matched_pages
+            s["source_page_numbers"] = matched_pages
+            s["source_page"] = matched_pages[0]
 
-        for line in relevant_text.splitlines():
-            line_s = line.strip()
-            if not line_s or line_s.startswith("--- Page "):
-                continue
+        # ── 4. Deep Dynamic Unit/Module Extraction Across Entire Document Text ──
+        chapters_map: Dict[str, List[Dict[str, Any]]] = {}
 
-            matched_subj = None
-            for s in subjects:
-                s_name = s.get("name", "")
-                s_code = s.get("code", "")
-                if s_name and (s_name.lower() in line_s.lower() or (s_code and s_code.lower() in line_s.lower())):
-                    if not re.match(r"^(?:Unit|Module|Chapter)\b", line_s, re.I):
-                        matched_subj = s_name
-                        break
-
-            if matched_subj:
-                if current_subject_key and current_units:
-                    chapters_map[current_subject_key] = current_units
-                current_subject_key = matched_subj
-                current_units = []
-                continue
-
-            unit_match = re.match(r"^(?:Unit|Module|Chapter)\s*([0-9IVXLCDM]+)\s*[:\-\.]?\s*(.+)$", line_s, re.I)
-            if unit_match and current_subject_key:
-                unit_num = unit_match.group(1)
-                unit_title = unit_match.group(2).strip()
-                parts = [p.strip() for p in re.split(r"[,;.]+", unit_title) if len(p.strip()) > 2]
-                concepts = parts[1:] if len(parts) > 1 else parts
-                u_name = f"Unit {unit_num}: {parts[0] if parts else unit_title}"
-                current_units.append({
-                    "name": u_name,
-                    "concepts": concepts if concepts else [parts[0] if parts else unit_title]
-                })
-
-        if current_subject_key and current_units:
-            chapters_map[current_subject_key] = current_units
-
-        # Do NOT invent placeholder units if units were not detailed in uploaded document
         for s in subjects:
             s_name = s.get("name", "")
-            if s_name not in chapters_map:
-                chapters_map[s_name] = []
+            s_code = s.get("code", "")
+            if not s_name:
+                continue
+
+            patterns = []
+            if s_code:
+                c_clean = re.sub(r"\s+", "", s_code)
+                code_flex = re.sub(r"([A-Za-z]+)(\d+)", r"\1\\s*\2", c_clean)
+                patterns.append(r"\b" + code_flex + r"\b")
+            clean_n = re.sub(r"[^A-Za-z0-9\s]", " ", s_name).strip()
+            words = [w for w in clean_n.split() if len(w) > 3]
+            if len(words) >= 2:
+                patterns.append(r"\b" + r"\s+".join(re.escape(w) for w in words[:3]) + r"\b")
+
+            course_start = -1
+            for p in patterns:
+                for m in re.finditer(p, raw_text, re.I):
+                    after_text = raw_text[m.start():m.start() + 1500]
+                    if re.search(r"\b(?:MODULE|UNIT|COURSE OBJECTIVES|PRACTICALS?|LIST OF EXPERIMENTS)\b", after_text, re.I):
+                        course_start = m.start()
+                        break
+                if course_start != -1:
+                    break
+
+            units: List[Dict[str, Any]] = []
+            if course_start != -1:
+                course_block = raw_text[course_start:course_start + 8000]
+                next_course = re.search(r"\n\s*[A-Z]{2,5}\s*\d{3,4}\s*\n\s*[A-Z\s]{4,}\s*\n\s*L\s*T\s*P\s*C", course_block[200:], re.I)
+                if next_course:
+                    course_block = course_block[:200 + next_course.start()]
+
+                unit_header_pattern = re.compile(
+                    r"(?:^|\n)\s*(MODULE|UNIT)\s+([0-9IVXLCDM]+)\s*[:\-–—\s]*([^\n\r]+)",
+                    re.I
+                )
+
+                unit_matches = list(unit_header_pattern.finditer(course_block))
+                for u_idx, um in enumerate(unit_matches):
+                    u_type = um.group(1).title()
+                    u_num = um.group(2).strip()
+                    u_title = um.group(3).strip()
+                    u_title_clean = re.sub(r"\s+\d+\s*$", "", u_title).strip()
+                    
+                    body_start = um.end()
+                    body_end = unit_matches[u_idx + 1].start() if u_idx + 1 < len(unit_matches) else len(course_block)
+                    body = course_block[body_start:body_end].strip()
+
+                    # Stop body at end markers if present
+                    end_marker = re.search(r"\n\s*(?:PRACTICALS?|LIST OF EXPERIMENTS|TEXT BOOKS?|REFERENCES?|COURSE OUTCOMES?)\b", body, re.I)
+                    if end_marker:
+                        body = body[:end_marker.start()].strip()
+                    
+                    concepts = []
+                    raw_concepts = [c.strip() for c in re.split(r"[–—\-•\*\n\r]+", body) if len(c.strip()) > 3]
+                    for rc in raw_concepts:
+                        rc_clean = re.sub(r"\s+\d+\s*$", "", rc).strip()
+                        if rc_clean and not any(k in rc_clean.lower() for k in ("hours", "total", "page", "sdg")):
+                            concepts.append(rc_clean)
+
+                    units.append({
+                        "name": f"{u_type} {u_num}: {u_title_clean}",
+                        "concepts": concepts[:8] if concepts else [u_title_clean]
+                    })
+
+
+                prac_match = re.search(r"(?:^|\n)\s*(?:PRACTICALS?|LIST OF EXPERIMENTS)\s*([\s\S]*?)(?=(?:(?:^|\n)\s*(?:TEXT BOOKS?|REFERENCES?|COURSE OUTCOMES?)|$))", course_block, re.I)
+                if prac_match:
+                    prac_text = prac_match.group(1).strip()
+                    exp_lines = [l.strip() for l in prac_text.splitlines() if l.strip() and len(l.strip()) > 5 and not l.strip().startswith("--- Page ")]
+                    if exp_lines:
+                        units.append({
+                            "name": "Laboratory & Practical Experiments",
+                            "concepts": exp_lines[:10]
+                        })
+
+            # If no course detail blocks were found, fallback to scanning relevant_text for inline units
+            if not units:
+                for line in relevant_text.splitlines():
+                    unit_match = re.match(r"^(?:Unit|Module|Chapter)\s*([0-9IVXLCDM]+)\s*[:\-\.]?\s*(.+)$", line.strip(), re.I)
+                    if unit_match:
+                        unit_num = unit_match.group(1)
+                        unit_title = unit_match.group(2).strip()
+                        parts = [p.strip() for p in re.split(r"[,;.]+", unit_title) if len(p.strip()) > 2]
+                        concepts = parts[1:] if len(parts) > 1 else parts
+                        units.append({
+                            "name": f"Unit {unit_num}: {parts[0] if parts else unit_title}",
+                            "concepts": concepts if concepts else [parts[0] if parts else unit_title]
+                        })
+
+            chapters_map[s_name] = units
 
         return {
             "validation_status": "VALID" if subjects else "NEEDS_REVIEW",
