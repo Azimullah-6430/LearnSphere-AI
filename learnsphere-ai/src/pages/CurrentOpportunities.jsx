@@ -293,14 +293,7 @@ export default function CurrentOpportunities() {
 
   return (
     <>
-      <PageHead
-        title="Current News & Opportunities"
-        subtitle={
-          isCollege
-            ? `Fact-checked tech trends, domain hackathons, paper presentations & scholarships matched to your academic field (${departmentName}).`
-            : `Verified school education news, board circulars, science Olympiads & STEM competitions matched to your grade (${departmentName}).`
-        }
-      />
+      <PageHead title="Current News & Opportunities" />
 
       {/* ─── PROFILE COMPLETENESS WARNING BANNER ────────────────────────────── */}
       {profileCompletenessMsg && (

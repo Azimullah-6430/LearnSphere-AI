@@ -314,7 +314,7 @@ export default function Evaluate() {
 
   return (
     <>
-      <PageHead title="Strict Paper Evaluation" subtitle="Upload Question Paper and Answer Script to evaluate strictly based on your materials." />
+      <PageHead title="Evaluate Answer Script" />
       <Stepper step={Math.min(step, 5)} />
 
       {errorMsg && (

@@ -472,6 +472,79 @@ def _lookup_user_by_id(user_id: str):
     return None
 
 
+def _sanitize_subject_name(name: str) -> str:
+    if not name or not isinstance(name, str):
+        return ""
+    cleaned = name.strip()
+
+    # Remove trailing regulation clauses e.g. "20.3 A student shall earn..."
+    cleaned = re.sub(r"\s*\d+\.\d+.*$", "", cleaned, flags=re.IGNORECASE)
+    # Remove page numbers / table annotations e.g. "B.Tech. Information Technology 24..."
+    cleaned = re.sub(r"\s*B\.Tech\.?\s+.*$", "", cleaned, flags=re.IGNORECASE)
+
+    known_prefixes = [
+        "Artificial Intelligence and Machine Learning",
+        "Virtual and Augmented Reality",
+        "Sensor Technology",
+        "Robotics",
+        "3D Printing",
+        "Electric Vehicles",
+        "Industrial Automation",
+        "GIS and Remote Sensing",
+        "Computational Biology",
+        "Block Chain",
+        "Cyber Security",
+        "Data Science",
+        "Internet of Things",
+        "Cloud Computing",
+        "Quantum Computing",
+        "Big Data Analytics",
+        "DevOps",
+        "Augmented Reality",
+        "Machine Learning",
+        "Deep Learning",
+        "Natural Language Processing",
+        "Computer Vision"
+    ]
+
+    dept_keywords = [
+        "Mechanical Engineering",
+        "Aeronautical Engineering",
+        "Polymer Engineering",
+        "Automobile Engineering",
+        "Civil Engineering",
+        "Biotechnology",
+        "Electrical and Electronics Engineering",
+        "Electronics and Instrumentation Engineering",
+        "Electronics and Communication Engineering",
+        "Artificial Intelligence and Data Science",
+        "Computer Science and Engineering",
+        "Information and Technology",
+        "Information Technology"
+    ]
+
+    for prefix in known_prefixes:
+        if cleaned.lower().startswith(prefix.lower()):
+            remainder = cleaned[len(prefix):].strip()
+            if remainder:
+                matches_dept = any(d.lower() in remainder.lower() for d in dept_keywords)
+                if matches_dept or re.search(r"\b(Engineering|Technology|B\.Tech|\d+)\b", remainder, flags=re.IGNORECASE):
+                    return prefix
+            else:
+                return prefix
+
+    for dept in dept_keywords:
+        idx = cleaned.find(dept)
+        if idx > 3:
+            candidate = cleaned[:idx].strip()
+            if len(candidate) > 2 and candidate not in dept_keywords:
+                cleaned = candidate
+                break
+
+    cleaned = re.sub(r"[\s\d\-:_]+$", "", cleaned).strip()
+    return cleaned or name
+
+
 def _normalize_curriculum_doc(doc: dict, user_id: str, user: dict = None) -> dict:
     """
     Standardize the validated curriculum schema consumed identically by:
@@ -516,7 +589,7 @@ def _normalize_curriculum_doc(doc: dict, user_id: str, user: dict = None) -> dic
 
     for idx, s in enumerate(raw_subjects):
         if isinstance(s, dict):
-            s_name = str(s.get("name") or "").strip()
+            s_name = _sanitize_subject_name(str(s.get("name") or "").strip())
             s_code = str(s.get("code") or s.get("subject_id") or s.get("subjectId") or s.get("id") or f"SUB{idx+1:02d}").strip()
             s_id = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s_code).strip()
             s_topics = list(s.get("topics") or [])

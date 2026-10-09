@@ -95,10 +95,7 @@ export default function Analytics() {
 
   return (
     <>
-      <PageHead
-        title="Class Student Analytics & Performance Tiers"
-        subtitle="Comprehensive evaluation breakdown tracking Toppers, Slow Learners, and At-Risk students by Class & Department."
-      />
+      <PageHead title="Class Student Analytics" />
 
       {/* Active Class Indicator & Switcher Bar */}
       <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] mb-4 flex items-center justify-between flex-wrap gap-3">

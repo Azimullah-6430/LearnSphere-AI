@@ -207,11 +207,6 @@ export default function CreateClassPage() {
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
               {isSchool ? 'School Class Setup' : 'College Department Setup'}
             </h1>
-            <p className="text-white/80 text-sm max-w-xl font-medium">
-              {isSchool
-                ? 'Create your school classes below. Each class maintains a strictly isolated student roster and performance data so details of different classes never overlap.'
-                : 'Create your college departments below. Each department maintains a strictly isolated student roster and course performance data so details of different departments never overlap.'}
-            </p>
           </div>
 
           <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center min-w-[200px] flex flex-col items-center justify-center gap-2">

@@ -63,10 +63,7 @@ export default function MisconceptionMap() {
 
   return (
     <>
-      <PageHead
-        title="Evidence-Based Misconception Map"
-        subtitle="Identifies genuine conceptual misunderstandings derived strictly from evaluated answer scripts. Calculation slips, spelling mistakes, and skipped questions are strictly excluded."
-      />
+      <PageHead title="Evidence-Based Misconception Map" />
 
       {activeClass && (
         <div className="mb-4 p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-bold text-[var(--accent)] flex items-center justify-between">
@@ -74,20 +71,6 @@ export default function MisconceptionMap() {
           <Badge tone="accent">{activeClass.type}</Badge>
         </div>
       )}
-
-      {/* Strict Mistake != Misconception Rule Banner */}
-      <div className="mb-6 p-4 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[13px] text-[var(--text)] flex items-start gap-3 shadow-sm">
-        <ShieldAlert size={22} className="text-[var(--accent)] shrink-0 mt-0.5" />
-        <div>
-          <div className="font-extrabold text-[var(--accent)] text-[14px] mb-1">
-            Strict Standard: Mistake &ne; Misconception
-          </div>
-          <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">
-            Arithmetic slips, spelling errors, or skipped questions are <strong>never</strong> classified as misconceptions.
-            Only persistent evidence demonstrating a flawed underlying model, principle, or method from a completed examination is recorded here.
-          </div>
-        </div>
-      </div>
 
       {!hasData ? (
         <Card className="p-8 text-center my-6 border-dashed border-2">

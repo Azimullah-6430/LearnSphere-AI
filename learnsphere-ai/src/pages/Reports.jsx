@@ -47,7 +47,7 @@ export default function Reports() {
 
   return (
     <>
-      <PageHead title="Evaluation & Academic Reports" subtitle="Real-time evaluation summaries derived from submitted student papers." />
+      <PageHead title="Academic Reports" />
       
       {loading ? (
         <Card className="p-8 text-center text-[var(--text-soft)]">

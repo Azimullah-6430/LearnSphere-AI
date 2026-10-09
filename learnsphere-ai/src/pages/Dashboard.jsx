@@ -1,24 +1,42 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardHeader, StatCard, RowItem, Badge, Button } from '../components/ui/Primitives.jsx'
+import { Card, CardHeader, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
-import { Sparkles, FileText, ArrowRight, AlertCircle, RefreshCw, BookOpen, Brain, Microscope, Trophy } from 'lucide-react'
+import {
+  Sparkles,
+  FileText,
+  ArrowRight,
+  AlertCircle,
+  RefreshCw,
+  BookOpen,
+  Brain,
+  Microscope,
+  Trophy,
+  Flame,
+  Clock,
+  TrendingUp,
+  Award,
+  CheckCircle2,
+  ChevronRight,
+  ShieldCheck,
+  Building2,
+  UserCheck,
+  Layers,
+  GraduationCap
+} from 'lucide-react'
 
 export default function Dashboard() {
   const { role, authenticated, authLoading, user } = useApp()
 
-  // 1. Loading User State
   if (authLoading) {
     return <DashboardLoadingSkeleton />
   }
 
-  // 2. Unauthenticated State
   if (!authenticated || !user) {
     return <UnauthenticatedState />
   }
 
-  // 3. Role Validation & Routing
   return role === 'teacher' ? <TeacherDashboard /> : <StudentDashboard />
 }
 
@@ -27,16 +45,16 @@ export default function Dashboard() {
 function DashboardLoadingSkeleton() {
   return (
     <div className="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading dashboard data">
-      <div>
-        <div className="h-7 w-64 bg-[var(--surface-alt)] rounded-md mb-2" />
-        <div className="h-4 w-96 bg-[var(--surface-alt)] rounded-md opacity-60" />
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+      <div className="h-28 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map(i => (
           <div key={i} className="h-24 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
         ))}
       </div>
-      <div className="h-64 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
+      <div className="grid md:grid-cols-[1.6fr_1fr] gap-4">
+        <div className="h-72 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
+        <div className="h-72 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
+      </div>
     </div>
   )
 }
@@ -44,11 +62,11 @@ function DashboardLoadingSkeleton() {
 function UnauthenticatedState() {
   const navigate = useNavigate()
   return (
-    <Card className="p-10 text-center my-10 max-w-md mx-auto">
+    <Card className="p-10 text-center my-10 max-w-md mx-auto shadow-sm">
       <AlertCircle size={40} className="text-[var(--warning)] mx-auto mb-3" />
       <h2 className="text-xl font-bold mb-2">Session Required</h2>
       <p className="text-sm text-[var(--text-soft)] mb-6">
-        Please log in with your credentials to access your personalized learning dashboard.
+        Please sign in to access your learning dashboard.
       </p>
       <Button onClick={() => navigate('/')} className="w-full">
         Sign In to LearnSphere
@@ -61,12 +79,11 @@ function UnauthenticatedState() {
 
 function StudentDashboard() {
   const navigate = useNavigate()
-  const { user } = useApp()
+  const { user, streakDays, formattedSessionTime } = useApp()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   
-  // Guard against race conditions across user account switches
   const activeUserIdRef = useRef(user?.id || user?._id || user?.email)
 
   useEffect(() => {
@@ -79,17 +96,16 @@ function StudentDashboard() {
 
       try {
         const res = await api.getDashboardAnalytics('student', user?.name || '')
-        // Prevent setting state if user switched while request was in-flight
         if (activeUserIdRef.current !== currentUserId) return
 
         if (res && res.success) {
           setData(res)
         } else {
-          setError(res?.error || 'Failed to load your student dashboard analytics.')
+          setError(res?.error || 'Failed to load dashboard data.')
         }
       } catch (err) {
         if (activeUserIdRef.current === currentUserId) {
-          setError(err?.message || 'Unable to connect to the analytics server.')
+          setError(err?.message || 'Unable to connect to the server.')
         }
       } finally {
         if (activeUserIdRef.current === currentUserId) {
@@ -103,7 +119,6 @@ function StudentDashboard() {
     }
   }, [user])
 
-  // Profile data extraction (authoritative from MongoDB user object)
   const isCollege = user?.level === 'college'
   const isSchool = user?.level === 'school'
 
@@ -115,55 +130,24 @@ function StudentDashboard() {
 
   const hasCollegeSemester = isCollege && currentSem !== null && currentSem !== '' && !isNaN(Number(currentSem))
 
-  // Dynamic Academic Format without hardcoded fallbacks
-  let academicLevelLabel = 'Not configured'
-  if (isCollege) academicLevelLabel = `COLLEGE · SEM ${currentSem || '?'}`
-  else if (isSchool) academicLevelLabel = 'SCHOOL'
-
-  let programSubtitle = 'Profile setup required'
+  let academicBadge = 'Student'
   if (isCollege) {
-    const parts = [
-      user?.degree || user?.program,
-      user?.department || user?.branch || user?.domain,
-      currentSem ? `Semester ${currentSem}` : null,
-      user?.current_year || user?.currentYear
-    ].filter(Boolean)
-    programSubtitle = parts.length > 0 ? `College Student · ${parts.join(' · ')}` : 'College Student (Semester setup required)'
+    academicBadge = `College · ${user?.department || user?.branch || 'Engineering'} · Sem ${currentSem || '—'}`
   } else if (isSchool) {
-    const parts = [
-      user?.board ? `${user.board} Board` : null,
-      user?.grade_level || user?.classLevel ? `Class ${user.grade_level || user.classLevel}` : null,
-      user?.stream,
-      user?.section ? `Sec ${user.section}` : null
-    ].filter(Boolean)
-    programSubtitle = parts.length > 0 ? `School Student · ${parts.join(' · ')}` : 'School Student (Grade setup required)'
-  }
-
-  let programStatValue = 'Not configured'
-  if (isCollege) {
-    programStatValue = [user?.degree || user?.program, user?.branch || user?.department || user?.domain].filter(Boolean).join(' - ') || 'Higher Education'
-  } else if (isSchool) {
-    if (user?.grade_level || user?.classLevel) {
-      programStatValue = `Class ${user.grade_level || user.classLevel}${user?.section ? ` (${user.section})` : ''}`
-    } else if (user?.board) {
-      programStatValue = `${user.board} Board`
-    }
+    academicBadge = `School · ${user?.board || 'Board'} · Class ${user?.grade_level || user?.classLevel || '—'}`
   }
 
   const recentEvals = data?.recentEvaluations || []
-  const weakTopics = data?.weakTopics || []
   const hasEvaluations = recentEvals.length > 0
 
-  // Calculate average score across authenticated user's graded exams
   const avgScore = hasEvaluations
     ? Math.round(recentEvals.reduce((acc, curr) => acc + (Number(curr.percentage) || 0), 0) / recentEvals.length)
     : null
 
-  // Error Loading State
   if (error && !data) {
     return (
       <div className="py-8">
-        <Card className="p-8 text-center max-w-lg mx-auto border-[var(--error)]">
+        <Card className="p-8 text-center max-w-lg mx-auto border-[var(--error)] shadow-sm">
           <AlertCircle size={36} className="text-[var(--error)] mx-auto mb-3" />
           <h2 className="text-lg font-bold mb-1">Error Loading Dashboard</h2>
           <p className="text-sm text-[var(--text-soft)] mb-5">{error}</p>
@@ -176,156 +160,242 @@ function StudentDashboard() {
   }
 
   return (
-    <>
-      {/* Personalized Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">Welcome back, {user?.name || 'Student'}.</h1>
-        <p className="text-[var(--text-soft)] text-sm">
-          {programSubtitle}
-        </p>
+    <div className="space-y-6">
+      {/* Executive Welcome Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--border)] p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] flex items-center gap-1.5">
+                <GraduationCap size={13} /> {academicBadge}
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                <Flame size={13} className="text-amber-500" /> {streakDays || 1} Day Streak
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                <Clock size={13} /> Session: {formattedSessionTime || '0m'}
+              </span>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text)]">
+              Welcome back, {user?.name || 'Student'}
+            </h1>
+            <p className="text-xs md:text-sm text-[var(--text-soft)] mt-1 font-medium">
+              {user?.institution_name || user?.school || user?.college || 'LearnSphere AI'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2 shadow-sm">
+              <BookOpen size={15} /> Self-Evaluation
+            </Button>
+            <Button variant="secondary" onClick={() => navigate('/app/trainer')} className="flex items-center gap-2">
+              <Brain size={15} /> AI Tutor
+            </Button>
+          </div>
+        </div>
       </div>
 
-      {/* College Semester Incomplete Banner */}
+      {/* College Semester Incomplete Notice */}
       {isCollege && !hasCollegeSemester && (
-        <div className="mb-5 p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between gap-4">
+        <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <AlertCircle size={22} className="text-amber-600 shrink-0" />
-            <div>
-              <div className="text-xs font-bold text-amber-900">Academic Semester Required for Curriculum Mapping</div>
-              <div className="text-xs text-amber-700">Configure your current program and semester context to unlock semester-specific syllabus mapping and AI study tools.</div>
+            <AlertCircle size={20} className="text-amber-600 shrink-0" />
+            <div className="text-xs font-bold text-amber-900 dark:text-amber-300">
+              Please set your current semester in Settings to align curriculum subjects and assessments.
             </div>
           </div>
-          <Button size="sm" onClick={() => navigate('/onboarding')} className="shrink-0">
-            Set Semester
+          <Button size="sm" onClick={() => navigate('/app/settings')} className="shrink-0">
+            Configure Semester
           </Button>
         </div>
       )}
 
-      {/* Account Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-5">
-        <StatCard 
-          label="Account Level" 
-          value={academicLevelLabel} 
-          delta={isCollege ? (currentSem ? `Semester ${currentSem} Context` : 'Semester Required') : (user?.board || 'School Board')} 
-          deltaTone={academicLevelLabel !== 'Not configured' ? 'up' : 'neutral'} 
-        />
-        <StatCard 
-          label="Evaluations Graded" 
-          value={loading ? '...' : recentEvals.length} 
-          delta="Stored in MongoDB" 
-        />
-        <StatCard 
-          label="Mastery Average" 
-          value={loading ? '...' : (avgScore !== null ? `${avgScore}%` : 'No data')} 
-          delta={avgScore !== null ? (avgScore >= 75 ? 'Strong performance' : 'Areas to improve') : 'Take your first test'} 
-          deltaTone={avgScore !== null && avgScore >= 75 ? 'up' : 'neutral'}
-        />
-        <StatCard 
-          label="Academic Program" 
-          value={programStatValue} 
-          delta={user?.institution_name || user?.school || user?.college || 'LearnSphere AI'} 
-        />
+      {/* Metric Cards Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Evaluations</span>
+            <FileText size={16} className="text-[var(--accent)]" />
+          </div>
+          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
+            {loading ? '...' : recentEvals.length}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1 flex items-center gap-1">
+            <CheckCircle2 size={12} className="text-[var(--success)]" /> Completed assessments
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Mastery Average</span>
+            <TrendingUp size={16} className="text-emerald-500" />
+          </div>
+          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
+            {loading ? '...' : (avgScore !== null ? `${avgScore}%` : '—')}
+          </div>
+          <div className="text-xs font-semibold mt-1">
+            {avgScore !== null ? (
+              <span className={avgScore >= 75 ? 'text-[var(--success)]' : avgScore >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'}>
+                {avgScore >= 75 ? 'Distinction Tier' : avgScore >= 50 ? 'Passing Tier' : 'Needs Practice'}
+              </span>
+            ) : (
+              <span className="text-[var(--text-faint)]">Awaiting first test</span>
+            )}
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Daily Streak</span>
+            <Flame size={16} className="text-amber-500" />
+          </div>
+          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
+            {streakDays || 1} <span className="text-base font-medium text-[var(--text-soft)]">{streakDays === 1 ? 'day' : 'days'}</span>
+          </div>
+          <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+            Active daily study
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Academic Status</span>
+            <ShieldCheck size={16} className="text-[var(--accent)]" />
+          </div>
+          <div className="text-lg lg:text-xl font-extrabold text-[var(--text)] truncate">
+            {isCollege ? (user?.degree || 'Undergraduate') : (user?.board ? `${user.board}` : 'Enrolled')}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1 truncate">
+            {isCollege ? (user?.department || 'Active Semester') : `Class ${user?.grade_level || user?.classLevel || '—'}`}
+          </div>
+        </div>
       </div>
 
-      {/* Main Content Area */}
-      {loading ? (
-        <div className="h-64 bg-[var(--surface)] rounded-xl border border-[var(--border)] flex items-center justify-center text-sm text-[var(--text-soft)] animate-pulse">
-          Loading your student evaluation history...
-        </div>
-      ) : !hasEvaluations ? (
-        /* Empty Dashboard State */
-        <Card className="p-8 text-center my-6 border-dashed border-2">
-          <FileText size={42} className="text-[var(--accent)] mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1">No Graded Evaluations Yet</h3>
-          <p className="text-sm text-[var(--text-soft)] max-w-md mx-auto mb-5">
-            Your personal evaluation record is empty. Upload a Question Paper and handwritten Answer Script to receive instant, strict AI grading and step-by-step feedback.
-          </p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2">
-              Start Self Evaluation <ArrowRight size={14} />
-            </Button>
-            <Button variant="outline" onClick={() => navigate('/app/trainer')}>
-              Practice with AI Trainer
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        /* Populated Dashboard */
-        <div className="grid md:grid-cols-[1.6fr_1fr] gap-4 mb-4">
-          <Card>
-            <CardHeader 
-              title="My Graded Answer Scripts" 
-              action={<Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>View all</Button>} 
-            />
+      {/* Main Grid: Graded Scripts + Quick Launch */}
+      <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">
+        {/* Left Column: Recent Graded Evaluations */}
+        <Card className="shadow-sm">
+          <CardHeader
+            title="Recent Evaluated Papers"
+            action={
+              <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
+                View all <ChevronRight size={13} className="ml-1" />
+              </Button>
+            }
+          />
+
+          {loading ? (
+            <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+              Loading evaluations...
+            </div>
+          ) : !hasEvaluations ? (
+            <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-xl p-6">
+              <FileText size={36} className="text-[var(--accent)] mx-auto mb-2.5 opacity-70" />
+              <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Papers Found</div>
+              <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4">
+                Submit a Question Paper and Answer Script to view instant detailed grading and feedback.
+              </p>
+              <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto">
+                Start Self-Evaluation
+              </Button>
+            </div>
+          ) : (
             <div className="divide-y divide-[var(--border)]">
-              {recentEvals.map((e, i) => (
-                <RowItem
-                  key={e.id || e._id || i}
-                  title={`${e.subject || 'Subject'} — ${e.assessment_title || 'Assessment'}`}
-                  subtitle={`Graded ${e.created_at || 'Recently'}`}
-                  right={
-                    <Badge tone={Number(e.percentage) >= 75 ? 'success' : Number(e.percentage) >= 50 ? 'warning' : 'error'}>
-                      {e.percentage}% {e.grade ? `(${e.grade})` : ''}
-                    </Badge>
-                  }
-                />
-              ))}
+              {recentEvals.slice(0, 5).map((e, idx) => {
+                const pct = Number(e.percentage) || 0
+                return (
+                  <div
+                    key={e.id || e._id || idx}
+                    onClick={() => navigate('/app/history')}
+                    className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs md:text-sm font-bold text-[var(--text)] truncate">
+                        {e.subject || 'Subject'}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                        {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
+                        {pct}% {e.grade ? `(${e.grade})` : ''}
+                      </Badge>
+                      <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Right Column: Learning Hub Modules */}
+        <div className="space-y-4">
+          <Card className="shadow-sm">
+            <CardHeader title="Learning Modules" />
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => navigate('/app/trainer')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <Brain size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">AI Academic Tutor</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Syllabus Coaching</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/reality-lab')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <Microscope size={20} className="text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Reality Lab</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Practical Scenarios</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/knowledge-challenge')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <Trophy size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Knowledge Challenge</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Module Drills</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/self-evaluation')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <BookOpen size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Self-Evaluation</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Grade Script</div>
+              </button>
             </div>
           </Card>
 
-          <div className="space-y-4">
-            {/* Quick Practice Access */}
-            <Card className="p-4">
-              <h3 className="font-bold text-sm mb-3">Interactive Learning Tools</h3>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => navigate('/app/trainer')}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group"
-                >
-                  <Brain size={18} className="text-[var(--accent)] mb-1 group-hover:scale-110 transition-transform" />
-                  <div className="text-xs font-bold text-[var(--text)]">AI Trainer</div>
-                  <div className="text-[11px] text-[var(--text-soft)]">Doubt solving</div>
-                </button>
-                <button
-                  onClick={() => navigate('/app/reality-lab')}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group"
-                >
-                  <Microscope size={18} className="text-[var(--success)] mb-1 group-hover:scale-110 transition-transform" />
-                  <div className="text-xs font-bold text-[var(--text)]">Reality Lab</div>
-                  <div className="text-[11px] text-[var(--text-soft)]">Real scenarios</div>
-                </button>
-                <button
-                  onClick={() => navigate('/app/knowledge-challenge')}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group"
-                >
-                  <Trophy size={18} className="text-[var(--warning)] mb-1 group-hover:scale-110 transition-transform" />
-                  <div className="text-xs font-bold text-[var(--text)]">Knowledge Quiz</div>
-                  <div className="text-[11px] text-[var(--text-soft)]">Test skills</div>
-                </button>
-                <button
-                  onClick={() => navigate('/app/self-evaluation')}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group"
-                >
-                  <BookOpen size={18} className="text-[var(--accent)] mb-1 group-hover:scale-110 transition-transform" />
-                  <div className="text-xs font-bold text-[var(--text)]">Self Eval</div>
-                  <div className="text-[11px] text-[var(--text-soft)]">Grade paper</div>
-                </button>
+          {/* Account Profile Summary */}
+          <Card className="p-4 shadow-sm">
+            <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+              Profile Summary
+            </div>
+            <div className="text-xs space-y-2 text-[var(--text-soft)]">
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+                <span>Account Name</span>
+                <span className="font-bold text-[var(--text)]">{user?.name}</span>
               </div>
-            </Card>
-
-            {/* Account Metadata Summary */}
-            <Card className="p-4">
-              <h3 className="font-bold text-xs uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Account Credentials</h3>
-              <div className="text-xs space-y-1.5 text-[var(--text-soft)]">
-                <div>Student Name: <strong className="text-[var(--text)]">{user?.name}</strong></div>
-                <div>Account ID: <strong className="text-[var(--text)]">{user?.email}</strong></div>
-                <div>Institution: <strong className="text-[var(--text)]">{user?.institution_name || user?.school || 'Not configured'}</strong></div>
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+                <span>Email ID</span>
+                <span className="font-bold text-[var(--text)]">{user?.email}</span>
               </div>
-            </Card>
-          </div>
+              <div className="flex justify-between items-center py-1">
+                <span>Institution</span>
+                <span className="font-bold text-[var(--text)]">{user?.institution_name || user?.school || user?.college || 'Configured'}</span>
+              </div>
+            </div>
+          </Card>
         </div>
-      )}
-    </>
+      </div>
+    </div>
   )
 }
 
@@ -360,67 +430,219 @@ function TeacherDashboard() {
   const hasEvaluations = recentEvals.length > 0
   const isCollege = user?.level === 'college' || user?.teacher_level === 'college'
 
+  const activeStudents = Array.from(new Set(recentEvals.map(e => e.student_name).filter(Boolean)))
+
   return (
-    <>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">Welcome, {user?.name || 'Teacher'}.</h1>
-        <p className="text-[var(--text-soft)] text-sm">
-          Teacher Portal · {isCollege ? `College Faculty (${user?.department || 'Higher Education'})` : `School Educator (${user?.board || 'School'})`}
-        </p>
-      </div>
+    <div className="space-y-6">
+      {/* Executive Teacher Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--border)] p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] flex items-center gap-1.5">
+                <Building2 size={13} /> {isCollege ? 'Higher Education Faculty' : 'School Educator'}
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                <UserCheck size={13} /> Faculty Verified
+              </span>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text)]">
+              Welcome, {user?.name || 'Faculty'}
+            </h1>
+            <p className="text-xs md:text-sm text-[var(--text-soft)] mt-1 font-medium">
+              {user?.institution_name || 'LearnSphere Academic Portal'} · {isCollege ? (user?.department || 'Department') : (user?.board || 'Board')}
+            </p>
+          </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-5">
-        <StatCard 
-          label="Account Role" 
-          value="TEACHER" 
-          delta={isCollege ? (user?.department || 'College Dept') : (user?.board || 'School Board')} 
-          deltaTone="up" 
-        />
-        <StatCard label="Evaluations Stored" value={loading ? '...' : recentEvals.length} delta="in Database" />
-        <StatCard label="Active Roster" value={loading ? '...' : (recentEvals.length > 0 ? Array.from(new Set(recentEvals.map(e => e.student_name))).length : 0)} delta="Graded Students" />
-        <StatCard label="Institution" value={user?.institution_name || 'LearnSphere AI'} delta={isCollege ? 'Higher Education' : (user?.board || 'School')} />
-      </div>
-
-      {loading ? (
-        <div className="h-64 bg-[var(--surface)] rounded-xl border border-[var(--border)] flex items-center justify-center text-sm text-[var(--text-soft)] animate-pulse">
-          Loading your evaluation roster...
+          <div className="flex items-center gap-2.5 shrink-0">
+            <Button onClick={() => navigate('/app/evaluate')} className="flex items-center gap-2 shadow-sm">
+              <FileText size={15} /> Evaluate Script
+            </Button>
+            <Button variant="secondary" onClick={() => navigate('/app/action-center')} className="flex items-center gap-2">
+              <Layers size={15} /> Action Center
+            </Button>
+          </div>
         </div>
-      ) : !hasEvaluations ? (
-        <Card className="p-8 text-center my-6 border-dashed border-2">
-          <FileText size={42} className="text-[var(--accent)] mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1">No evaluations submitted yet</h3>
-          <p className="text-sm text-[var(--text-soft)] max-w-md mx-auto mb-5">
-            Go to <strong>Evaluate Answer Script</strong> from the sidebar to upload a Question Paper and handwritten Answer Script for strict AI grading.
-          </p>
-          <Button onClick={() => navigate('/app/evaluate')} className="mx-auto">
-            Go to Evaluation Page
-          </Button>
-        </Card>
-      ) : (
-        <div className="grid md:grid-cols-[1.55fr_1fr] gap-3.5 mb-3.5">
-          <Card>
-            <CardHeader title="Recent Evaluations" action={<Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>View all</Button>} />
+      </div>
+
+      {/* Metrics Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Evaluations Graded</span>
+            <FileText size={16} className="text-[var(--accent)]" />
+          </div>
+          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
+            {loading ? '...' : recentEvals.length}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
+            Stored evaluation records
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Active Students</span>
+            <UserCheck size={16} className="text-emerald-500" />
+          </div>
+          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
+            {loading ? '...' : activeStudents.length}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
+            Graded student roster
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Department / Level</span>
+            <Building2 size={16} className="text-[var(--accent)]" />
+          </div>
+          <div className="text-base lg:text-lg font-extrabold text-[var(--text)] truncate">
+            {isCollege ? (user?.department || 'Higher Ed') : (user?.board || 'School')}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
+            Institutional branch
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
+          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
+            <span>Institution</span>
+            <ShieldCheck size={16} className="text-amber-500" />
+          </div>
+          <div className="text-base lg:text-lg font-extrabold text-[var(--text)] truncate">
+            {user?.institution_name || 'LearnSphere AI'}
+          </div>
+          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
+            Authoritative portal
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid: Evaluation Roster + Quick Tools */}
+      <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">
+        <Card className="shadow-sm">
+          <CardHeader
+            title="Recent Student Evaluations"
+            action={
+              <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
+                View all <ChevronRight size={13} className="ml-1" />
+              </Button>
+            }
+          />
+
+          {loading ? (
+            <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+              Loading student evaluations...
+            </div>
+          ) : !hasEvaluations ? (
+            <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-xl p-6">
+              <FileText size={36} className="text-[var(--accent)] mx-auto mb-2.5 opacity-70" />
+              <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Scripts Yet</div>
+              <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4">
+                Upload Question Papers and Student Answer Scripts in Evaluate to generate question-level marks and misconception analysis.
+              </p>
+              <Button size="sm" onClick={() => navigate('/app/evaluate')} className="mx-auto">
+                Evaluate Answer Script
+              </Button>
+            </div>
+          ) : (
             <div className="divide-y divide-[var(--border)]">
-              {recentEvals.map((e, i) => (
-                <RowItem
-                  key={e.id || e._id || i}
-                  title={`${e.student_name || 'Student'} — ${e.subject || 'Subject'}`}
-                  subtitle={`${e.assessment_title || 'Exam'} · ${e.created_at || 'Recently'}`}
-                  right={<Badge tone={Number(e.percentage) >= 75 ? 'success' : 'warning'}>{e.percentage}%</Badge>}
-                />
-              ))}
+              {recentEvals.slice(0, 5).map((e, idx) => {
+                const pct = Number(e.percentage) || 0
+                return (
+                  <div
+                    key={e.id || e._id || idx}
+                    onClick={() => navigate('/app/history')}
+                    className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs md:text-sm font-bold text-[var(--text)] truncate">
+                        {e.student_name || 'Student'} — {e.subject || 'Subject'}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                        {e.assessment_title || 'Exam'} · {e.created_at || 'Recently'}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <Badge tone={pct >= 75 ? 'success' : 'warning'}>
+                        {pct}%
+                      </Badge>
+                      <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Right Tools Column */}
+        <div className="space-y-4">
+          <Card className="shadow-sm">
+            <CardHeader title="Faculty Tools" />
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => navigate('/app/evaluate')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <FileText size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Evaluate Scripts</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Strict Grading</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/action-center')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <Layers size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Action Center</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Interventions</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/misconceptions')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <Brain size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Misconceptions</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Concept Gaps</div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/analytics')}
+                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+              >
+                <TrendingUp size={20} className="text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-[var(--text)]">Class Analytics</div>
+                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Performance</div>
+              </button>
             </div>
           </Card>
-          <Card>
-            <CardHeader title="Account Profile" />
-            <div className="p-4 bg-[var(--surface-alt)] rounded-lg text-xs leading-relaxed text-[var(--text-soft)] space-y-1.5">
-              <div>Logged in as <strong>{user?.name}</strong> ({user?.email}).</div>
-              <div>Institution: <strong>{user?.institution_name || 'Configured Profile'}</strong></div>
-              <div>Level: <strong>{isCollege ? 'College Educator' : `School Educator (${user?.board || 'Board'})`}</strong></div>
+
+          <Card className="p-4 shadow-sm">
+            <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+              Faculty Profile
+            </div>
+            <div className="text-xs space-y-2 text-[var(--text-soft)]">
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+                <span>Faculty Name</span>
+                <span className="font-bold text-[var(--text)]">{user?.name}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+                <span>Email ID</span>
+                <span className="font-bold text-[var(--text)]">{user?.email}</span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span>Institution</span>
+                <span className="font-bold text-[var(--text)]">{user?.institution_name || 'LearnSphere AI'}</span>
+              </div>
             </div>
           </Card>
         </div>
-      )}
-    </>
+      </div>
+    </div>
   )
 }
+

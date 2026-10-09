@@ -144,7 +144,6 @@ export default function Memory() {
     <>
       <PageHead
         title="Academic Memory"
-        subtitle="Spaced-repetition retention memory tracking mastered concepts and knowledge retention rates."
         action={
           <div className="flex items-center gap-2">
             {cards.length > 0 && (

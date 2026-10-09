@@ -1048,6 +1048,86 @@ export function getCurriculumValidationStatus(profile, syllabusData) {
  * Guarantees 100% subject, code, and module parity across all agents.
  * ABSOLUTE RULE: ONLY 'VALID' STATE EXPOSES SUBJECTS.
  */
+export function sanitizeSubjectName(name) {
+  if (!name || typeof name !== 'string') return ''
+  let cleaned = name.trim()
+
+  // Remove trailing regulation clauses e.g. "20.3 A student shall earn an additional..."
+  cleaned = cleaned.replace(/\s*\d+\.\d+.*$/i, '')
+  // Remove page numbers / table annotations e.g. "B.Tech. Information Technology 24..."
+  cleaned = cleaned.replace(/\s*B\.Tech\.?\s+.*$/i, '')
+
+  // Known subjects that frequently have department columns concatenated in elective syllabus tables
+  const knownPrefixes = [
+    'Artificial Intelligence and Machine Learning',
+    'Virtual and Augmented Reality',
+    'Sensor Technology',
+    'Robotics',
+    '3D Printing',
+    'Electric Vehicles',
+    'Industrial Automation',
+    'GIS and Remote Sensing',
+    'Computational Biology',
+    'Block Chain',
+    'Cyber Security',
+    'Data Science',
+    'Internet of Things',
+    'Cloud Computing',
+    'Quantum Computing',
+    'Big Data Analytics',
+    'DevOps',
+    'Augmented Reality',
+    'Machine Learning',
+    'Deep Learning',
+    'Natural Language Processing',
+    'Computer Vision'
+  ]
+
+  const deptKeywords = [
+    'Mechanical Engineering',
+    'Aeronautical Engineering',
+    'Polymer Engineering',
+    'Automobile Engineering',
+    'Civil Engineering',
+    'Biotechnology',
+    'Electrical and Electronics Engineering',
+    'Electronics and Instrumentation Engineering',
+    'Electronics and Communication Engineering',
+    'Artificial Intelligence and Data Science',
+    'Computer Science and Engineering',
+    'Information and Technology',
+    'Information Technology'
+  ]
+
+  for (const prefix of knownPrefixes) {
+    if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+      const remainder = cleaned.slice(prefix.length).trim()
+      if (remainder.length > 0) {
+        const matchesDept = deptKeywords.some(d => remainder.toLowerCase().includes(d.toLowerCase()))
+        if (matchesDept || /\b(Engineering|Technology|B\.Tech|\d+)\b/i.test(remainder)) {
+          return prefix
+        }
+      } else {
+        return prefix
+      }
+    }
+  }
+
+  for (const dept of deptKeywords) {
+    const idx = cleaned.indexOf(dept)
+    if (idx > 3) {
+      const candidate = cleaned.slice(0, idx).trim()
+      if (candidate.length > 2 && !deptKeywords.includes(candidate)) {
+        cleaned = candidate
+        break
+      }
+    }
+  }
+
+  cleaned = cleaned.replace(/[\s\d\-:_]+$/, '').trim()
+  return cleaned || name
+}
+
 export function getActiveValidatedCurriculum(profile, syllabusData) {
   const validation = getCurriculumValidationStatus(profile, syllabusData)
   const semester = profile?.semester || profile?.current_semester || syllabusData?.semester || null
@@ -1082,9 +1162,10 @@ export function getActiveValidatedCurriculum(profile, syllabusData) {
   if (Array.isArray(syllabusData.subjects) && syllabusData.subjects.length > 0) {
     subjects = syllabusData.subjects.map(s => {
       if (typeof s === 'object' && s !== null) {
+        const cleanName = sanitizeSubjectName(s.name || '')
         return {
           code: s.code || '',
-          name: s.name || '',
+          name: cleanName,
           type: s.type || s.category || 'Theory Core',
           category: s.category || s.type || 'Program Core',
           credits: s.credits || 4,
@@ -1096,12 +1177,24 @@ export function getActiveValidatedCurriculum(profile, syllabusData) {
           evidence_verified: s.evidence_verified ?? true
         }
       }
-      return { code: '', name: String(s), type: 'Theory Core', category: 'Core', credits: 4 }
+      return { code: '', name: sanitizeSubjectName(String(s)), type: 'Theory Core', category: 'Core', credits: 4 }
     }).filter(s => Boolean(s.name))
 
+    const seen = new Set()
+    subjects = subjects.filter(s => {
+      if (seen.has(s.name)) return false
+      seen.add(s.name)
+      return true
+    })
     subjectNames = subjects.map(s => s.name)
   } else if (Array.isArray(syllabusData.extracted_subjects) && syllabusData.extracted_subjects.length > 0) {
-    subjectNames = syllabusData.extracted_subjects.filter(Boolean)
+    const rawNames = syllabusData.extracted_subjects.filter(Boolean)
+    const seen = new Set()
+    subjectNames = rawNames.map(sanitizeSubjectName).filter(name => {
+      if (!name || seen.has(name)) return false
+      seen.add(name)
+      return true
+    })
     subjects = subjectNames.map(name => ({
       code: '',
       name,

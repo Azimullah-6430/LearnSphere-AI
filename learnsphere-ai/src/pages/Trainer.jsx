@@ -504,13 +504,10 @@ export default function Trainer() {
   if (!hasValidCurriculum) {
     return (
       <>
-        <PageHead
-          title="Personal AI Academic Tutor & Exam Coach"
-          subtitle="Syllabus-grounded intelligent tutor powered by conversational AI specially trained for student study."
-        />
+        <PageHead title="AI Academic Tutor" />
         <CurriculumReviewNotice
           curriculum={activeCurriculum}
-          featureName="Personal AI Trainer"
+          featureName="AI Academic Tutor"
           onOpenSyllabusModal={() => setIsSyllabusModalOpen(true)}
         />
         <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
@@ -518,21 +515,17 @@ export default function Trainer() {
     )
   }
 
-  const semBadge = activeCurriculum.semester ? `Semester ${activeCurriculum.semester}` : 'Semester Active'
-  const progBadge = activeCurriculum.degree ? `${activeCurriculum.degree}` : 'College'
-
   return (
     <>
       <PageHead
-        title="Personal AI Academic Tutor"
-        subtitle={`ChatGPT & Gemini-Grade Conversational AI Specially Trained for Student Mastery · ${semBadge} · ${progBadge}`}
+        title="AI Academic Tutor"
         action={
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
               <Sparkles size={13} className="text-emerald-500" /> AI Tutor Active
             </span>
             <span className="px-3 py-1 bg-amber-500/10 text-amber-600 border border-amber-500/20 rounded-full text-xs font-bold flex items-center gap-1">
-              <Flame size={14} className="text-amber-500 animate-bounce" /> {streakDays} Day Streak
+              <Flame size={14} className="text-amber-500" /> {streakDays} Day Streak
             </span>
           </div>
         }

@@ -158,10 +158,7 @@ export default function KnowledgeChallenge() {
 
   return (
     <>
-      <PageHead
-        title="Knowledge Transfer Challenge"
-        subtitle="Can your knowledge survive an unfamiliar real-world problem? 20 Questions per Module."
-      />
+      <PageHead title="Knowledge Transfer Challenge" />
 
       {!hasValidCurriculum ? (
         <>

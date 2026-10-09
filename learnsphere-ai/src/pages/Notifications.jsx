@@ -170,7 +170,6 @@ export default function Notifications() {
     <>
       <PageHead
         title="Notifications"
-        subtitle="Real-time alerts, evaluation updates, daily streaks, and synchronized opportunities."
         action={
           <div className="flex items-center gap-2">
             <Button

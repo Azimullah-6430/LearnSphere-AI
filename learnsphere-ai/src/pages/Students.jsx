@@ -28,7 +28,7 @@ export default function Students() {
 
   return (
     <>
-      <PageHead title="Students portfolio" subtitle="Student roster tracked live across sections in MongoDB Atlas." />
+      <PageHead title="Students Portfolio" />
       <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <SearchBox placeholder="Search students or section..." value={search} onChange={(e) => setSearch(e.target.value)} />

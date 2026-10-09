@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
-import { getDynamicSubjects } from '../data/syllabusData.js'
+import { getDynamicSubjects, sanitizeSubjectName } from '../data/syllabusData.js'
 import { api } from '../services/api.js'
 import {
   UploadCloud, FileText, CheckCircle2, AlertTriangle, Loader2,
@@ -25,11 +25,19 @@ export default function SelfEvaluation() {
   const activeProfile = user
 
   const dynamicSubjects = getDynamicSubjects(activeProfile, syllabusData)
-  const subjects = dynamicSubjects.length > 0
+  const rawSubjects = dynamicSubjects.length > 0
     ? dynamicSubjects
     : (activeProfile?.subjects?.length > 0
         ? activeProfile.subjects
         : ['Mathematics', 'Physics', 'Chemistry', 'Computer Science', 'General'])
+
+  const subjects = Array.from(
+    new Set(
+      rawSubjects
+        .map((s) => (typeof s === 'string' ? sanitizeSubjectName(s) : sanitizeSubjectName(s?.name || '')))
+        .filter(Boolean)
+    )
+  )
 
   // Upload state
   const [qpRawFile, setQpRawFile] = useState(null)
@@ -153,23 +161,7 @@ export default function SelfEvaluation() {
 
   return (
     <>
-      <PageHead
-        title="Student Self-Evaluation"
-        subtitle="Evaluated by the exact same strict, centralized AI teacher engine used across LearnSphere AI. Every question is individually assessed against academic marking standards."
-      />
-
-      {/* Engine Parity Notice */}
-      <div className="mb-6 p-4 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[13px] text-[var(--text)] flex items-start gap-3 shadow-sm">
-        <ShieldAlert size={22} className="text-[var(--accent)] shrink-0 mt-0.5" />
-        <div>
-          <div className="font-extrabold text-[var(--accent)] text-[14px] mb-0.5">
-            Centralized Strict Teacher Standards
-          </div>
-          <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">
-            Your self-evaluation is processed by the <strong>same unified evaluator</strong> as official teacher assessments. Question-wise marks, conceptual diagnostic feedback, step-by-step calculations, and expected answers are permanently saved to your academic profile.
-          </div>
-        </div>
-      </div>
+      <PageHead title="Student Self-Evaluation" />
 
       <div className="max-w-[880px] space-y-6">
         {errorMsg && (

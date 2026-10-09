@@ -190,10 +190,7 @@ export default function Settings() {
 
   return (
     <>
-      <PageHead
-        title="Account & Academic Settings"
-        subtitle="Manage your authoritative institutional profile, semester mapping, and syllabus documents."
-      />
+      <PageHead title="Settings" />
 
       <div className="grid md:grid-cols-[1.3fr_1fr] gap-6 max-w-[1020px]">
         {/* Left Card: Academic Profile Details */}

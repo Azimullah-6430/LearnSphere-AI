@@ -139,23 +139,7 @@ export default function ActionCenter() {
 
   return (
     <>
-      <PageHead
-        title="Teacher Action Center"
-        subtitle="Identifies students requiring teacher intervention derived directly from completed evaluations, question-level marks, and identified conceptual misconceptions."
-      />
-
-      {/* Target Filtering Rule Banner */}
-      <div className="mb-6 p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-[13px] text-[var(--text)] flex items-start gap-3 shadow-sm">
-        <TrendingDown size={22} className="text-[var(--error)] shrink-0 mt-0.5" />
-        <div>
-          <div className="font-extrabold text-[var(--error)] text-[14px] mb-0.5">
-            Evaluation-Driven Intervention Pipeline
-          </div>
-          <div className="text-[12.5px] text-[var(--text-soft)] leading-relaxed">
-            Consumes <strong>real question-level evaluation records</strong>. Flags students who lost &gt;20 marks in an assessment (calculated directly as <code>maximum marks &minus; marks obtained</code>), repeatedly miss questions on the same concept, have severe conceptual misconceptions, or submit incomplete multi-question scripts.
-          </div>
-        </div>
-      </div>
+      <PageHead title="Teacher Action Center" />
 
       {/* Toast Notification */}
       {toastMessage && (

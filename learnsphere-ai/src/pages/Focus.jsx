@@ -221,7 +221,6 @@ export default function Focus() {
     <div className={`transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-50 bg-[var(--bg)] p-8 flex flex-col justify-between overflow-y-auto' : ''}`}>
       <PageHead
         title="Focus Session & Deep Work"
-        subtitle="Distraction-free focus timer with manual ON/OFF control and ambient audio focus soundscapes."
         action={
           <div className="flex items-center gap-2">
             <button

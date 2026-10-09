@@ -240,10 +240,7 @@ export default function RealityLab() {
   if (!hasValidCurriculum || subjects.length === 0) {
     return (
       <>
-        <PageHead
-          title="Knowledge-to-Reality Lab"
-          subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena."
-        />
+        <PageHead title="Knowledge-to-Reality Lab" />
         <CurriculumReviewNotice
           curriculum={activeCurriculum}
           featureName="Knowledge-to-Reality Lab"
@@ -273,7 +270,6 @@ export default function RealityLab() {
     <>
       <PageHead
         title="Knowledge-to-Reality Lab"
-        subtitle="Apply your textbook knowledge to explain real-world engineering & everyday phenomena."
         action={
           <div className="flex items-center gap-2">
             <Button onClick={handleGenerateAIActivity} disabled={isGenerating} size="sm" variant="outline">

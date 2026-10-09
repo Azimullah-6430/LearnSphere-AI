@@ -56,10 +56,7 @@ export default function Plagiarism() {
 
   return (
     <>
-      <PageHead
-        title="Academic Integrity & Plagiarism Audit"
-        subtitle="Multi-level audit: SHA-256 exact file match, answer-level text similarity, and multi-student collusion detection."
-      />
+      <PageHead title="Academic Integrity & Plagiarism Audit" />
 
       {activeClass && (
         <div className="mb-4 p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-bold text-[var(--accent)] flex items-center justify-between">
@@ -67,16 +64,6 @@ export default function Plagiarism() {
           <Badge tone="accent">{activeClass.type}</Badge>
         </div>
       )}
-
-      <div className="mb-6 p-4 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[13px] text-[var(--text)] flex items-start gap-3">
-        <ShieldCheck size={22} className="text-[var(--accent)] shrink-0 mt-0.5" />
-        <div>
-          <div className="font-extrabold text-[var(--accent)] mb-0.5">Multi-Level Evidence-Based Plagiarism Audit Active</div>
-          <div className="text-[12.5px] text-[var(--text-soft)]">
-            Submissions are audited for: <strong>Level 1 — SHA-256 Full-File Exact Match</strong>, <strong>Level 2 — Question-Level Semantic Similarity</strong>, and <strong>Level 3 — 4+ Student Group Collusion</strong>.
-          </div>
-        </div>
-      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 mb-6">
         <StatCard label="Total Submissions Audited" value={totalChecked} delta="database audit" />

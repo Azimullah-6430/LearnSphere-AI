@@ -106,7 +106,6 @@ export default function Parent() {
     <>
       <PageHead
         title="Parent Agent & Study Time Audit"
-        subtitle="Real-time login session duration, start to end time report, and active streak monitoring for parents."
         action={
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--success-soft)] border border-[var(--border)] rounded-full">

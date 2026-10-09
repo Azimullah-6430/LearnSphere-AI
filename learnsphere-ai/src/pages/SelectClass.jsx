@@ -145,11 +145,8 @@ export default function SelectClass() {
             <Sparkles size={18} className="text-yellow-300 animate-pulse" />
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-            Welcome, {user?.name || 'Educator'}!
+            Welcome, {user?.name || 'Educator'}
           </h1>
-          <p className="text-white/80 text-sm max-w-xl font-medium">
-            Create a class or select an existing class below to navigate into the Teacher Portal and access paper evaluation, misconception maps, action center, and student analytics.
-          </p>
         </div>
 
         <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center min-w-[200px]">

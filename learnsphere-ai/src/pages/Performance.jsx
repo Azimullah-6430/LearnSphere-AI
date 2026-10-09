@@ -103,10 +103,7 @@ export default function Performance() {
 
   return (
     <>
-      <PageHead
-        title="Student Analytics & Performance Trends"
-        subtitle="Quantitative mastery trends, subject breakdown, question-wise accuracy, and concept diagnostics derived strictly from your stored evaluations."
-      />
+      <PageHead title="Student Analytics & Performance Trends" />
 
       {loading ? (
         <Card className="p-12 text-center my-6">
@@ -190,11 +187,11 @@ export default function Performance() {
           {/* Charts Row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="shadow-sm">
-              <CardHeader title="Score History Progression" subtitle="Percentage trajectory across completed evaluations" />
+              <CardHeader title="Score History Progression" />
               <TrendChart data={trendData} />
             </Card>
             <Card className="shadow-sm">
-              <CardHeader title="Subject-Wise Performance" subtitle="Average percentage by evaluated academic subject" />
+              <CardHeader title="Subject-Wise Performance" />
               <SubjectBarChart data={subjectChartData} />
             </Card>
           </div>
@@ -205,7 +202,6 @@ export default function Performance() {
               <div className="flex items-center justify-between border-b border-[var(--border)] pb-2.5">
                 <div>
                   <h3 className="text-sm font-extrabold text-[var(--text)]">Question-Wise Accuracy Breakdown</h3>
-                  <p className="text-xs text-[var(--text-soft)]">Aggregated accuracy and average marks awarded across question numbers</p>
                 </div>
                 <Badge tone="accent">Exam Question Analytics</Badge>
               </div>

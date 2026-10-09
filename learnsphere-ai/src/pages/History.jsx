@@ -157,8 +157,7 @@ export default function History() {
   return (
     <>
       <PageHead
-        title={role === 'teacher' ? 'Teacher Evaluation History & Traceability' : 'My Evaluation History'}
-        subtitle="Searchable repository of stored evaluation records. Opening any record displays question-level mark reasoning, script evidence, feedback, misconceptions, and Action Center relevance without recalculating."
+        title={role === 'teacher' ? 'Teacher Evaluation History' : 'My Evaluation History'}
       />
 
       {activeClass && role === 'teacher' && (
