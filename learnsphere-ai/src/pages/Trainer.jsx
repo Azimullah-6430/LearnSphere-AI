@@ -515,6 +515,9 @@ export default function Trainer() {
     )
   }
 
+  const semBadge = activeCurriculum.semester ? `Semester ${activeCurriculum.semester}` : 'Semester Active'
+  const progBadge = activeCurriculum.degree ? `${activeCurriculum.degree}` : 'College'
+
   return (
     <>
       <PageHead
