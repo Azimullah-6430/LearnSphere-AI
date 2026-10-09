@@ -251,7 +251,11 @@ export default function Evaluate() {
       formData.append('student_name', studentName)
       formData.append('roll_number', rollNumber)
       formData.append('assessment_title', assessmentTitle)
-      formData.append('role', role)
+      formData.append('role', role || 'teacher')
+      formData.append('evaluation_source', 'TEACHER_EVALUATION')
+      if (activeClass?.id) {
+        formData.append('class_id', activeClass.id)
+      }
       formData.append('level', level)
       formData.append('board', board)
       formData.append('stream', stream)

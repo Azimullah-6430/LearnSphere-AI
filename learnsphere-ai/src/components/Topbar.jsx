@@ -92,9 +92,11 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal,
 
         <button
           onClick={() => navigate('/app/notifications')}
-          className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
+          title="View notifications"
+          className="relative w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
         >
           <Bell size={17} strokeWidth={1.7} />
+          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
         </button>
 
         <button

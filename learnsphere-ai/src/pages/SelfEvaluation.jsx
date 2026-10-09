@@ -102,6 +102,7 @@ export default function SelfEvaluation() {
       formData.append('roll_number', user?.roll_number || user?.id || 'N/A')
       formData.append('assessment_title', `${effectiveSubject} Self Evaluation`)
       formData.append('role', 'student')
+      formData.append('evaluation_source', 'STUDENT_SELF_EVALUATION')
       formData.append('level', activeProfile?.level || 'Standard')
       formData.append('academic_level', activeProfile?.level || (activeProfile?.semester ? 'college' : 'school'))
       formData.append('board', activeProfile?.board || '')

@@ -254,10 +254,20 @@ export const api = {
     return request(`/api/misconceptions${qs ? '?' + qs : ''}`)
   },
 
+  // ── Streak ────────────────────────────────────────────────────────────────
+  getStreak: () => request('/api/user/streak'),
+  recordStreak: () => request('/api/user/streak', { method: 'POST' }),
+
   // ── Memory Cards ──────────────────────────────────────────────────────────
 
   getMemoryCards:   (studentName = '') =>
     request(`/api/memory/cards?student_name=${encodeURIComponent(studentName)}`),
+  createMemoryCard: (payload) =>
+    request('/api/memory/cards', { method: 'POST', body: payload }),
+  deleteMemoryCard: (cardId) =>
+    request(`/api/memory/cards/${encodeURIComponent(cardId)}`, { method: 'DELETE' }),
+  clearMemoryCards: () =>
+    request('/api/memory/cards', { method: 'DELETE' }),
   reviewMemoryCard: (cardId) =>
     request('/api/memory/review', { method: 'POST', body: { id: cardId } }),
 
@@ -265,8 +275,16 @@ export const api = {
 
   getNotifications: (role = 'all', studentName = '') =>
     request(`/api/notifications?role=${role}&student_name=${encodeURIComponent(studentName)}`),
+  createNotification: (payload) =>
+    request('/api/notifications', { method: 'POST', body: payload }),
   markNotificationRead: (id) =>
-    request(`/api/notifications/${id}/read`, { method: 'PUT' }),
+    request(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' }),
+  markAllNotificationsRead: () =>
+    request('/api/notifications/read-all', { method: 'PUT' }),
+  deleteNotification: (id) =>
+    request(`/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clearNotifications: () =>
+    request('/api/notifications', { method: 'DELETE' }),
 
   // ── Opportunities ─────────────────────────────────────────────────────────
 
@@ -275,9 +293,10 @@ export const api = {
     return request(`/api/opportunities${qs ? '?' + qs : ''}`)
   },
 
-  // ── Action Center ─────────────────────────────────────────────────────────
-
-  getActionCenterItems: () => request('/api/action-center'),
+  getActionCenterItems: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/action-center${qs ? '?' + qs : ''}`)
+  },
 
   updateActionCenterStatus: (itemId, status) =>
     request(`/api/action-center/${itemId}`, { method: 'PUT', body: { status } }),

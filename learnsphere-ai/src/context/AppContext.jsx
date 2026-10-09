@@ -168,27 +168,14 @@ export function AppProvider({ children }) {
 
   const _restoreStreak = useCallback((user) => {
     if (!user) return
-    const keyStreak   = getUserStorageKey('streak', user)
+    const serverStreak = Number(user.streak_count || user.streakDays || user.streak || 1)
+    const serverLastDate = user.last_active_date || getTodayStr()
+    setStreakDays(serverStreak)
+    setLastActiveDate(serverLastDate)
+    const keyStreak = getUserStorageKey('streak', user)
     const keyLastDate = getUserStorageKey('last_active_date', user)
-    if (!keyStreak || !keyLastDate) return
-
-    const today       = getTodayStr()
-    const yesterday   = getYesterdayStr()
-    const savedDate   = localStorage.getItem(keyLastDate) || ''
-    const savedStreak = parseInt(localStorage.getItem(keyStreak) || '1', 10)
-
-    let streak = savedStreak
-    if (!savedDate || savedDate === today) {
-      streak = savedStreak || 1
-    } else if (savedDate === yesterday) {
-      streak = savedStreak + 1
-    } else {
-      streak = 1
-    }
-    safeSet(keyStreak, streak.toString())
-    safeSet(keyLastDate, today)
-    setStreakDays(streak)
-    setLastActiveDate(today)
+    if (keyStreak) safeSet(keyStreak, serverStreak.toString())
+    if (keyLastDate) safeSet(keyLastDate, serverLastDate)
   }, [])
 
   const _startSession = useCallback(() => {

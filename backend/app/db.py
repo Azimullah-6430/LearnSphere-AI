@@ -36,9 +36,11 @@ try:
         ConnectionFailure, ServerSelectionTimeoutError,
         ConfigurationError, OperationFailure,
     )
+    from bson import ObjectId               # type: ignore
     PYMONGO_AVAILABLE = True
 except ImportError:
     PYMONGO_AVAILABLE = False
+    ObjectId = None
 
 # ── SQLite path (dev-only) ─────────────────────────────────────────────────────
 DB_PATH = _backend_dir / "learnsphere.db"
@@ -202,6 +204,9 @@ def _init_mongodb_indexes(db) -> None:
         # evaluations
         db["evaluations"].create_index("student_id", background=True)
         db["evaluations"].create_index("teacher_id",  background=True)
+        db["evaluations"].create_index("evaluation_source", background=True)
+        db["evaluations"].create_index("class_id", background=True)
+        db["evaluations"].create_index("created_by_user_id", background=True)
         db["evaluations"].create_index("student_name", background=True)
         db["evaluations"].create_index([("created_at", -1)], background=True)
         db["evaluations"].create_index("status", background=True)
@@ -225,12 +230,18 @@ def _init_mongodb_indexes(db) -> None:
 
         # misconceptions
         db["misconceptions"].create_index("student_name", background=True)
+        db["misconceptions"].create_index("student_id", background=True)
+        db["misconceptions"].create_index("teacher_id", background=True)
         db["misconceptions"].create_index("evaluation_id", background=True)
+        db["misconceptions"].create_index("evaluation_source", background=True)
+        db["misconceptions"].create_index("class_id", background=True)
 
         # action_items
         db["action_items"].create_index("teacher_id", background=True)
         db["action_items"].create_index("student_id", background=True)
         db["action_items"].create_index("evaluation_id", background=True)
+        db["action_items"].create_index("evaluation_source", background=True)
+        db["action_items"].create_index("class_id", background=True)
         db["action_items"].create_index([("created_at", -1)], background=True)
 
         # plagiarism
@@ -239,10 +250,33 @@ def _init_mongodb_indexes(db) -> None:
         # notifications
         db["notifications"].create_index([("created_at", -1)], background=True)
 
+        # opportunities and news
+        db["news_items"].create_index("id", unique=True, background=True)
+        db["news_items"].create_index("student_type", background=True)
+        db["news_items"].create_index("departments", background=True)
+        db["opportunities_items"].create_index("id", unique=True, background=True)
+        db["opportunities_items"].create_index("student_type", background=True)
+        db["opportunities_items"].create_index("departments", background=True)
+        db["opportunities_items"].create_index("opportunity_status", background=True)
+        db["opportunities_sync_log"].create_index([("timestamp", -1)], background=True)
+
+        # Legacy data migration for provenance
+        _migrate_mongo_legacy_provenance(db)
+
         logger.info("[DB] MongoDB indexes verified.")
     except Exception as exc:
         # Non-fatal: indexes may already exist
         logger.warning("[DB] Index setup notice: %s", exc)
+
+
+def _migrate_mongo_legacy_provenance(db) -> None:
+    """Safely migrate and repair legacy MongoDB evaluation, misconception, and action item records missing provenance."""
+    try:
+        from .evaluation.repair import run_safe_evaluation_repair
+        run_safe_evaluation_repair(dry_run=False, backup=True)
+    except Exception as exc:
+        logger.warning("[DB] Mongo legacy migration notice: %s", exc)
+
 
 
 def _init_sqlite_schema() -> None:
@@ -286,6 +320,10 @@ def _init_sqlite_schema() -> None:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_id TEXT,
         teacher_id TEXT,
+        created_by_user_id TEXT,
+        created_by_role TEXT,
+        evaluation_source TEXT DEFAULT 'UNKNOWN',
+        class_id TEXT,
         student_name TEXT NOT NULL,
         roll_number TEXT,
         subject TEXT NOT NULL,
@@ -342,6 +380,13 @@ def _init_sqlite_schema() -> None:
 
     CREATE TABLE IF NOT EXISTS misconceptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        evaluation_id TEXT,
+        student_id TEXT,
+        teacher_id TEXT,
+        created_by_user_id TEXT,
+        created_by_role TEXT,
+        evaluation_source TEXT DEFAULT 'UNKNOWN',
+        class_id TEXT,
         student_name TEXT,
         subject TEXT NOT NULL,
         topic TEXT NOT NULL,
@@ -369,6 +414,7 @@ def _init_sqlite_schema() -> None:
     CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         target_role TEXT NOT NULL,
+        target_id TEXT,
         target_name TEXT,
         title TEXT NOT NULL,
         message TEXT NOT NULL,
@@ -411,6 +457,10 @@ def _init_sqlite_schema() -> None:
         teacher_id TEXT,
         student_id TEXT,
         evaluation_id TEXT,
+        created_by_user_id TEXT,
+        created_by_role TEXT,
+        evaluation_source TEXT DEFAULT 'UNKNOWN',
+        class_id TEXT,
         student_name TEXT NOT NULL,
         roll_number TEXT,
         academic_status TEXT,
@@ -458,6 +508,10 @@ def _init_sqlite_schema() -> None:
         "semester": "INTEGER",
         "current_semester": "INTEGER",
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "streak_count": "INTEGER DEFAULT 1",
+        "last_active_date": "TEXT",
+        "longest_streak": "INTEGER DEFAULT 1",
+        "active_days_json": "TEXT",
     }
     for col, defn in needed_cols.items():
         if col not in existing_cols:
@@ -466,6 +520,93 @@ def _init_sqlite_schema() -> None:
             except Exception as exc:
                 logger.debug("[DB] SQLite column migration notice (%s): %s", col, exc)
 
+    # Migrations for evaluations
+    cursor.execute("PRAGMA table_info(evaluations);")
+    existing_eval_cols = {row[1] for row in cursor.fetchall()}
+    needed_eval_cols = {
+        "student_id": "TEXT",
+        "teacher_id": "TEXT",
+        "created_by_user_id": "TEXT",
+        "created_by_role": "TEXT",
+        "evaluation_source": "TEXT DEFAULT 'UNKNOWN'",
+        "class_id": "TEXT",
+        "is_teacher_overridden": "INTEGER DEFAULT 0",
+    }
+    for col, defn in needed_eval_cols.items():
+        if col not in existing_eval_cols:
+            try:
+                cursor.execute(f"ALTER TABLE evaluations ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite evaluations migration notice (%s): %s", col, exc)
+
+    # Migrations for misconceptions
+    cursor.execute("PRAGMA table_info(misconceptions);")
+    existing_misc_cols = {row[1] for row in cursor.fetchall()}
+    needed_misc_cols = {
+        "evaluation_id": "TEXT",
+        "student_id": "TEXT",
+        "teacher_id": "TEXT",
+        "created_by_user_id": "TEXT",
+        "created_by_role": "TEXT",
+        "evaluation_source": "TEXT DEFAULT 'UNKNOWN'",
+        "class_id": "TEXT",
+    }
+    for col, defn in needed_misc_cols.items():
+        if col not in existing_misc_cols:
+            try:
+                cursor.execute(f"ALTER TABLE misconceptions ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite misconceptions migration notice (%s): %s", col, exc)
+
+    # Migrations for action_items
+    cursor.execute("PRAGMA table_info(action_items);")
+    existing_act_cols = {row[1] for row in cursor.fetchall()}
+    needed_act_cols = {
+        "created_by_user_id": "TEXT",
+        "created_by_role": "TEXT",
+        "evaluation_source": "TEXT DEFAULT 'UNKNOWN'",
+        "class_id": "TEXT",
+    }
+    for col, defn in needed_act_cols.items():
+        if col not in existing_act_cols:
+            try:
+                cursor.execute(f"ALTER TABLE action_items ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite action_items migration notice (%s): %s", col, exc)
+
+    # Migrations for academic_memory
+    cursor.execute("PRAGMA table_info(academic_memory);")
+    existing_mem_cols = {row[1] for row in cursor.fetchall()}
+    needed_mem_cols = {
+        "student_id": "TEXT",
+        "student_name": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    }
+    for col, defn in needed_mem_cols.items():
+        if col not in existing_mem_cols:
+            try:
+                cursor.execute(f"ALTER TABLE academic_memory ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite academic_memory migration notice (%s): %s", col, exc)
+
+    # Migrations for notifications
+    cursor.execute("PRAGMA table_info(notifications);")
+    existing_notif_cols = {row[1] for row in cursor.fetchall()}
+    needed_notif_cols = {
+        "notification_id": "TEXT",
+        "user_id": "TEXT",
+        "action_url": "TEXT",
+        "category": "TEXT DEFAULT 'info'"
+    }
+    for col, defn in needed_notif_cols.items():
+        if col not in existing_notif_cols:
+            try:
+                cursor.execute(f"ALTER TABLE notifications ADD COLUMN {col} {defn};")
+            except Exception as exc:
+                logger.debug("[DB] SQLite notifications migration notice (%s): %s", col, exc)
+
+
+    # Migrations for syllabi
     cursor.execute("PRAGMA table_info(syllabi);")
     existing_syllabi_cols = {row[1] for row in cursor.fetchall()}
     needed_syllabi_cols = {
@@ -487,6 +628,22 @@ def _init_sqlite_schema() -> None:
                 cursor.execute(f"ALTER TABLE syllabi ADD COLUMN {col} {defn};")
             except Exception as exc:
                 logger.debug("[DB] SQLite syllabi column migration notice (%s): %s", col, exc)
+
+    # Migrations for notifications
+    cursor.execute("PRAGMA table_info(notifications);")
+    existing_notif_cols = {row[1] for row in cursor.fetchall()}
+    if "target_id" not in existing_notif_cols:
+        try:
+            cursor.execute("ALTER TABLE notifications ADD COLUMN target_id TEXT;")
+        except Exception as exc:
+            logger.debug("[DB] SQLite notifications migration notice: %s", exc)
+
+    # Safe data migration for SQLite legacy evaluations
+    try:
+        from .evaluation.repair import run_safe_evaluation_repair
+        run_safe_evaluation_repair(dry_run=False, backup=True)
+    except Exception as exc:
+        logger.debug("[DB] SQLite legacy data repair notice: %s", exc)
 
     cursor.execute("PRAGMA table_info(knowledge_challenges);")
     existing_kc_cols = {row[1] for row in cursor.fetchall()}

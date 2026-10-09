@@ -16,7 +16,8 @@ export default function MisconceptionMap() {
     async function loadMisconceptions() {
       setLoading(true)
       try {
-        const res = await api.getMisconceptions()
+        const params = activeClass?.id ? { class_id: activeClass.id } : {}
+        const res = await api.getMisconceptions(params)
         if (res && res.success && Array.isArray(res.misconceptions)) {
           setMisconceptions(res.misconceptions)
         } else {
@@ -29,7 +30,7 @@ export default function MisconceptionMap() {
       }
     }
     loadMisconceptions()
-  }, [])
+  }, [activeClass?.id])
 
   // Delete Misconception
   const handleDelete = (id) => {

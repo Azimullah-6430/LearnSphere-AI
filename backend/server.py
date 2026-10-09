@@ -219,6 +219,156 @@ def mongo_serialize(doc: Any) -> Any:
     return d
 
 
+def _update_user_streak(user_id: str, user_doc: dict) -> dict:
+    """
+    Calculate and persist daily streak based on calendar date in Asia/Kolkata (IST).
+    - If user already logged in today: retain streak.
+    - If user logged in yesterday: increment streak (+1), update longest_streak.
+    - If user missed one or more days: break streak and reset to 1.
+    """
+    if not user_id or not user_doc:
+        return user_doc or {}
+
+    try:
+        from datetime import datetime, timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(IST)
+        today_str = now_ist.strftime("%Y-%m-%d")
+        yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        last_date = str(user_doc.get("last_active_date") or "").strip()
+        try:
+            current_streak = int(user_doc.get("streak_count") or user_doc.get("streakDays") or 1)
+        except (ValueError, TypeError):
+            current_streak = 1
+
+        try:
+            longest_streak = int(user_doc.get("longest_streak") or current_streak)
+        except (ValueError, TypeError):
+            longest_streak = current_streak
+
+        raw_days = user_doc.get("active_days") or user_doc.get("active_days_json") or []
+        if isinstance(raw_days, str):
+            try:
+                active_days = json.loads(raw_days)
+            except Exception:
+                active_days = []
+        elif isinstance(raw_days, list):
+            active_days = list(raw_days)
+        else:
+            active_days = []
+
+        if today_str not in active_days:
+            active_days.append(today_str)
+            if len(active_days) > 60:
+                active_days = active_days[-60:]
+
+        if not last_date:
+            new_streak = 1
+        elif last_date == today_str:
+            new_streak = max(1, current_streak)
+        elif last_date == yesterday_str:
+            new_streak = current_streak + 1
+        else:
+            # Missed one or more days -> break streak
+            new_streak = 1
+
+        new_longest = max(longest_streak, new_streak)
+
+        update_fields = {
+            "streak_count": new_streak,
+            "streakDays": new_streak,
+            "last_active_date": today_str,
+            "longest_streak": new_longest,
+            "active_days": active_days,
+            "active_days_json": json.dumps(active_days),
+            "updated_at": datetime.utcnow()
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            query = {}
+            if ObjectId and len(str(user_id)) == 24:
+                try:
+                    query = {"_id": ObjectId(user_id)}
+                except Exception:
+                    query = {"$or": [{"user_id": str(user_id)}, {"id": str(user_id)}]}
+            else:
+                query = {"$or": [{"user_id": str(user_id)}, {"id": str(user_id)}]}
+            mongo_db["users"].update_one(query, {"$set": update_fields})
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users
+                SET streak_count=?, last_active_date=?, longest_streak=?, active_days_json=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=? OR user_id=?
+            """, (new_streak, today_str, new_longest, json.dumps(active_days), str(user_id), str(user_id)))
+            conn.commit()
+            conn.close()
+
+        user_doc.update(update_fields)
+        return user_doc
+    except Exception as exc:
+        logger.error("Error updating user streak: %s", exc)
+        return user_doc
+
+
+def _create_system_notification(
+    user_id: str,
+    title: str,
+    message: str,
+    category: str = "info",
+    action_url: str = None,
+    target_role: str = "student",
+    target_name: str = None
+) -> dict:
+    """Safely create and persist a real system notification for MongoDB and SQLite."""
+    try:
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        now = datetime.utcnow()
+        doc = {
+            "notification_id": notif_id,
+            "id": notif_id,
+            "user_id": str(user_id) if user_id else None,
+            "target_id": str(user_id) if user_id else None,
+            "target_role": target_role or "student",
+            "target_name": target_name,
+            "title": str(title),
+            "message": str(message),
+            "category": str(category or "info"),
+            "action_url": action_url,
+            "is_read": False,
+            "created_at": now,
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            # Check for recent duplicate within 1 hour to prevent notification spam
+            one_hour_ago = now - timedelta(hours=1)
+            existing = mongo_db["notifications"].find_one({
+                "target_id": str(user_id),
+                "title": str(title),
+                "created_at": {"$gte": one_hour_ago}
+            })
+            if not existing:
+                mongo_db["notifications"].insert_one(doc)
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO notifications (target_role, target_id, target_name, title, message, category, is_read, notification_id, action_url, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
+            """, (target_role or "student", str(user_id) if user_id else None, target_name, str(title), str(message), str(category or "info"), notif_id, action_url))
+            conn.commit()
+            conn.close()
+
+        return doc
+    except Exception as exc:
+        logger.error("Error creating system notification: %s", exc)
+        return {}
+
+
 def _normalize_user_doc(doc: dict) -> dict:
     """Normalize user profile fields for consistent client/server consumption."""
     if not doc or not isinstance(doc, dict):
@@ -232,6 +382,20 @@ def _normalize_user_doc(doc: dict) -> dict:
         or d.get("level")
         or "school"
     )
+
+    # Streak normalization
+    streak = d.get("streak_count") or d.get("streakDays") or 1
+    try:
+        streak = int(streak)
+    except Exception:
+        streak = 1
+    d["streak_count"] = streak
+    d["streakDays"] = streak
+    d["last_active_date"] = d.get("last_active_date") or ""
+    try:
+        d["longest_streak"] = int(d.get("longest_streak") or streak)
+    except Exception:
+        d["longest_streak"] = streak
 
     # College fields normalization
     degree = d.get("degree") or d.get("program") or d.get("course") or ""
@@ -276,6 +440,7 @@ def _normalize_user_doc(doc: dict) -> dict:
         d["grade_level"] = cls_val
 
     return d
+
 
 
 def _lookup_user_by_id(user_id: str):
@@ -742,8 +907,21 @@ def auth_register():
         session["user_id"] = stored_id
         session["role"]    = role
 
+        # Initialize streak on registration
+        user_doc = _update_user_streak(stored_id, user_doc)
         response_user = _normalize_user_doc(mongo_serialize(user_doc))
         response_user["id"] = stored_id
+
+        # Create welcoming system notification
+        _create_system_notification(
+            user_id=stored_id,
+            title="Welcome to LearnSphere AI",
+            message=f"Welcome, {name}! Your personalized learning environment and daily streak tracking are now active.",
+            category="success",
+            action_url="/app",
+            target_role=role,
+            target_name=name
+        )
 
         return jsonify({"success": True, "user": response_user}), 201
 
@@ -821,6 +999,9 @@ def auth_login():
     session["user_id"] = stored_id
     session["role"]    = db_role
 
+    # Update streak on successful daily login
+    user = _update_user_streak(stored_id, user)
+
     # Normalize profile for frontend
     user = _normalize_user_doc(user)
     user["id"] = stored_id
@@ -842,8 +1023,41 @@ def auth_me():
         session.clear()
         return jsonify({"success": False, "authenticated": False, "error": "User not found."}), 404
 
+    # Keep streak verified and up-to-date on session restoration
+    user = _update_user_streak(user_id, user)
     user = _normalize_user_doc(user)
     return jsonify({"success": True, "authenticated": True, "user": user}), 200
+
+
+@app.route("/api/user/streak", methods=["GET", "POST"])
+@require_auth
+def user_streak_api():
+    """Get or record daily active study streak in Asia/Kolkata timezone."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        user = _update_user_streak(user_id, user)
+        streak_count = user.get("streak_count") or user.get("streakDays") or 1
+        longest = user.get("longest_streak") or streak_count
+        last_date = user.get("last_active_date") or ""
+        active_days = user.get("active_days") or []
+        if isinstance(active_days, str):
+            try:
+                active_days = json.loads(active_days)
+            except Exception:
+                active_days = []
+        return jsonify({
+            "success": True,
+            "streak": streak_count,
+            "streak_count": streak_count,
+            "streakDays": streak_count,
+            "longest_streak": longest,
+            "last_active_date": last_date,
+            "active_days": active_days
+        }), 200
+    except Exception as exc:
+        logger.error("User streak error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route("/api/user/profile", methods=["PUT"])
@@ -992,24 +1206,50 @@ def evaluate():
                 board  = user.get("board") or board
                 stream = user.get("stream") or stream
 
+        # Strict Provenance & Role Verification from Authenticated Session
+        if session_role == "student":
+            evaluation_source = "STUDENT_SELF_EVALUATION"
+            student_id = user_id
+            teacher_id = None
+            class_id = request.form.get("class_id") or request.form.get("classId") or None
+            created_by_user_id = user_id
+            created_by_role = "student"
+        else:
+            evaluation_source = "TEACHER_EVALUATION"
+            student_id = request.form.get("student_id") or request.form.get("studentId") or None
+            teacher_id = user_id
+            class_id = request.form.get("class_id") or request.form.get("classId") or None
+            created_by_user_id = user_id
+            created_by_role = "teacher"
+
         evaluation_request = {
-            "evaluation_id":   f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}",
-            "submitted_by":     user_id,
-            "submitter_role":   session_role,
-            "student_id":       user_id if session_role == "student" else (request.form.get("student_id") or None),
-            "teacher_id":       user_id if session_role == "teacher" else None,
-            "subject":          subject,
-            "student_name":     student_name,
-            "roll_number":      roll_number,
-            "assessment_title": assessment_title or "Self Evaluation Examination",
-            "level":            level,
-            "board":            board,
-            "stream":           stream,
-            "semester":         semester,
-            "question_paper":   qp_path,
-            "answer_script":    answer_path,
-            "rubrics":          rubric_path,
-            "syllabus":         syllabus_path,
+            "evaluation_id":       f"eval_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}",
+            "evaluation_source":   evaluation_source,
+            "evaluationSource":   evaluation_source,
+            "created_by_user_id":  created_by_user_id,
+            "createdByUserId":     created_by_user_id,
+            "created_by_role":     created_by_role,
+            "createdByRole":       created_by_role,
+            "class_id":            class_id,
+            "classId":             class_id,
+            "submitted_by":        user_id,
+            "submitter_role":      session_role,
+            "student_id":          student_id,
+            "studentId":           student_id,
+            "teacher_id":          teacher_id,
+            "teacherId":           teacher_id,
+            "subject":             subject,
+            "student_name":        student_name,
+            "roll_number":         roll_number,
+            "assessment_title":    assessment_title or ("Self Evaluation Examination" if session_role == "student" else f"{subject} Examination"),
+            "level":               level,
+            "board":               board,
+            "stream":              stream,
+            "semester":            semester,
+            "question_paper":      qp_path,
+            "answer_script":       answer_path,
+            "rubrics":             rubric_path,
+            "syllabus":            syllabus_path,
         }
 
         # ── Run evaluation ────────────────────────────────────────────────────
@@ -1069,6 +1309,7 @@ def get_evaluations():
     user_id      = _current_user_id()
     session_role = _current_role()
     subject      = request.args.get("subject")
+    class_id     = request.args.get("class_id") or request.args.get("classId")
     user         = _lookup_user_by_id(user_id)
     user_email   = user.get("email", "") if user else ""
     student_name = user.get("name", "") if user else ""
@@ -1076,7 +1317,7 @@ def get_evaluations():
     mongo_db = get_mongodb()
     if mongo_db is not None:
         if session_role == "student":
-            # Students see ONLY their own evaluations (by user_id, email, or student_name)
+            # Students see ONLY their own evaluations
             query: dict = {
                 "$or": [
                     {"submitted_by": user_id},
@@ -1088,14 +1329,18 @@ def get_evaluations():
             if student_name:
                 query["$or"].append({"student_name": student_name})
         else:
-            # Teachers see evaluations they submitted or are assigned to
+            # Teachers see genuine teacher evaluations they submitted or are assigned to
             query = {
+                "evaluation_source": "TEACHER_EVALUATION",
                 "$or": [
                     {"submitted_by": user_id},
                     {"teacher_id": user_id},
+                    {"created_by_user_id": user_id},
                     {"submitted_by": user_email},
                 ]
             }
+            if class_id:
+                query["class_id"] = class_id
 
         if subject:
             query["subject"] = subject
@@ -1111,8 +1356,11 @@ def get_evaluations():
         q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR student_id = ? OR student_name = ?)"
         params: list = [user_id, user_id, student_name]
     else:
-        q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR teacher_id = ?)"
-        params = [user_id, user_id]
+        q = "SELECT * FROM evaluations WHERE (submitted_by = ? OR teacher_id = ? OR created_by_user_id = ?) AND evaluation_source = 'TEACHER_EVALUATION'"
+        params = [user_id, user_id, user_id]
+        if class_id:
+            q += " AND class_id = ?"
+            params.append(class_id)
 
     if subject:
         q += " AND subject = ?"
@@ -1241,7 +1489,7 @@ def delete_evaluation(eval_id: str):
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-@app.route("/api/evaluations/<eval_id>/override", methods=["PUT"])
+@app.route("/api/evaluations/<eval_id>/override", methods=["PUT", "POST"])
 @require_role("teacher")
 def override_evaluation_marks(eval_id: str):
     """Teacher mark override with audit trail."""
@@ -1286,6 +1534,27 @@ def override_evaluation_marks(eval_id: str):
             "teacher_review_required": False,
         }
 
+        def _safe_val(v, default=0.0):
+            try:
+                return float(v) if v is not None else default
+            except (ValueError, TypeError):
+                return default
+
+        # Recalculate marks lost and update linked action items
+        calc_marks_lost = round(max(0.0, total_marks - obtained_marks), 2)
+        affected_qs = [
+            str(q.get("question_number") or i + 1)
+            for i, q in enumerate(updated_questions)
+            if _safe_val(q.get("maximum_marks"), 0) > _safe_val(q.get("awarded_marks"), 0)
+        ]
+        marks_lost_per_q = {
+            str(q.get("question_number") or i + 1): round(
+                max(0.0, _safe_val(q.get("maximum_marks"), 0) - _safe_val(q.get("awarded_marks"), 0)), 2
+            )
+            for i, q in enumerate(updated_questions)
+            if _safe_val(q.get("maximum_marks"), 0) > _safe_val(q.get("awarded_marks"), 0)
+        }
+
         mongo_db = get_mongodb()
         if mongo_db is not None:
             # Audit log
@@ -1307,6 +1576,32 @@ def override_evaluation_marks(eval_id: str):
                     pass
             mongo_db["evaluations"].update_one({"id": eval_id}, {"$set": update_fields})
 
+            # Recalculate linked action items
+            mongo_db["action_items"].update_many(
+                {"$or": [{"evaluation_id": eval_id}, {"evaluation_id": str(eval_id)}], "category": "teacher_review"},
+                {"$set": {"status": "Resolved", "updated_at": now.strftime("%Y-%m-%d %H:%M:%S")}}
+            )
+            if calc_marks_lost > 20.0:
+                mongo_db["action_items"].update_many(
+                    {"$or": [{"evaluation_id": eval_id}, {"evaluation_id": str(eval_id)}], "category": "excessive_marks_lost"},
+                    {"$set": {
+                        "total_marks": obtained_marks,
+                        "maximum_marks": total_marks,
+                        "marks_lost": calc_marks_lost,
+                        "affected_questions": affected_qs,
+                        "marks_lost_per_question": marks_lost_per_q,
+                        "academic_status": f"At Risk (Lost {calc_marks_lost} marks)",
+                        "issue": f"Student lost {calc_marks_lost} marks ({obtained_marks}/{total_marks}) across {len(affected_qs)} questions.",
+                        "updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "Active",
+                    }}
+                )
+            else:
+                mongo_db["action_items"].update_many(
+                    {"$or": [{"evaluation_id": eval_id}, {"evaluation_id": str(eval_id)}], "category": "excessive_marks_lost"},
+                    {"$set": {"status": "Resolved", "updated_at": now.strftime("%Y-%m-%d %H:%M:%S")}}
+                )
+
         conn = get_sqlite_db()
         cursor = conn.cursor()
         cursor.execute(
@@ -1314,6 +1609,30 @@ def override_evaluation_marks(eval_id: str):
             "is_teacher_overridden=1 WHERE id=?",
             (obtained_marks, total_marks, percentage, grade, str(eval_id))
         )
+        cursor.execute(
+            "UPDATE action_items SET status = 'Resolved' WHERE evaluation_id = ? AND category = 'teacher_review'",
+            (str(eval_id),)
+        )
+        if calc_marks_lost > 20.0:
+            cursor.execute(
+                """UPDATE action_items 
+                   SET total_marks = ?, maximum_marks = ?, marks_lost = ?, 
+                       affected_questions = ?, marks_lost_per_question = ?,
+                       academic_status = ?, issue = ?, status = 'Active'
+                   WHERE evaluation_id = ? AND category = 'excessive_marks_lost'""",
+                (
+                    obtained_marks, total_marks, calc_marks_lost,
+                    json.dumps(affected_qs), json.dumps(marks_lost_per_q),
+                    f"At Risk (Lost {calc_marks_lost} marks)",
+                    f"Student lost {calc_marks_lost} marks ({obtained_marks}/{total_marks}).",
+                    str(eval_id)
+                )
+            )
+        else:
+            cursor.execute(
+                "UPDATE action_items SET status = 'Resolved' WHERE evaluation_id = ? AND category = 'excessive_marks_lost'",
+                (str(eval_id),)
+            )
         conn.commit()
         conn.close()
 
@@ -1338,24 +1657,30 @@ def override_evaluation_marks(eval_id: str):
 @require_auth
 def download_evaluation_pdf(eval_id: str):
     try:
+        user_id      = _current_user_id()
+        session_role = _current_role()
+        user         = _lookup_user_by_id(user_id)
+        user_email   = (user or {}).get("email", "")
+        user_name    = (user or {}).get("name", "")
+
         eval_data = None
         mongo_db  = get_mongodb()
         if mongo_db is not None:
             doc = None
-            if ObjectId:
+            if ObjectId and len(str(eval_id)) == 24:
                 try:
                     doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
                 except Exception:
                     pass
             if not doc:
-                doc = mongo_db["evaluations"].find_one({"id": eval_id})
+                doc = mongo_db["evaluations"].find_one({"id": str(eval_id)})
             if doc:
                 eval_data = mongo_serialize(doc)
 
         if not eval_data:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM evaluations WHERE id = ?", (eval_id,))
+            cursor.execute("SELECT * FROM evaluations WHERE id = ?", (str(eval_id),))
             row = cursor.fetchone()
             conn.close()
             if row:
@@ -1363,6 +1688,29 @@ def download_evaluation_pdf(eval_id: str):
 
         if not eval_data:
             return jsonify({"success": False, "error": "Evaluation not found."}), 404
+
+        # Strict authorization & provenance check
+        if session_role == "student":
+            is_owner = (
+                str(eval_data.get("submitted_by", "")) == user_id
+                or str(eval_data.get("student_id", "")) == user_id
+                or str(eval_data.get("submitted_by", "")) == user_email
+                or (user_name and eval_data.get("student_name") == user_name)
+            )
+            if not is_owner:
+                return jsonify({"success": False, "error": "Access denied."}), 403
+        else:
+            if eval_data.get("evaluation_source") != "TEACHER_EVALUATION":
+                return jsonify({"success": False, "error": "Access denied. Only teacher evaluations can be exported by teachers."}), 403
+            is_teacher_owner = (
+                str(eval_data.get("submitted_by", "")) == user_id
+                or str(eval_data.get("teacher_id", "")) == user_id
+                or str(eval_data.get("created_by_user_id", "")) == user_id
+                or str(eval_data.get("submitted_by", "")) == user_email
+                or eval_data.get("assigned_to_teacher")
+            )
+            if not is_teacher_owner:
+                return jsonify({"success": False, "error": "Access denied."}), 403
 
         pdf_bytes = generate_evaluation_pdf(eval_data)
         return send_file(
@@ -2268,25 +2616,111 @@ def get_single_subject_evidence(subject_identifier: str):
 @require_role("teacher")
 def get_action_center_items():
     teacher_id = _current_user_id()
+    user = _lookup_user_by_id(teacher_id)
+    user_email = user.get("email", "") if user else ""
+    class_id = request.args.get("class_id") or request.args.get("classId")
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            # Teacher sees action items from evaluations they submitted or unassigned
-            items_cursor = mongo_db["action_items"].find({
-                "$or": [{"teacher_id": teacher_id}, {"teacher_id": None}, {"teacher_id": ""}]
-            }).sort("created_at", -1)
-            items = [mongo_serialize(d) for d in items_cursor]
-            return jsonify({"success": True, "items": items}), 200
+            query = {
+                "evaluation_source": "TEACHER_EVALUATION",
+                "$or": [
+                    {"teacher_id": str(teacher_id)},
+                    {"teacher_id": str(user_email)},
+                    {"created_by_user_id": str(teacher_id)},
+                ]
+            }
+            if class_id:
+                query["class_id"] = str(class_id)
+            items_cursor = list(mongo_db["action_items"].find(query).sort("created_at", -1))
+            valid_items = []
+            for d in items_cursor:
+                # 1. Must be TEACHER_EVALUATION
+                if d.get("evaluation_source") != "TEACHER_EVALUATION":
+                    mongo_db["action_items"].update_one(
+                        {"_id": d["_id"]},
+                        {"$set": {"status": "NEEDS_REVIEW", "flagged_reason": "Non-teacher evaluation source"}}
+                    )
+                    continue
 
-        # SQLite: query action_items table
+                # 2. Must have valid source evaluation
+                eval_id = d.get("evaluation_id")
+                if not eval_id:
+                    mongo_db["action_items"].update_one(
+                        {"_id": d["_id"]},
+                        {"$set": {"status": "NEEDS_REVIEW", "flagged_reason": "Missing source evaluation ID"}}
+                    )
+                    continue
+
+                parent = mongo_db["evaluations"].find_one({"$or": [{"id": str(eval_id)}, {"evaluation_id": str(eval_id)}]})
+                if not parent and ObjectId and len(str(eval_id)) == 24:
+                    try:
+                        parent = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+                    except Exception:
+                        pass
+
+                if not parent:
+                    mongo_db["action_items"].update_one(
+                        {"_id": d["_id"]},
+                        {"$set": {"status": "NEEDS_REVIEW", "flagged_reason": "Parent evaluation not found"}}
+                    )
+                    continue
+
+                if parent.get("evaluation_source") != "TEACHER_EVALUATION":
+                    mongo_db["action_items"].update_one(
+                        {"_id": d["_id"]},
+                        {"$set": {"status": "NEEDS_REVIEW", "flagged_reason": "Parent evaluation is not a teacher evaluation"}}
+                    )
+                    continue
+
+                p_teacher = str(parent.get("teacher_id") or parent.get("created_by_user_id") or "")
+                if p_teacher and p_teacher not in (str(teacher_id), str(user_email)):
+                    mongo_db["action_items"].update_one(
+                        {"_id": d["_id"]},
+                        {"$set": {"status": "NEEDS_REVIEW", "flagged_reason": "Unauthorized teacher scope"}}
+                    )
+                    continue
+
+                if class_id and parent.get("class_id") and str(parent.get("class_id")) != str(class_id):
+                    continue
+
+                d_ser = mongo_serialize(d)
+                if not d_ser.get("question_num"):
+                    d_ser["question_num"] = d_ser.get("question_number") or "Evaluation"
+                if not d_ser.get("learning_gap"):
+                    d_ser["learning_gap"] = d_ser.get("misconception") or d_ser.get("issue") or ""
+                if not d_ser.get("recommended_action"):
+                    d_ser["recommended_action"] = d_ser.get("action") or ""
+                if not d_ser.get("updated_at"):
+                    d_ser["updated_at"] = d_ser.get("created_at")
+                valid_items.append(d_ser)
+
+            return jsonify({"success": True, "items": valid_items, "action_items": valid_items}), 200
+
+        # SQLite: query action_items joined with evaluations
         conn = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute(
-            """SELECT * FROM action_items 
-               WHERE teacher_id = ? OR teacher_id IS NULL OR teacher_id = '' 
-               ORDER BY created_at DESC""",
-            (teacher_id,)
-        )
+        if class_id:
+            cursor.execute(
+                """SELECT a.* FROM action_items a
+                   JOIN evaluations e ON a.evaluation_id = e.id
+                   WHERE (a.teacher_id = ? OR a.created_by_user_id = ?) 
+                     AND a.evaluation_source = 'TEACHER_EVALUATION' 
+                     AND e.evaluation_source = 'TEACHER_EVALUATION'
+                     AND a.class_id = ?
+                   ORDER BY a.created_at DESC""",
+                (str(teacher_id), str(teacher_id), str(class_id))
+            )
+        else:
+            cursor.execute(
+                """SELECT a.* FROM action_items a
+                   JOIN evaluations e ON a.evaluation_id = e.id
+                   WHERE (a.teacher_id = ? OR a.created_by_user_id = ?) 
+                     AND a.evaluation_source = 'TEACHER_EVALUATION' 
+                     AND e.evaluation_source = 'TEACHER_EVALUATION'
+                   ORDER BY a.created_at DESC""",
+                (str(teacher_id), str(teacher_id))
+            )
         rows = cursor.fetchall()
         items = []
         for r in rows:
@@ -2297,12 +2731,18 @@ def get_action_center_items():
                         d[json_field] = json.loads(d[json_field])
                     except Exception:
                         pass
+            if not d.get("question_num"):
+                d["question_num"] = d.get("question_number") or "Evaluation"
+            if not d.get("learning_gap"):
+                d["learning_gap"] = d.get("misconception") or d.get("issue") or ""
+            if not d.get("recommended_action"):
+                d["recommended_action"] = d.get("action") or ""
             items.append(d)
         conn.close()
-        return jsonify({"success": True, "items": items}), 200
+        return jsonify({"success": True, "items": items, "action_items": items}), 200
     except Exception as exc:
         logger.error("Action Center error: %s", exc)
-        return jsonify({"success": True, "items": []}), 200
+        return jsonify({"success": True, "items": [], "action_items": []}), 200
 
 
 @app.route("/api/action-center/<item_id>", methods=["PUT"])
@@ -2315,15 +2755,15 @@ def update_action_center_item(item_id: str):
         mongo_db   = get_mongodb()
         if mongo_db is not None:
             mongo_db["action_items"].update_one(
-                {"id": item_id},
+                {"id": item_id, "evaluation_source": "TEACHER_EVALUATION"},
                 {"$set": {"status": new_status, "updated_by": teacher_id,
                           "updated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}},
-                upsert=True,
+                upsert=False,
             )
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE action_items SET status = ? WHERE id = ?", (new_status, item_id))
+            cursor.execute("UPDATE action_items SET status = ? WHERE id = ? AND evaluation_source = 'TEACHER_EVALUATION'", (new_status, item_id))
             conn.commit()
             conn.close()
         return jsonify({"success": True, "id": item_id, "status": new_status}), 200
@@ -2340,6 +2780,7 @@ def update_action_center_item(item_id: str):
 def get_misconceptions():
     user_id      = _current_user_id()
     session_role = _current_role()
+    class_id     = request.args.get("class_id") or request.args.get("classId")
     try:
         user = _lookup_user_by_id(user_id)
         user_name = user.get("name", "") if user else ""
@@ -2357,24 +2798,82 @@ def get_misconceptions():
                 if user_name:
                     query["$or"].append({"student_name": user_name})
             else:
+                # Teachers only see genuine TEACHER_EVALUATION misconceptions within their authorized scope
                 query = {
+                    "evaluation_source": "TEACHER_EVALUATION",
                     "$or": [
-                        {"teacher_id": user_id},
-                        {"teacher_id": user_email},
-                        {"teacher_id": None},
+                        {"teacher_id": str(user_id)},
+                        {"teacher_id": str(user_email)},
+                        {"created_by_user_id": str(user_id)},
                     ]
                 }
-            docs = [mongo_serialize(d) for d in mongo_db["misconceptions"].find(query)]
+                if class_id:
+                    query["class_id"] = str(class_id)
+
+            raw_docs = list(mongo_db["misconceptions"].find(query).sort("created_at", -1))
+            docs = []
+            for d in raw_docs:
+                if session_role == "teacher":
+                    # 1. Must originate from TEACHER_EVALUATION
+                    if d.get("evaluation_source") != "TEACHER_EVALUATION":
+                        continue
+
+                    # 2. Must contain question-level evidence / concept
+                    concept = d.get("concept") or d.get("identified_concept") or d.get("topic")
+                    evidence = d.get("evidence") or d.get("student_answer") or d.get("description")
+                    if not concept or not evidence:
+                        continue
+
+                    # 3. Verify source evaluation authenticity and teacher authorization
+                    eval_id = d.get("evaluation_id")
+                    if eval_id:
+                        parent = mongo_db["evaluations"].find_one({"$or": [{"id": str(eval_id)}, {"evaluation_id": str(eval_id)}]})
+                        if not parent and ObjectId and len(str(eval_id)) == 24:
+                            try:
+                                parent = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+                            except Exception:
+                                pass
+                        if parent:
+                            # Must originate from TEACHER_EVALUATION
+                            if parent.get("evaluation_source") != "TEACHER_EVALUATION":
+                                continue
+                            # Must belong to teacher's authorized scope
+                            p_teacher = str(parent.get("teacher_id") or parent.get("created_by_user_id") or "")
+                            if p_teacher and p_teacher not in (str(user_id), str(user_email)):
+                                continue
+                            # If class_id specified, parent must match
+                            if class_id and parent.get("class_id") and str(parent.get("class_id")) != str(class_id):
+                                continue
+
+                docs.append(mongo_serialize(d))
+
             return jsonify({"success": True, "misconceptions": docs}), 200
 
         conn   = get_sqlite_db()
         cursor = conn.cursor()
         if session_role == "student":
             cursor.execute(
-                "SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (user_name,)
+                "SELECT * FROM misconceptions WHERE student_id = ? OR student_name = ? ORDER BY created_at DESC",
+                (user_id, user_name),
             )
         else:
-            cursor.execute("SELECT * FROM misconceptions ORDER BY created_at DESC")
+            if class_id:
+                cursor.execute(
+                    """SELECT * FROM misconceptions 
+                       WHERE (teacher_id = ? OR created_by_user_id = ?) 
+                         AND evaluation_source = 'TEACHER_EVALUATION' 
+                         AND class_id = ? 
+                       ORDER BY created_at DESC""",
+                    (user_id, user_id, class_id)
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM misconceptions 
+                       WHERE (teacher_id = ? OR created_by_user_id = ?) 
+                         AND evaluation_source = 'TEACHER_EVALUATION' 
+                       ORDER BY created_at DESC""",
+                    (user_id, user_id)
+                )
         rows = cursor.fetchall()
         conn.close()
         return jsonify({"success": True, "misconceptions": [dict(r) for r in rows]}), 200
@@ -2440,21 +2939,39 @@ def get_plagiarism_summary():
 @app.route("/api/students", methods=["GET"])
 @require_role("teacher")
 def get_students():
+    teacher_id = _current_user_id()
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        students_cursor = mongo_db["users"].find({"role": "student"})
+        students_cursor = list(mongo_db["users"].find({"role": "student"}))
+        all_evals = list(mongo_db["evaluations"].find({
+            "evaluation_source": "TEACHER_EVALUATION",
+            "$or": [
+                {"teacher_id": str(teacher_id)},
+                {"created_by_user_id": str(teacher_id)},
+            ]
+        }))
         students = []
         for s in students_cursor:
             name  = s.get("name", "")
-            evals = list(mongo_db["evaluations"].find({"student_name": name}))
+            s_id  = str(s.get("_id") or s.get("id") or s.get("user_id") or "")
+            s_email = s.get("email", "")
+            evals = [
+                e for e in all_evals
+                if (s_id and str(e.get("student_id") or "") == s_id)
+                or (s_email and str(e.get("student_id") or "") == s_email)
+                or (name and str(e.get("student_name") or "") == name)
+            ]
             avg   = round(sum(float(e.get("percentage", 0)) for e in evals) / len(evals), 1) if evals else 0.0
             students.append({
                 "id":          str(s["_id"]),
+                "student_id":  str(s.get("user_id") or s.get("id") or s["_id"]),
+                "studentId":   str(s.get("user_id") or s.get("id") or s["_id"]),
                 "name":        name,
                 "roll_number": s.get("roll_number", ""),
                 "section":     s.get("section", ""),
                 "level":       s.get("level", "school"),
                 "average":     avg,
+                "averageScore": avg,
                 "evaluations": len(evals),
                 "status":      "On track" if avg >= 75 else "Needs support" if avg >= 50 else "New Student",
             })
@@ -2464,13 +2981,27 @@ def get_students():
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE role = 'student'")
     rows = cursor.fetchall()
-    conn.close()
     students = []
     for r in rows:
         d = dict(r)
         d.pop("password_hash", None)
         d.pop("password", None)
+        cursor.execute("""
+            SELECT percentage FROM evaluations 
+            WHERE (student_name = ? OR student_id = ?) 
+              AND (teacher_id = ? OR created_by_user_id = ?)
+              AND evaluation_source = 'TEACHER_EVALUATION'
+        """, (d.get("name"), str(d.get("id")), str(teacher_id), str(teacher_id)))
+        e_rows = cursor.fetchall()
+        avg = round(sum(float(er[0] or 0) for er in e_rows) / len(e_rows), 1) if e_rows else 0.0
+        d["average"] = avg
+        d["averageScore"] = avg
+        d["student_id"] = str(d.get("user_id") or d.get("id"))
+        d["studentId"] = str(d.get("user_id") or d.get("id"))
+        d["evaluations"] = len(e_rows)
+        d["status"] = "On track" if avg >= 75 else "Needs support" if avg >= 50 else "New Student"
         students.append(d)
+    conn.close()
     return jsonify({"success": True, "students": students}), 200
 
 
@@ -2614,11 +3145,23 @@ def get_dashboard_analytics():
                 weak_topics  = [mongo_serialize(d) for d in
                                 mongo_db["misconceptions"].find({"$or": [{"student_id": user_id}, {"student_id": user_email}], "resolved": {"$ne": True}}).limit(5)]
             else:
-                # Teachers: show recent evaluations they submitted
+                # Teachers: show genuine teacher evaluations they submitted
+                eval_query = {
+                    "evaluation_source": "TEACHER_EVALUATION",
+                    "$or": [
+                        {"submitted_by": user_id},
+                        {"teacher_id": user_id},
+                        {"created_by_user_id": user_id},
+                    ]
+                }
                 recent_evals = [mongo_serialize(d) for d in
-                                mongo_db["evaluations"].find({"submitted_by": user_id}).sort("created_at", -1).limit(10)]
+                                mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(10)]
                 weak_topics  = [mongo_serialize(d) for d in
-                                mongo_db["misconceptions"].find({"teacher_id": user_id, "resolved": {"$ne": True}}).limit(5)]
+                                mongo_db["misconceptions"].find({
+                                    "evaluation_source": "TEACHER_EVALUATION",
+                                    "$or": [{"teacher_id": user_id}, {"created_by_user_id": user_id}],
+                                    "resolved": {"$ne": True}
+                                }).limit(5)]
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
@@ -2629,7 +3172,10 @@ def get_dashboard_analytics():
                     "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR submitted_by=?) ORDER BY created_at DESC LIMIT 10", (user_id, user_id, user_email)
                 )
             else:
-                cursor.execute("SELECT * FROM evaluations WHERE submitted_by=? ORDER BY created_at DESC LIMIT 10", (user_id,))
+                cursor.execute(
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR teacher_id=? OR created_by_user_id=?) AND evaluation_source='TEACHER_EVALUATION' ORDER BY created_at DESC LIMIT 10",
+                    (user_id, user_id, user_id)
+                )
             recent_evals = [dict(r) for r in cursor.fetchall()]
             conn.close()
     except Exception as exc:
@@ -2637,6 +3183,8 @@ def get_dashboard_analytics():
 
     return jsonify({
         "success":           True,
+        "role":              session_role,
+        "total_evaluations": len(recent_evals),
         "recentEvaluations": recent_evals,
         "weakTopics":        weak_topics,
         "academicMemory":    memory_items,
@@ -2648,11 +3196,14 @@ def get_dashboard_analytics():
 def get_student_analytics():
     user_id = _current_user_id()
     session_role = _current_role()
-    target_student_id = request.args.get("student_id") or user_id
+    teacher_user = _lookup_user_by_id(user_id) if session_role == "teacher" else None
+    teacher_email = (teacher_user or {}).get("email", "")
 
     # If role is student, they can ONLY view their own analytics
     if session_role == "student":
         target_student_id = user_id
+    else:
+        target_student_id = request.args.get("student_id") or user_id
 
     user = _lookup_user_by_id(target_student_id)
     user_email = (user or {}).get("email", "")
@@ -2663,40 +3214,99 @@ def get_student_analytics():
     misconceptions = []
     try:
         if mongo_db is not None:
-            eval_query = {
-                "$or": [
-                    {"submitted_by": target_student_id},
-                    {"student_id": target_student_id},
-                    {"submitted_by": user_email},
-                    {"student_id": user_email},
-                ]
-            }
-            if user_name:
-                eval_query["$or"].append({"student_name": user_name})
-            evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(eval_query).sort("created_at", 1)]
+            if session_role == "student":
+                eval_query = {
+                    "$or": [
+                        {"submitted_by": str(target_student_id)},
+                        {"student_id": str(target_student_id)},
+                        {"submitted_by": str(user_email)},
+                        {"student_id": str(user_email)},
+                    ]
+                }
+                if user_name:
+                    eval_query["$or"].append({"student_name": user_name})
 
-            misc_query = {
-                "$or": [
-                    {"student_id": target_student_id},
-                    {"student_id": user_email},
-                ]
-            }
-            if user_name:
-                misc_query["$or"].append({"student_name": user_name})
+                misc_query = {
+                    "$or": [
+                        {"student_id": str(target_student_id)},
+                        {"student_id": str(user_email)},
+                    ]
+                }
+                if user_name:
+                    misc_query["$or"].append({"student_name": user_name})
+            else:
+                # Teacher query: ONLY genuine TEACHER_EVALUATION records within authorized teacher scope
+                eval_query = {
+                    "evaluation_source": "TEACHER_EVALUATION",
+                    "$and": [
+                        {"$or": [
+                            {"teacher_id": str(user_id)},
+                            {"created_by_user_id": str(user_id)},
+                            {"teacher_id": str(teacher_email)},
+                        ]},
+                        {"$or": [
+                            {"student_id": str(target_student_id)},
+                            {"submitted_by": str(target_student_id)},
+                            {"student_id": str(user_email)},
+                            {"student_name": user_name},
+                        ]}
+                    ]
+                }
+                misc_query = {
+                    "evaluation_source": "TEACHER_EVALUATION",
+                    "$and": [
+                        {"$or": [
+                            {"teacher_id": str(user_id)},
+                            {"created_by_user_id": str(user_id)},
+                            {"teacher_id": str(teacher_email)},
+                        ]},
+                        {"$or": [
+                            {"student_id": str(target_student_id)},
+                            {"student_id": str(user_email)},
+                            {"student_name": user_name},
+                        ]}
+                    ]
+                }
+
+            evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find(eval_query).sort("created_at", 1)]
             misconceptions = [mongo_serialize(d) for d in mongo_db["misconceptions"].find(misc_query).sort("created_at", -1)]
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR student_name=?) ORDER BY created_at ASC",
-                (target_student_id, target_student_id, user_name),
-            )
-            evals = [dict(r) for r in cursor.fetchall()]
+            if session_role == "student":
+                cursor.execute(
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR student_name=?) ORDER BY created_at ASC",
+                    (str(target_student_id), str(target_student_id), user_name),
+                )
+                evals = [dict(r) for r in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT * FROM misconceptions WHERE (student_id=? OR student_name=?) ORDER BY created_at DESC",
+                    (str(target_student_id), user_name)
+                )
+                misconceptions = [dict(r) for r in cursor.fetchall()]
+            else:
+                cursor.execute(
+                    """SELECT * FROM evaluations 
+                       WHERE (student_id=? OR student_name=?) 
+                         AND (teacher_id=? OR created_by_user_id=?) 
+                         AND evaluation_source='TEACHER_EVALUATION' 
+                       ORDER BY created_at ASC""",
+                    (str(target_student_id), user_name, str(user_id), str(user_id)),
+                )
+                evals = [dict(r) for r in cursor.fetchall()]
+                cursor.execute(
+                    """SELECT * FROM misconceptions 
+                       WHERE (student_id=? OR student_name=?) 
+                         AND (teacher_id=? OR created_by_user_id=?) 
+                         AND evaluation_source='TEACHER_EVALUATION' 
+                       ORDER BY created_at DESC""",
+                    (str(target_student_id), user_name, str(user_id), str(user_id)),
+                )
+                misconceptions = [dict(r) for r in cursor.fetchall()]
+
             for ev in evals:
                 cursor.execute("SELECT * FROM evaluation_questions WHERE evaluation_id = ?", (ev.get("id"),))
                 ev["questions"] = [dict(r) for r in cursor.fetchall()]
-            cursor.execute("SELECT * FROM misconceptions WHERE student_name=? ORDER BY created_at DESC", (user_name,))
-            misconceptions = [dict(r) for r in cursor.fetchall()]
             conn.close()
 
         total_evals = len(evals)
@@ -3503,7 +4113,7 @@ def submit_challenge():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MEMORY CARDS
+# MEMORY CARDS (Academic Memory CRUD)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/memory/cards", methods=["GET"])
@@ -3518,7 +4128,7 @@ def get_memory_cards():
         if mongo_db is not None:
             query = {
                 "$or": [
-                    {"student_id": user_id},
+                    {"student_id": str(user_id)},
                     {"student_id": email},
                 ]
             }
@@ -3526,14 +4136,172 @@ def get_memory_cards():
                 query["$or"].append({"student_name": name})
             cards = [mongo_serialize(d) for d in
                      mongo_db["academic_memory"].find(query).sort("next_review", 1)]
+            
+            # If student has no memory cards yet, dynamically derive cards from completed evaluations
+            if not cards:
+                eval_query = {
+                    "$or": [
+                        {"student_id": str(user_id)},
+                        {"student_id": email},
+                    ]
+                }
+                if name:
+                    eval_query["$or"].append({"student_name": name})
+                recent_evals = list(mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(5))
+                now = datetime.utcnow()
+                derived_cards = []
+                for ev in recent_evals:
+                    subj = ev.get("subject") or "General"
+                    pct = float(ev.get("percentage") or 0.0)
+                    mastery_val = int(round(max(0, min(100, pct))))
+                    topic_title = ev.get("assessment_title") or f"{subj} Core Review"
+                    card_doc = {
+                        "student_id": str(user_id),
+                        "student_name": name or "Student",
+                        "subject": subj,
+                        "topic": topic_title,
+                        "mastery": mastery_val,
+                        "retention_rate": mastery_val,
+                        "status": "Mastered" if mastery_val >= 80 else "Learning",
+                        "last_reviewed": now,
+                        "next_review": now + timedelta(days=2),
+                        "created_at": now
+                    }
+                    res = mongo_db["academic_memory"].insert_one(card_doc)
+                    card_doc["id"] = str(res.inserted_id)
+                    derived_cards.append(mongo_serialize(card_doc))
+                cards = derived_cards
+
             return jsonify({"success": True, "cards": cards}), 200
+
         conn   = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM academic_memory WHERE student_name=? ORDER BY next_review ASC", (name,))
+        cursor.execute("SELECT * FROM academic_memory WHERE student_id=? OR student_name=? ORDER BY next_review ASC", (str(user_id), name))
         rows = cursor.fetchall()
         conn.close()
         return jsonify({"success": True, "cards": [dict(r) for r in rows]}), 200
     except Exception as exc:
+        logger.error("Get memory cards error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/memory/cards", methods=["POST"])
+@require_auth
+def create_memory_card():
+    try:
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id) or {}
+        data    = request.get_json(force=True) or {}
+        
+        subject = str(data.get("subject") or "").strip()
+        topic   = str(data.get("topic") or "").strip()
+        if not subject or not topic:
+            return jsonify({"success": False, "error": "Subject and topic are required."}), 400
+
+        mastery = int(data.get("mastery") or 0)
+        retention = int(data.get("retention_rate") or mastery)
+        status = str(data.get("status") or ("Mastered" if mastery >= 80 else "Learning"))
+        now = datetime.utcnow()
+        next_review = now + timedelta(days=3)
+
+        card_doc = {
+            "student_id": str(user_id),
+            "student_name": user.get("name", "Student"),
+            "subject": subject,
+            "topic": topic,
+            "mastery": max(0, min(100, mastery)),
+            "retention_rate": max(0, min(100, retention)),
+            "status": status,
+            "last_reviewed": now,
+            "next_review": next_review,
+            "created_at": now
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            res = mongo_db["academic_memory"].insert_one(card_doc)
+            card_doc["id"] = str(res.inserted_id)
+            stored_id = str(res.inserted_id)
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO academic_memory (student_id, student_name, subject, topic, mastery, retention_rate, status, last_reviewed, next_review, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (str(user_id), user.get("name", "Student"), subject, topic, mastery, retention, status, now.strftime("%Y-%m-%d %H:%M:%S"), next_review.strftime("%Y-%m-%d %H:%M:%S")))
+            stored_id = str(cursor.lastrowid)
+            conn.commit()
+            conn.close()
+            card_doc["id"] = stored_id
+
+        return jsonify({"success": True, "card": mongo_serialize(card_doc), "id": stored_id}), 201
+    except Exception as exc:
+        logger.error("Create memory card error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/memory/cards/<card_id>", methods=["DELETE"])
+@require_auth
+def delete_memory_card(card_id: str):
+    """Delete a specific academic memory card."""
+    try:
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id) or {}
+        name    = user.get("name", "")
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            id_clause = []
+            if ObjectId and len(str(card_id)) == 24:
+                try:
+                    id_clause.append({"_id": ObjectId(card_id)})
+                except Exception:
+                    pass
+            id_clause.append({"id": str(card_id)})
+            
+            mongo_db["academic_memory"].delete_many({
+                "$and": [
+                    {"$or": id_clause},
+                    {"$or": [{"student_id": str(user_id)}, {"student_name": name}]}
+                ]
+            })
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM academic_memory WHERE (id=? OR id=CAST(? AS INTEGER)) AND (student_id=? OR student_name=?)", (str(card_id), str(card_id), str(user_id), name))
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "id": card_id, "message": "Memory card deleted successfully."}), 200
+    except Exception as exc:
+        logger.error("Delete memory card error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/memory/cards", methods=["DELETE"])
+@require_auth
+def clear_memory_cards():
+    """Clear all academic memory cards for the current student."""
+    try:
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id) or {}
+        name    = user.get("name", "")
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["academic_memory"].delete_many({
+                "$or": [{"student_id": str(user_id)}, {"student_name": name}]
+            })
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM academic_memory WHERE student_id=? OR student_name=?", (str(user_id), name))
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "message": "All memory cards cleared."}), 200
+    except Exception as exc:
+        logger.error("Clear memory cards error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -3546,22 +4314,22 @@ def review_memory_card():
         next_rev = datetime.utcnow() + timedelta(days=3)
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            if ObjectId:
+            if ObjectId and len(str(card_id)) == 24:
                 try:
                     mongo_db["academic_memory"].update_one(
                         {"_id": ObjectId(card_id)},
-                        {"$set": {"status": "Mastered", "next_review": next_rev}}
+                        {"$set": {"status": "Mastered", "next_review": next_rev, "last_reviewed": datetime.utcnow()}}
                     )
                 except Exception:
                     pass
             mongo_db["academic_memory"].update_one(
                 {"id": str(card_id)},
-                {"$set": {"status": "Mastered", "next_review": next_rev}}
+                {"$set": {"status": "Mastered", "next_review": next_rev, "last_reviewed": datetime.utcnow()}}
             )
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE academic_memory SET status='Mastered', next_review=? WHERE id=?", (next_rev, card_id))
+            cursor.execute("UPDATE academic_memory SET status='Mastered', next_review=?, last_reviewed=CURRENT_TIMESTAMP WHERE id=?", (next_rev, card_id))
             conn.commit()
             conn.close()
         return jsonify({"success": True, "card_id": card_id}), 200
@@ -3570,7 +4338,7 @@ def review_memory_card():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NOTIFICATIONS
+# NOTIFICATIONS (Real Dynamic System Notifications)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/notifications", methods=["GET"])
@@ -3579,39 +4347,98 @@ def get_notifications():
     try:
         user_id      = _current_user_id()
         session_role = _current_role()
-        user         = _lookup_user_by_id(user_id)
-        student_name = (user or {}).get("name", "")
-        email        = (user or {}).get("email", "")
+        user         = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name", "")
+        email        = user.get("email", "")
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            query: dict = {}
-            if session_role == "student":
-                query["$or"] = [
-                    {"target_id": user_id},
+            query: dict = {
+                "$or": [
+                    {"target_id": str(user_id)},
+                    {"user_id": str(user_id)},
                     {"target_id": email},
                     {"target_role": "all"},
+                    {"target_role": session_role}
                 ]
-                if student_name:
-                    query["$or"].append({"target_role": "student", "target_name": student_name})
-            else:
-                query["$or"] = [
-                    {"target_id": user_id},
-                    {"target_id": email},
-                    {"target_role": "teacher"},
-                    {"target_role": "all"},
-                ]
+            }
+            if student_name:
+                query["$or"].append({"target_name": student_name})
             docs = [mongo_serialize(d) for d in
                     mongo_db["notifications"].find(query).sort("created_at", -1)]
+            
+            # If no notifications exist, generate real contextual system notifications for the user
+            if not docs:
+                streak_count = user.get("streak_count") or user.get("streakDays") or 1
+                level = user.get("level") or "college"
+                notifs_to_seed = [
+                    {
+                        "title": f"Daily Study Streak: {streak_count} Day{'s' if streak_count != 1 else ''}",
+                        "message": f"You're on a {streak_count}-day learning streak! Keep logging in daily to maintain momentum.",
+                        "category": "success",
+                        "action_url": "/app"
+                    },
+                    {
+                        "title": "AI Personal Trainer Ready",
+                        "message": f"Your {level.title()} syllabus and personalized study plan are synchronized with your academic profile.",
+                        "category": "info",
+                        "action_url": "/app/trainer"
+                    }
+                ]
+                for n in notifs_to_seed:
+                    created = _create_system_notification(
+                        user_id=user_id,
+                        title=n["title"],
+                        message=n["message"],
+                        category=n["category"],
+                        action_url=n["action_url"],
+                        target_role=session_role,
+                        target_name=student_name
+                    )
+                    if created:
+                        docs.append(mongo_serialize(created))
+
             return jsonify({"success": True, "notifications": docs}), 200
 
         conn   = get_sqlite_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM notifications WHERE target_name = ? OR target_role = 'all' OR target_role = ? ORDER BY created_at DESC", (student_name, session_role))
+        cursor.execute("""
+            SELECT * FROM notifications
+            WHERE target_id = ? OR user_id = ? OR target_name = ? OR target_role = 'all' OR target_role = ?
+            ORDER BY created_at DESC
+        """, (str(user_id), str(user_id), student_name, session_role))
         rows = cursor.fetchall()
         conn.close()
         return jsonify({"success": True, "notifications": [dict(r) for r in rows]}), 200
     except Exception as exc:
+        logger.error("Get notifications error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/notifications", methods=["POST"])
+@require_auth
+def create_notification_api():
+    try:
+        user_id = _current_user_id()
+        data = request.get_json(force=True) or {}
+        title = str(data.get("title") or "").strip()
+        message = str(data.get("message") or "").strip()
+        category = str(data.get("category") or "info").strip()
+        action_url = data.get("action_url")
+        if not title or not message:
+            return jsonify({"success": False, "error": "Title and message are required."}), 400
+
+        doc = _create_system_notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            category=category,
+            action_url=action_url,
+            target_role=_current_role(),
+        )
+        return jsonify({"success": True, "notification": mongo_serialize(doc)}), 201
+    except Exception as exc:
+        logger.error("Create notification error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -3621,7 +4448,7 @@ def mark_notification_read(notif_id: str):
     try:
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            if ObjectId:
+            if ObjectId and len(str(notif_id)) == 24:
                 try:
                     mongo_db["notifications"].update_one(
                         {"_id": ObjectId(notif_id)}, {"$set": {"is_read": True}}
@@ -3629,16 +4456,108 @@ def mark_notification_read(notif_id: str):
                 except Exception:
                     pass
             mongo_db["notifications"].update_one(
-                {"id": str(notif_id)}, {"$set": {"is_read": True}}
+                {"$or": [{"id": str(notif_id)}, {"notification_id": str(notif_id)}]},
+                {"$set": {"is_read": True}}
             )
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
-            cursor.execute("UPDATE notifications SET is_read=1 WHERE id=?", (notif_id,))
+            cursor.execute("UPDATE notifications SET is_read=1 WHERE id=? OR notification_id=?", (str(notif_id), str(notif_id)))
             conn.commit()
             conn.close()
         return jsonify({"success": True, "id": notif_id}), 200
     except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/notifications/read-all", methods=["PUT"])
+@require_auth
+def mark_all_notifications_read():
+    """Mark all notifications as read for current user."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        name = user.get("name", "")
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["notifications"].update_many(
+                {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_name": name}]},
+                {"$set": {"is_read": True}}
+            )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE notifications SET is_read=1 WHERE target_id=? OR user_id=? OR target_name=?", (str(user_id), str(user_id), name))
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "message": "All notifications marked as read."}), 200
+    except Exception as exc:
+        logger.error("Mark all read error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/notifications/<notif_id>", methods=["DELETE"])
+@require_auth
+def delete_notification_api(notif_id: str):
+    """Delete a specific notification."""
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            id_clause = []
+            if ObjectId and len(str(notif_id)) == 24:
+                try:
+                    id_clause.append({"_id": ObjectId(notif_id)})
+                except Exception:
+                    pass
+            id_clause.append({"id": str(notif_id)})
+            id_clause.append({"notification_id": str(notif_id)})
+            
+            mongo_db["notifications"].delete_many({
+                "$and": [
+                    {"$or": id_clause},
+                    {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_role": "all"}, {"target_role": _current_role()}]}
+                ]
+            })
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM notifications WHERE (id=? OR notification_id=?) AND (target_id=? OR user_id=? OR target_role='all')", (str(notif_id), str(notif_id), str(user_id), str(user_id)))
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "id": notif_id, "message": "Notification deleted."}), 200
+    except Exception as exc:
+        logger.error("Delete notification error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/notifications", methods=["DELETE"])
+@require_auth
+def clear_all_notifications_api():
+    """Clear all notifications for the current user."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        name = user.get("name", "")
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db["notifications"].delete_many(
+                {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_name": name}]}
+            )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM notifications WHERE target_id=? OR user_id=? OR target_name=?", (str(user_id), str(user_id), name))
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "message": "All notifications cleared."}), 200
+    except Exception as exc:
+        logger.error("Clear notifications error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -3674,6 +4593,7 @@ def get_opportunities_api():
 
 
 @app.route("/api/opportunities/verify", methods=["POST"])
+@app.route("/api/opportunities/refresh", methods=["POST"])
 @require_auth
 def run_opportunities_verification_api():
     """Trigger periodic verification pipeline manually or via admin/worker."""

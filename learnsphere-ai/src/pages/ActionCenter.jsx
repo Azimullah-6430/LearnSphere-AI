@@ -30,7 +30,7 @@ import {
 } from 'lucide-react'
 
 export default function ActionCenter() {
-  const { user, recordActivity } = useApp()
+  const { user, activeClass, recordActivity } = useApp()
   const navigate = useNavigate()
 
   // Items State
@@ -55,7 +55,8 @@ export default function ActionCenter() {
     async function fetchBackendItems() {
       setLoading(true)
       try {
-        const res = await api.getActionCenterItems()
+        const params = activeClass?.id ? { class_id: activeClass.id } : {}
+        const res = await api.getActionCenterItems(params)
         if (res && res.success && Array.isArray(res.items)) {
           setItems(res.items)
         } else {
@@ -69,7 +70,7 @@ export default function ActionCenter() {
       }
     }
     fetchBackendItems()
-  }, [user])
+  }, [user, activeClass?.id])
 
   const handleStatusChange = (id, newStatus) => {
     setItems((prev) =>
