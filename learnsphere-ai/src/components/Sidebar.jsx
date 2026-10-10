@@ -21,6 +21,7 @@ import {
   UploadCloud,
   Globe,
   Zap,
+  Compass,
 } from 'lucide-react'
 import { useApp } from '../context/AppContext.jsx'
 
@@ -123,6 +124,9 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
             </Item>
             <Item to="/app/reality-lab" icon={FlaskConical}>
               Reality Lab
+            </Item>
+            <Item to="/app/learn-anywhere" icon={Compass}>
+              Learn from Anywhere
             </Item>
             <NavLabel>Productivity & Growth</NavLabel>
             <Item to="/app/opportunities" icon={Globe}>

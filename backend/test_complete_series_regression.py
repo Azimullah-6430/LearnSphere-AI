@@ -166,7 +166,7 @@ class TestCompleteSeriesRegression(unittest.TestCase):
             "validation_status": "VALID",
             "detected_semesters": [3],
             "explicit_semester_identifier": "SEMESTER 3",
-            "course_title": "B.Tech Computer Science",
+            "course_title": "B.Tech Computer Science Standalone Course",
             "expected_subject_count": 1,
             "extracted_subjects": ["Data Structures & Algorithms"],
             "subjects": [
@@ -196,7 +196,7 @@ class TestCompleteSeriesRegression(unittest.TestCase):
             "validation_status": "VALID",
             "detected_semesters": [3],
             "explicit_semester_identifier": "SEMESTER 3",
-            "course_title": "B.Tech Computer Science",
+            "course_title": "B.Tech Computer Science Standalone Course",
             "expected_subject_count": 2,
             "extracted_subjects": ["Object Oriented Programming via Java", "Digital Logic & Computer Design"],
             "subjects": [
@@ -252,7 +252,7 @@ class TestCompleteSeriesRegression(unittest.TestCase):
             "validation_status": "VALID",
             "detected_semesters": [5],
             "explicit_semester_identifier": "SEMESTER 5",
-            "course_title": "B.Tech Information Technology",
+            "course_title": "B.Tech Information Technology Standalone Course",
             "expected_subject_count": 1,
             "extracted_subjects": ["Software Engineering"],
             "subjects": [
@@ -287,7 +287,7 @@ class TestCompleteSeriesRegression(unittest.TestCase):
             "validation_status": "VALID",
             "detected_semesters": [4],
             "explicit_semester_identifier": "SEMESTER 4",
-            "course_title": "B.Tech Civil Engineering",
+            "course_title": "B.Tech Civil Engineering Standalone Course",
             "expected_subject_count": 1,
             "extracted_subjects": ["Structural Analysis"],
             "subjects": [

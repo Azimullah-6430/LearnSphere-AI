@@ -2211,6 +2211,1074 @@ Return ONLY JSON:
         raw = self.generate_content(prompt, json_output=True)
         return self.parse_json_response(raw)
 
+    def evaluate_learn_anywhere_answer(
+        self,
+        subject: str,
+        topic: str,
+        question: str,
+        expected_answer: str,
+        student_answer: str,
+        attempt_number: int = 1,
+        preferred_language: str = "English"
+    ) -> Dict[str, Any]:
+        """
+        Evaluate a student's answer for Learn from Anywhere interactive concept checks.
+        Accepts semantically correct short answers even when wording or language differs.
+        Distinguishes conceptual misunderstandings from spelling/grammar errors.
+        Never penalizes language differences when academic meaning is correct.
+        """
+        lang_note = f"The student prefers {preferred_language}. Allow responses in {preferred_language} or mixed language/transliteration as long as academic concept is correct." if preferred_language and preferred_language.lower() != "english" else ""
+
+        prompt = f"""
+You are the Academic Evaluator for Learn from Anywhere in LearnSphere AI.
+Your task is to evaluate a student's answer to a syllabus concept check question.
+
+Subject: {subject}
+Syllabus Topic: {topic}
+Question: {question}
+Expected Reference Answer: {expected_answer}
+Student's Answer: {student_answer}
+Attempt Number: {attempt_number}
+{lang_note}
+
+EVALUATION DIRECTIVES:
+1. SEMANTIC MATCHING: Focus on academic concept accuracy, not exact word-for-word string match. Accept synonyms, rephrasing, and simplified descriptions.
+2. MULTILINGUAL TOLERANCE: Do not penalize language differences, transliteration, or native language terms (Hindi, Tamil, etc.) if the core scientific/mathematical meaning is correct.
+3. ERROR TYPE CLASSIFICATION:
+   - "none": Concept is fully correct.
+   - "spelling_grammar_only": Academic concept is correct, but minor spelling or grammar typos are present. Count as correct (`is_correct`: true, `score`: 90-100).
+   - "conceptual_misunderstanding": The student misunderstood the underlying academic law, formula, or physical cause.
+4. RETRY & HINTS: If incorrect (`is_correct`: false), provide a constructive hint without revealing the exact answer directly. Set `suggested_retry`: true. If attempt_number >= 2, provide a clearer step-by-step hint.
+
+Return ONLY a valid JSON object matching this schema:
+{{
+  "is_correct": true,
+  "score": 100,
+  "error_type": "none | spelling_grammar_only | conceptual_misunderstanding",
+  "feedback": "Concise specific feedback explaining why the answer is correct or incorrect",
+  "explanation": "Scientific/mathematical explanation linking directly to {topic}",
+  "suggested_retry": false,
+  "additional_hint": "Constructive hint for retrying if answer was incorrect"
+}}
+"""
+        try:
+            raw = self.generate_content(prompt, json_output=True)
+            res = self.parse_json_response(raw)
+            if isinstance(res, dict) and "is_correct" in res:
+                res.setdefault("error_type", "none" if res.get("is_correct") else "conceptual_misunderstanding")
+                res.setdefault("feedback", "Good effort!" if res.get("is_correct") else "Review the concept and try again.")
+                res.setdefault("explanation", f"Concept governed by principles of {topic}.")
+                res.setdefault("suggested_retry", not res.get("is_correct"))
+                return res
+        except Exception as e:
+            logger.warning(f"[GeminiService] evaluate_learn_anywhere_answer API call error: {e}")
+
+        # Offline / Rate-Limit Deterministic Fallback Evaluator
+        return self._evaluate_learn_anywhere_answer_fallback(
+            subject=subject,
+            topic=topic,
+            question=question,
+            expected_answer=expected_answer,
+            student_answer=student_answer,
+            attempt_number=attempt_number
+        )
+
+    def _evaluate_learn_anywhere_answer_fallback(
+        self,
+        subject: str,
+        topic: str,
+        question: str,
+        expected_answer: str,
+        student_answer: str,
+        attempt_number: int = 1
+    ) -> Dict[str, Any]:
+        """Deterministic, offline-resilient semantic evaluation fallback."""
+        st_clean = student_answer.strip().lower()
+        exp_clean = expected_answer.strip().lower()
+
+        st_words = set(re.findall(r'\w+', st_clean))
+        exp_words = set(re.findall(r'\w+', exp_clean))
+
+        stop_words = {"a", "an", "the", "is", "are", "was", "were", "it", "of", "to", "in", "and", "or", "by", "for", "with", "that", "this", "turns", "turn", "mixed", "when", "using", "shows", "show", "makes", "become", "gives", "gives", "into"}
+        st_filtered = st_words - stop_words
+        exp_filtered = exp_words - stop_words
+
+        if not st_clean:
+            return {
+                "is_correct": False,
+                "score": 0,
+                "error_type": "conceptual_misunderstanding",
+                "feedback": "Please enter an answer before submitting.",
+                "explanation": f"Key concept for {topic}: {expected_answer}",
+                "suggested_retry": True,
+                "additional_hint": "Think about what physical or mathematical change occurs."
+            }
+
+        if st_clean == exp_clean or st_clean in exp_clean or exp_clean in st_clean:
+            return {
+                "is_correct": True,
+                "score": 100,
+                "error_type": "none",
+                "feedback": "Excellent! Your answer accurately explains the concept.",
+                "explanation": f"Scientific principle: {expected_answer}",
+                "suggested_retry": False,
+                "additional_hint": ""
+            }
+
+        overlap = len(st_filtered & exp_filtered)
+        total_exp = len(exp_filtered) or 1
+        overlap_ratio = overlap / total_exp
+
+        if overlap_ratio >= 0.40 or (overlap >= 2 and overlap_ratio >= 0.30):
+            return {
+                "is_correct": True,
+                "score": 90,
+                "error_type": "none" if overlap_ratio >= 0.6 else "spelling_grammar_only",
+                "feedback": "Correct! Your answer captures the core academic concept.",
+                "explanation": f"Core academic theory for {topic}: {expected_answer}",
+                "suggested_retry": False,
+                "additional_hint": ""
+            }
+        else:
+            return {
+                "is_correct": False,
+                "score": 30,
+                "error_type": "conceptual_misunderstanding",
+                "feedback": f"Not quite. Focus on how {topic} operates in this activity.",
+                "explanation": f"Expected principle: {expected_answer}",
+                "suggested_retry": True,
+                "additional_hint": f"Hint (Attempt #{attempt_number}): Consider the relation between {topic} and the observed changes."
+            }
+
+    def generate_additional_practice_questions(
+        self,
+        subject: str,
+        topic: str,
+        difficulty: str = "Medium",
+        preferred_language: str = "English"
+    ) -> List[Dict[str, Any]]:
+        """Generate 2-3 additional targeted practice questions for a topic where student needs extra practice."""
+        prompt = f"""
+Generate 3 additional targeted practice questions on '{topic}' in '{subject}' for a student needing extra practice.
+Preferred Language: {preferred_language}
+
+Return ONLY a valid JSON list of question objects:
+[
+  {{
+    "question": "Targeted practice question 1?",
+    "answer": "Concise correct answer",
+    "explanation": "Why this answer is scientifically correct"
+  }},
+  ...
+]
+"""
+        try:
+            raw = self.generate_content(prompt, json_output=True)
+            res = self.parse_json_response(raw)
+            if isinstance(res, list) and len(res) > 0:
+                return res
+        except Exception as e:
+            logger.warning(f"[GeminiService] generate_additional_practice_questions error: {e}")
+
+        return [
+            {
+                "question": f"How does changing scale or volume affect {topic}?",
+                "answer": "It scales the physical interaction proportionally.",
+                "explanation": f"Proportionality is a fundamental rule in {topic}."
+            },
+            {
+                "question": f"What safety or environmental factor must be controlled during tests of {topic}?",
+                "answer": "Temperature, moisture, or surface cleanliness.",
+                "explanation": f"Environmental parameters directly influence real-world outcomes in {topic}."
+            }
+        ]
+
+    def generate_learn_anywhere(
+        self,
+        subject: str,
+        subject_id: str = "",
+        topic: str = "",
+        unit: str = "",
+        curriculum_reference: str = "",
+        resource_environment: str = "All Local Resources",
+        difficulty: str = "Medium",
+        validated_topics: List[str] = None,
+        syllabus_context: str = "",
+        semester: str = "",
+        program: str = "",
+        department: str = "",
+        custom_materials: str = "",
+        constraint_mode: str = "strict_only",
+        image_data: str = "",
+        preferred_language: str = "English",
+        accessibility_notes: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Generate a syllabus-grounded practical learning activity specifically tailored for rural/village students
+        with limited educational resources. Transforms difficult textbook concepts into understandable hands-on activities,
+        outdoor observations, or conceptual thought experiment analogs using safe, zero-cost everyday materials.
+
+        Strict safety & feasibility rules:
+        - NEVER recommend hazardous chemicals, mains electricity (220V), unsafe machinery, or open fire.
+        - Feasible, internally consistent, academically rigorous, and age-appropriate.
+        - Grounded directly in the authenticated student's validated curriculum topic.
+        - Distinguish predicted scientific outcomes from conditional real-world variations.
+        - For topics that cannot be safely/reliably physically demonstrated (e.g. quantum mechanics, nuclear reactions, astrophysics),
+          provide a safe physical analog / conceptual thought experiment while clearly stating the demonstration boundaries.
+        """
+        sem_str = f"Semester {semester}" if semester and "semester" not in str(semester).lower() else (str(semester) or "Active Semester")
+        active_topic = topic or (validated_topics[0] if validated_topics else "Core Practical Principle")
+        topics_str = ", ".join(validated_topics[:10]) if validated_topics else active_topic
+
+        constraint_instruction = "STRICT CONSTRAINT: You MUST design the activity using ONLY the exact objects and materials specified by the student. Do not introduce any external or store-bought materials." if constraint_mode == "strict_only" else "CONSTRAINT: Base the activity primarily around the student's available materials, but you may include minimal, common household items (e.g. clean water, spoon, paper, cotton thread, ruler, small cup) if strictly necessary."
+
+        custom_mat_section = f"- Student's Specific Available Objects / Surroundings: {custom_materials}" if custom_materials else "- Student's General Environment: Rural/Village surroundings with natural objects (soil, plants, water, stones, tools)"
+        image_notice = "- Student attached a photo of their available physical surroundings / materials for multimodal visual grounding." if image_data else ""
+        accessibility_section = f"- Accessibility / Resource Constraints: {accessibility_notes}" if accessibility_notes else ""
+
+        lang_instruction = f"Provide all explanations, steps, and questions in {preferred_language}, while preserving rigorous scientific/mathematical accuracy for technical terms." if preferred_language and preferred_language.lower() != "english" else "Provide explanations in simple, clear, accessible English before introducing formal academic terms."
+
+        prompt = f"""
+You are the AI Learning Assistant for 'Learn from Anywhere' in LearnSphere AI.
+Your mission is to transform an academic curriculum topic into an understandable, feasible, zero-cost, hands-on activity or conceptual observation for a student with limited educational resources in a rural or village setting.
+
+Academic & Curriculum Grounding:
+- Program / Degree: {program or 'Academic Curriculum'}
+- Department / Board: {department or 'General Science & Engineering'}
+- Academic Level: {sem_str}
+- Subject: {subject} (Subject ID: {subject_id or 'N/A'})
+- Syllabus Topic to Teach: {active_topic}
+- Unit / Module: {unit or 'Standard Curriculum Module'}
+- Curriculum Reference: {curriculum_reference or 'Accredited Syllabus'}
+- Validated Syllabus Concepts: {topics_str}
+- Local Resource Environment: {resource_environment}
+{custom_mat_section}
+{image_notice}
+{accessibility_section}
+- Material Constraint Mode: {constraint_mode} ({constraint_instruction})
+- Difficulty Level: {difficulty}
+- Preferred Language: {preferred_language} ({lang_instruction})
+
+Supported Pedagogical Approaches by Subject:
+1. Household-Object Demonstrations: Water cups, cloth strips, spoons, cardboard, thread, clay pots.
+2. Outdoor & Nature-Based Observations: Soil profiles, river sand, tree canopies, sun angle, shadows, rainwater percolation.
+3. Mathematics: Everyday counting, measuring, geometric shadows, pebble arrays for series/probability, water volume displacement.
+4. Physics: Low-cost mechanics, surface tension, capillary action, optics with water droplets, acoustics with bottles.
+5. Chemistry: Safe botanical pH indicators (turmeric, hibiscus), crystallization from salt/sugar, solubility, emulsions.
+6. Biology: Seed germination, transpiration in leaf bags, capillary dye in plant stems, leaf venation, root osmosis.
+7. Environmental Science: Soil erosion runoff, terracotta evaporative cooling, watershed percolation, natural compost breakdown.
+8. Engineering & Technology: Lever balance, bicycle gear ratios, siphon water transfer, twig truss structures.
+9. Non-Demonstrable / Abstract Topics (e.g. quantum mechanics, nuclear physics, relativity, pure calculus): If a physical experiment is impossible or dangerous, DO NOT fake a lab result. Instead, provide a safe physical analog / thought experiment / paper-and-shadow model, and clearly state in the limitations why a direct physical experiment cannot be performed.
+
+Strict Safety & Grounding Directives:
+1. SAFETY MANDATE: NEVER recommend hazardous chemicals (no strong acids/bases), mains electricity (220V), unsafe machinery, or fire.
+2. The activity must teach the ACTUAL selected topic ({active_topic}), not merely mention its name.
+3. Explain concepts in simple plain language before introducing technical academic formulas.
+4. Include the correct academic explanation, linking it directly to the textbook law or formula.
+5. Offer a no-purchase alternative for every item.
+6. Distinguish predicted scientific outcomes from variable real-world environmental factors (humidity, light angle, soil mineral variance).
+7. VISUAL EVIDENCE DIRECTIVES (WHEN IMAGE IS ATTACHED):
+   - Identify ONLY visible physical characteristics supported by visual evidence (shape, color, surface texture, leaf venation, visible gears, container shape).
+   - DO NOT claim that the photograph proves invisible properties (e.g., exact chemical composition, microscopic cellular structures, exact species name without visible diagnostic traits, exact numerical measurements, or unobserved experimental outcomes).
+   - Ask for clarification in 'clarification_needed' if the object or its relevant properties cannot be identified reliably visually.
+
+Return ONLY a valid JSON object matching this exact schema:
+{{
+  "activity_id": "lfa_{subject.lower()[:4]}_{difficulty.lower()}",
+  "activity_title": "Descriptive Activity Title",
+  "title": "Descriptive Activity Title",
+  "demonstration_type": "physical_demonstration | outdoor_observation | household_demonstration | thought_experiment_and_analog",
+  "image_analysis": {{
+    "image_processed": true,
+    "visible_features": [
+      "Observed physical feature 1",
+      "Observed physical feature 2"
+    ],
+    "identified_object_or_structure": "Observed object, plant, tool, or structure description",
+    "confidence_level": "high | medium | low",
+    "clarification_needed": "Questions if visual properties cannot be identified with high confidence",
+    "syllabus_connection": "Detailed explanation of how this visual observation connects to {active_topic}"
+  }},
+  "academic_grounding": {{
+    "subject": "{subject}",
+    "topic": "{active_topic}",
+    "unit": "{unit or 'Core Unit'}",
+    "curriculum_reference": "{curriculum_reference or 'Active Syllabus'}",
+    "grade_or_semester": "{sem_str}",
+    "program": "{program or 'Academic Curriculum'}",
+    "department": "{department or 'Science'}"
+  }},
+  "learning_objectives": [
+    "Specific academic learning outcome 1",
+    "Specific academic learning outcome 2"
+  ],
+  "real_world_concept": "Clear description of the physical, chemical, biological, or mathematical phenomenon being demonstrated",
+  "materials_student_has": [
+    "Item 1 available locally",
+    "Item 2 available locally"
+  ],
+  "safe_substitutions": [
+    "Safe zero-cost alternative 1 (e.g. Banana leaf instead of plastic sheet)",
+    "Safe alternative 2 (e.g. Charcoal dust instead of dark dye)"
+  ],
+  "no_purchase_alternative": "Comprehensive zero-cost substitution guide if specific household items are unavailable",
+  "steps": [
+    "Step 1: Preparation...",
+    "Step 2: Execution...",
+    "Step 3: Observation..."
+  ],
+  "simple_explanation": "Plain language explanation of why this activity works for young/rural students without prior lab training",
+  "academic_theory": "Rigorous scientific/mathematical explanation including governing formulas or laws",
+  "everyday_applications": "How this concept directly impacts farming, irrigation, village machinery, weather, sustainability, or household life",
+  "expected_observations": "What to see/measure and how to interpret it, noting real-world conditional variations",
+  "limitations_and_misconceptions": "Boundary conditions, physical limits, common misconceptions, and why certain abstract aspects rely on conceptual analogs",
+  "safety_precautions": "Clear safety precautions and adult supervision guidance where appropriate",
+  "understanding_questions": [
+    {{
+      "question": "Conceptual Question 1?",
+      "answer": "Concise answer",
+      "explanation": "Why this answer is scientifically correct"
+    }},
+    {{
+      "question": "Application Question 2?",
+      "answer": "Concise answer",
+      "explanation": "Why this answer is scientifically correct"
+    }},
+    {{
+      "question": "Analytical Question 3?",
+      "answer": "Concise answer",
+      "explanation": "Why this answer is scientifically correct"
+    }}
+  ],
+  "reflection_task": "A short conceptual thought experiment or reflection task connected to local surroundings",
+  "follow_up_practice": "A suggested follow-up problem or mini-investigation on the same syllabus topic",
+  "is_supported": true
+}}
+"""
+        files_payload = None
+        if image_data:
+            try:
+                b64_clean = image_data.split(",", 1)[1] if "," in image_data else image_data
+                mime_type = "image/jpeg"
+                if "data:image/png" in image_data:
+                    mime_type = "image/png"
+                elif "data:image/webp" in image_data:
+                    mime_type = "image/webp"
+                files_payload = [{"inline_data": {"mime_type": mime_type, "data": b64_clean}}]
+            except Exception as e:
+                logger.warning(f"[LearnAnywhere] Could not parse image payload: {e}")
+
+        try:
+            raw = self.generate_content(prompt, files=files_payload, json_output=True)
+            res = self.parse_json_response(raw)
+            if isinstance(res, dict) and (res.get("title") or res.get("activity_title") or res.get("academic_theory") or res.get("scientific_principle")):
+                return self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
+        except Exception as e:
+            logger.warning(f"[GeminiService] generate_learn_anywhere API call error: {e}")
+
+        fallback = self._build_deterministic_learn_anywhere(subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department)
+        return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
+
+    def _normalize_learn_anywhere_response(
+        self,
+        res: Dict[str, Any],
+        subject: str,
+        topic: str,
+        unit: str,
+        curriculum_ref: str,
+        resource_env: str,
+        difficulty: str,
+        semester: str,
+        program: str,
+        department: str,
+        constraint_mode: str
+    ) -> Dict[str, Any]:
+        """Normalize and enforce the strict 16-point schema, approach metadata, and backward compatibility."""
+        title = res.get("activity_title") or res.get("title") or f"Hands-on Investigation of {topic}"
+        res["activity_title"] = title
+        res["title"] = title
+
+        grounding = res.get("academic_grounding") or {}
+        if not isinstance(grounding, dict):
+            grounding = {}
+        grounding.setdefault("subject", subject)
+        grounding.setdefault("topic", topic)
+        grounding.setdefault("unit", unit or "Standard Unit")
+        grounding.setdefault("curriculum_reference", curriculum_ref or "Active Validated Syllabus")
+        grounding.setdefault("grade_or_semester", semester)
+        grounding.setdefault("program", program)
+        grounding.setdefault("department", department)
+        res["academic_grounding"] = grounding
+
+        res.setdefault("subject", subject)
+        res.setdefault("syllabus_topic", topic)
+        res.setdefault("resource_category", resource_env)
+        res.setdefault("constraint_mode", constraint_mode)
+        res.setdefault("is_supported", True)
+
+        demo_type = res.get("demonstration_type") or "physical_demonstration"
+        res["demonstration_type"] = demo_type
+
+        img_analysis = res.get("image_analysis")
+        if isinstance(img_analysis, dict) and img_analysis.get("image_processed"):
+            res["image_analysis"] = {
+                "image_processed": True,
+                "image_note": img_analysis.get("image_note") or "Image successfully analyzed and grounded in syllabus concept.",
+                "visible_features": img_analysis.get("visible_features") if isinstance(img_analysis.get("visible_features"), list) else [str(img_analysis.get("visible_features"))],
+                "identified_object_or_structure": img_analysis.get("identified_object_or_structure") or "Observed physical object / structure",
+                "confidence_level": img_analysis.get("confidence_level") or "high",
+                "clarification_needed": img_analysis.get("clarification_needed") or "",
+                "syllabus_connection": img_analysis.get("syllabus_connection") or f"Visible characteristics connected directly to {topic}"
+            }
+        else:
+            res["image_analysis"] = {
+                "image_processed": False,
+                "image_note": "Image analysis was unavailable or not attached; text-based practical activity was generated for your syllabus topic.",
+                "visible_features": [],
+                "identified_object_or_structure": "N/A",
+                "confidence_level": "N/A",
+                "clarification_needed": "",
+                "syllabus_connection": f"Activity directly connected to {topic}"
+            }
+
+        objs = res.get("learning_objectives") or []
+        if isinstance(objs, str):
+            objs = [objs]
+        if not objs and res.get("learning_objective"):
+            objs = [res["learning_objective"]]
+        res["learning_objectives"] = objs or [f"Understand the fundamental practical principles of {topic}"]
+        res["learning_objective"] = res["learning_objectives"][0]
+
+        mats = res.get("materials_student_has") or res.get("local_materials") or []
+        if isinstance(mats, str):
+            mats = [mats]
+        res["materials_student_has"] = mats or ["Locally sourceable items", "Clean water", "Measuring stick"]
+        res["local_materials"] = res["materials_student_has"]
+
+        subs = res.get("safe_substitutions") or []
+        if isinstance(subs, str):
+            subs = [subs]
+        res["safe_substitutions"] = subs
+
+        res.setdefault("no_purchase_alternative", "All required items can be gathered for free from natural surroundings, clean recycled containers, or standard kitchen tools.")
+
+        steps = res.get("steps") or []
+        if isinstance(steps, str):
+            steps = [steps]
+        res["steps"] = steps or [
+            "Step 1: Gather your local materials in a well-lit, clean area.",
+            "Step 2: Set up the trial apparatus according to the instructions.",
+            "Step 3: Measure and record the empirical observations."
+        ]
+
+        res.setdefault("simple_explanation", res.get("scientific_principle") or f"This activity demonstrates the physical behavior of {topic} through direct observable changes.")
+        res.setdefault("academic_theory", res.get("scientific_principle") or f"Governed by fundamental laws of {subject} related to {topic}.")
+        res["scientific_principle"] = res["academic_theory"]
+
+        res.setdefault("real_world_concept", f"Physical verification of {topic} in everyday environments.")
+
+        res.setdefault("everyday_applications", res.get("village_application") or "Directly applicable in agricultural crop management, irrigation, mechanics, sustainability, and local tools.")
+        res["village_application"] = res["everyday_applications"]
+
+        res.setdefault("expected_observations", res.get("expected_observation") or "Observable physical change matching theoretical expectations.")
+        res["expected_observation"] = res["expected_observations"]
+
+        res.setdefault("limitations_and_misconceptions", "Environmental parameters such as temperature and humidity may cause minor measurement variance.")
+
+        res.setdefault("safety_precautions", res.get("safety_notes") or "Work with clean tools on flat ground. Wash hands thoroughly with soap after the experiment.")
+        res["safety_notes"] = res["safety_precautions"]
+
+        questions = res.get("understanding_questions") or []
+        if not isinstance(questions, list) or len(questions) == 0:
+            questions = [
+                {
+                    "question": f"What is the primary governing factor in {topic}?",
+                    "answer": "The physical balance of applied forces and material properties.",
+                    "explanation": "This directly confirms the academic theory."
+                },
+                {
+                    "question": f"How does changing particle size or quantity impact the result?",
+                    "answer": "It alters the rate of physical interaction proportionally.",
+                    "explanation": "Rate of interaction depends directly on exposed surface area."
+                },
+                {
+                    "question": f"Why is this concept important in rural applications?",
+                    "answer": "It allows efficient resource utilization without expensive instruments.",
+                    "explanation": "Understanding basic physics/chemistry enables low-cost optimization."
+                }
+            ]
+        res["understanding_questions"] = questions
+
+        res.setdefault("reflection_task", res.get("reflection_question") or f"How would you explain the principle of {topic} to a local farmer or artisan?")
+        res["reflection_question"] = res["reflection_task"]
+
+        res.setdefault("follow_up_practice", f"Calculate the expected quantitative variance if temperature or material volume is doubled for {topic}.")
+
+        return res
+
+    def _build_deterministic_learn_anywhere(
+        self,
+        subject: str,
+        subject_id: str,
+        topic: str,
+        resource_env: str,
+        difficulty: str,
+        semester: str,
+        program: str,
+        department: str
+    ) -> Dict[str, Any]:
+        """
+        Deterministic, offline-resilient rural learning activity grounded in academic subjects
+        with complete 16-point structure and zero hazardous materials.
+        Supports:
+        - Physics / Mechanics / Optics
+        - Chemistry / Materials
+        - Biology / Agriculture / Ecology
+        - Mathematics / Geometry / Statistics
+        - Environmental Science / Sustainability
+        - Engineering / Computer Science / Mechanisms
+        - Abstract / Theoretical / Quantum (Thought Experiments)
+        """
+        sub_lower = subject.lower()
+        top_lower = topic.lower()
+
+        # 1. Abstract / Theoretical / Non-Demonstrable Topics (Quantum, Nuclear, Relativity, Abstract Pure Math)
+        if any(w in top_lower or w in sub_lower for w in ["quantum", "nuclear", "relativity", "astrophysic", "atomic structure", "subatomic", "particle physics"]):
+            return {
+                "activity_id": f"lfa_theo_{difficulty.lower()}",
+                "activity_title": f"Thought Experiment & Ripple Analogy: Exploring {topic or 'Quantum / Theoretical Concepts'}",
+                "title": f"Thought Experiment & Ripple Analogy: Exploring {topic or 'Quantum / Theoretical Concepts'}",
+                "demonstration_type": "thought_experiment_and_analog",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Theoretical & Modern Physics Principles",
+                    "unit": "Modern Physics & Theoretical Foundations",
+                    "curriculum_reference": "Accredited Physics Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Science & Engineering",
+                    "department": department or "Physics"
+                },
+                "learning_objectives": [
+                    "Explore microscopic or relativistic phenomena using classical macroscopic analogs and structured thought experiments.",
+                    "Differentiate between deterministic classical observations and probabilistic wave-particle behavior."
+                ],
+                "real_world_concept": "Wave-particle duality and probability distribution modeled through slit shadows and water ripple interference.",
+                "materials_student_has": [
+                    "A flat cardboard sheet with two narrow slits cut 2 mm apart",
+                    "A single point-source sunlight beam entering a dark room (or torch light)",
+                    "A shallow wide basin of water",
+                    "Two small pebbles"
+                ],
+                "safe_substitutions": [
+                    "Two razor blade edges held side-by-side between fingers instead of cut cardboard",
+                    "A comb held in sunlight against a white wall"
+                ],
+                "no_purchase_alternative": "Use any scrap cardboard from grocery boxes and sunlight coming through a window shutter crack.",
+                "steps": [
+                    "Step 1: In a darkened room, direct a narrow sunlight beam through the two parallel cardboard slits onto a flat white wall 2 meters away.",
+                    "Step 2: Observe the alternating bright and dark diffraction fringes formed by light wave interference (Young's double slit analog).",
+                    "Step 3: Drop two pebbles simultaneously 5 cm apart in the water basin and watch the overlapping constructive and destructive wave crests.",
+                    "Step 4: Conduct Einstein's thought experiment: If photons or electrons are sent one-by-one, each individual particle still builds up an interference pattern over time due to its probability wave function psi.",
+                    "Step 5: Tabulate the differences between classical billiard-ball trajectories and quantum probability amplitudes."
+                ],
+                "simple_explanation": "At microscopic scales, particles like electrons behave like ripples on a pond. Even though we cannot see a single atom in our village, we can understand how their probability waves add up and cancel out just like overlapping ripples when two stones drop into water.",
+                "academic_theory": "Governed by de Broglie wavelength lambda = h / p and the Schrödinger wave equation i*hbar*(d(psi)/dt) = H*psi. The probability density P(x) = |psi(x)|^2 gives the likelihood of detecting a quantum particle at position x. Interference arises from linear superposition of probability amplitudes: psi_total = psi_1 + psi_2.",
+                "everyday_applications": "Underpins modern solar photovoltaic panels, LED lighting used in rural solar lanterns, semiconductor microchips, and MRI medical imaging.",
+                "expected_observations": "Visible optical fringe patterns on the wall and distinct water wave nodes in the basin. Note that stray ambient light reduces contrast on the projection wall.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Quantum states and subatomic particles cannot be physically observed or safely isolated with household equipment. This activity uses classical wave analogs; electrons possess intrinsic quantum spin and non-locality that water ripples do not possess.",
+                "safety_precautions": "Never look directly into the sun. Perform the slit experiment using indirect reflected sunlight or safe low-power torch light.",
+                "understanding_questions": [
+                    {
+                        "question": "Why do two overlapping water waves create areas of completely calm water?",
+                        "answer": "Destructive interference occurs when the crest of one wave aligns with the trough of another (phase difference of 180 degrees), canceling each other out.",
+                        "explanation": "Wave superposition allows amplitudes of opposite signs to sum to zero."
+                    },
+                    {
+                        "question": "Why is a thought experiment necessary for understanding quantum mechanics in a household?",
+                        "answer": "Subatomic particles require high-vacuum particle accelerators and cryo-sensors, but logical mathematical thought experiments allow rigorous verification of principles.",
+                        "explanation": "Thought experiments (Gedankenexperiments) isolate core theoretical assumptions without hazardous equipment."
+                    },
+                    {
+                        "question": "How does de Broglie's formula (lambda = h/p) explain why a flying cricket ball does not show wave diffraction?",
+                        "answer": "Because Planck's constant h is extremely small (6.626e-34 J*s), the momentum p of a cricket ball makes its wavelength lambda unimaginably tiny, rendering wave effects undetectable.",
+                        "explanation": "Quantum wave properties only become significant when momentum p is comparable to subatomic scales."
+                    }
+                ],
+                "reflection_task": "How does a solar calculator or solar lantern convert sunlight into electricity using quantum photon absorption?",
+                "follow_up_practice": "Calculate the de Broglie wavelength of an electron (mass = 9.11e-31 kg) moving at 10^6 m/s.",
+                "is_supported": True
+            }
+
+        # 2. Biology / Agriculture / Botany / Life Sciences
+        elif any(w in sub_lower or w in top_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "crop", "seed", "transpir"]):
+            return {
+                "activity_id": f"lfa_bio_{difficulty.lower()}",
+                "activity_title": f"Non-Invasive Plant Transpiration & Stomatal Regulation Investigation for {topic or 'Plant Physiology'}",
+                "title": f"Non-Invasive Plant Transpiration & Stomatal Regulation Investigation for {topic or 'Plant Physiology'}",
+                "demonstration_type": "outdoor_observation",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Transpiration, Stomata & Xylem Transport",
+                    "unit": "Plant Physiology & Agricultural Botany",
+                    "curriculum_reference": "Standard Life Sciences Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Agricultural & Biological Sciences",
+                    "department": department or "Life Sciences"
+                },
+                "learning_objectives": [
+                    "Measure non-invasive plant transpiration rates under varying sunlight and shade conditions.",
+                    "Understand stomatal aperture mechanics, transpiration pull, and xylem water transport."
+                ],
+                "real_world_concept": "Evapotranspiration and negative water potential gradients driving water lift against gravity in vascular plants.",
+                "materials_student_has": [
+                    "A living outdoor potted plant or leafy tree branch (e.g. Guava, Mango, or Hibiscus)",
+                    "2 clean, dry transparent plastic polythene covers",
+                    "Cotton string or rubber band to tie the bag mouths",
+                    "A clean glass cup or measuring spoon"
+                ],
+                "safe_substitutions": [
+                    "Clean food-packaging plastic wrap instead of polythene bags",
+                    "Jute twine or dried grass blades instead of rubber bands"
+                ],
+                "no_purchase_alternative": "Reuse clean plastic grocery bags and string made from twisted banana fiber or jute.",
+                "steps": [
+                    "Step 1: Choose two healthy leafy branches of similar leaf count on a sunlit plant.",
+                    "Step 2: Enclose branch A inside a clean transparent plastic bag and tie the base tightly with string around the stem, ensuring no air gaps.",
+                    "Step 3: Enclose branch B in the exact same way, but place a cardboard shade over branch B to block direct sunlight.",
+                    "Step 4: Leave both setups for 60 to 90 minutes in their respective conditions.",
+                    "Step 5: Observe the accumulation of condensed water droplets on the interior plastic surface and compare the volume between sunlit and shaded branches."
+                ],
+                "simple_explanation": "Plants drink water from their roots and release excess water vapor into the air through tiny microscopic breathing pores (stomata) on their leaves. When we tie a plastic bag around the leaves, the trapped vapor cools and condenses into visible water drops.",
+                "academic_theory": "Transpiration is governed by the Cohesion-Tension Theory and Fick's Law of diffusion. Water evaporation from mesophyll cell walls generates a negative hydrostatic pressure (suction tension up to -2 MPa) in xylem vessels. The rate of transpiration E = (C_leaf - C_air) / (r_s + r_a), where r_s is stomatal resistance and r_a is boundary layer resistance. High sunlight triggers guard cell turgor expansion (K+ ion influx), opening stomata and accelerating water vapor flux.",
+                "everyday_applications": "Informs village farmers on optimal morning/evening drip irrigation timing, mulch application to reduce soil moisture evaporation, and windbreak planting to reduce crop moisture loss during dry seasons.",
+                "expected_observations": "The sunlit bag accumulates dense mist and pooling water droplets within an hour, whereas the shaded bag collects significantly less. Real-world humidity and leaf age will influence condensation speed.",
+                "limitations_and_misconceptions": "Common misconception: assuming roots push water all the way to the top of tall trees by positive pressure. In reality, transpiration pull (negative pressure from leaves) is the primary driver for tall trees.",
+                "safety_precautions": "Do not break or damage tree branches; ensure bags are removed after 2 hours so the plant can resume normal respiration.",
+                "understanding_questions": [
+                    {
+                        "question": "Why did the sunlit branch produce significantly more water droplets than the shaded branch?",
+                        "answer": "Sunlight activates photosynthetic light receptors in guard cells, causing K+ influx, turgor pressure increase, and stomatal opening to maximize gas exchange.",
+                        "explanation": "Open stomata dramatically lower stomatal resistance (r_s), increasing transpiration rate."
+                    },
+                    {
+                        "question": "How do water molecules stay connected in a continuous column from root to leaf top without breaking?",
+                        "answer": "Through high hydrogen bonding cohesion among water molecules and adhesion to polar xylem cell walls.",
+                        "explanation": "Tensile strength of water prevents cavitation under high negative pressure."
+                    },
+                    {
+                        "question": "Why do plants in dry rural areas often have waxy or small leaves?",
+                        "answer": "Thick cuticles and reduced surface area increase boundary resistance and minimize water loss during hot dry spells.",
+                        "explanation": "Xerophytic adaptations prevent desiccation by regulating transpiration."
+                    }
+                ],
+                "reflection_task": "Look at three different plants in your village: one with large broad leaves and one with tiny waxy leaves. How does leaf size correlate with where they grow?",
+                "follow_up_practice": "Place a freshly cut white flower stalk or celery stem in water colored with a pinch of food color or ink. Record the time taken for color to appear in the petals.",
+                "is_supported": True
+            }
+
+        # 3. Environmental Science / Ecology / Geography / Water Conservation
+        elif any(w in sub_lower or w in top_lower for w in ["environ", "ecolog", "earth", "geograph", "water conservation", "sustainab", "weather"]):
+            return {
+                "activity_id": f"lfa_env_{difficulty.lower()}",
+                "activity_title": f"Soil Runoff, Watershed Conservation & Natural Terracotta Cooling for {topic or 'Environmental Systems'}",
+                "title": f"Soil Runoff, Watershed Conservation & Natural Terracotta Cooling for {topic or 'Environmental Systems'}",
+                "demonstration_type": "outdoor_observation",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Watershed Management, Soil Erosion & Thermal Regulation",
+                    "unit": "Environmental Sciences & Resource Sustainability",
+                    "curriculum_reference": "Standard Environmental Studies Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Environmental Science & Civil Engineering",
+                    "department": department or "Environmental Studies"
+                },
+                "learning_objectives": [
+                    "Evaluate topsoil erosion and surface water runoff across bare versus vegetated slopes.",
+                    "Analyze latent heat of vaporization in porous terracotta pots (matkas) for zero-electricity cooling."
+                ],
+                "real_world_concept": "Surface friction / vegetative root binding mitigating shear stress from water runoff, and latent heat absorption through porous evaporative surfaces.",
+                "materials_student_has": [
+                    "Two sloped earth mounds (one bare soil, one covered with grass/dry leaves)",
+                    "A cup or jug with small perforations (or watering can)",
+                    "A traditional unglazed terracotta clay pot (matka) and a metal or glass cup",
+                    "Clean water"
+                ],
+                "safe_substitutions": [
+                    "Trays of soil on a slight tilt if mounds are not available outdoors",
+                    "Cloth-wrapped glass bottle instead of terracotta pot"
+                ],
+                "no_purchase_alternative": "Gather natural clay from stream beds and use fallen dry leaves/twigs as natural mulch.",
+                "steps": [
+                    "Step 1: Set up two 30-degree soil slopes of identical length: Slope 1 is bare loose earth, and Slope 2 is covered with grass roots or leaf mulch.",
+                    "Step 2: Pour 500 ml of water steadily over both slopes using a perforated can to simulate torrential rainfall.",
+                    "Step 3: Collect the runoff water at the base in separate clear bowls and measure sediment clarity / turbidity.",
+                    "Step 4: Fill the porous clay pot and the metal container with equal volumes of water and place both in a shaded, breezy area.",
+                    "Step 5: Measure water temperatures after 3 hours and note the natural temperature drop in the clay pot."
+                ],
+                "simple_explanation": "Grass and roots act like natural anchors holding topsoil in place, preventing monsoon rain from washing fertile soil away. Meanwhile, unglazed clay pots 'sweat' through tiny microscopic pores; as this water evaporates into the breeze, it carries heat away, keeping the drinking water naturally cold without electricity.",
+                "academic_theory": "Governed by the Revised Universal Soil Loss Equation (RUSLE): A = R * K * LS * C * P, where vegetation cover factor C drastically reduces soil loss A. For evaporative cooling, heat extraction Q = m * L_v, where L_v is the latent heat of vaporization of water (approx. 2.26 x 10^6 J/kg). Evaporation removes high-energy molecules from the pot surface, decreasing the average kinetic energy (temperature) of remaining water.",
+                "everyday_applications": "Critical for rural village check-dam construction, bund farming on contours to recharge groundwater aquifers, and constructing zero-energy cool chambers (ZECC) for preserving fresh farm vegetables.",
+                "expected_observations": "Water from the bare slope is thick with muddy sediment, while water from the mulched slope emerges relatively clear. The clay pot water drops 3 to 6 degrees Celsius below ambient temperature depending on air humidity.",
+                "limitations_and_misconceptions": "Clay pot cooling efficiency decreases in extremely high humidity (e.g. heavy monsoon rain) because high ambient vapor pressure retards the rate of evaporation.",
+                "safety_precautions": "Wash hands with soap after handling soil and runoff samples.",
+                "understanding_questions": [
+                    {
+                        "question": "Why does vegetative cover prevent soil erosion during heavy monsoon rains?",
+                        "answer": "Plant foliage intercepts raindrops, dissipating kinetic impact energy, while fibrous root networks mechanically bind soil aggregates together.",
+                        "explanation": "Roots increase soil shear strength and enhance infiltration capacity, reducing erosive overland sheet flow."
+                    },
+                    {
+                        "question": "Why does water in an unglazed clay pot stay cooler than in a plastic or steel bottle?",
+                        "answer": "Unglazed clay is porous, allowing continuous microscopic seepage and surface evaporation, which extracts latent heat of vaporization (2.26 MJ/kg) directly from the water.",
+                        "explanation": "Steel and plastic lack porosity and cannot facilitate endothermic evaporative cooling."
+                    },
+                    {
+                        "question": "Why is evaporative cooling less effective on rainy, humid days?",
+                        "answer": "High relative humidity means air is near saturation (vapor pressure deficit is low), suppressing the evaporation rate.",
+                        "explanation": "Evaporation rate is proportional to the difference between saturation vapor pressure and actual ambient vapor pressure."
+                    }
+                ],
+                "reflection_task": "Walk around your village after a rainstorm. Where does rainwater pool or create gullies, and where does it soak into the earth? What soil features cause this?",
+                "follow_up_practice": "Design a small 3-tier filtration column using coarse gravel, sand, and crushed charcoal to clarify turbid rainwater.",
+                "is_supported": True
+            }
+
+        # 4. Mathematics / Geometry / Statistics / Logic
+        elif any(w in sub_lower or w in top_lower for w in ["math", "algebra", "geometr", "trig", "calculus", "probab", "statist", "matrix", "number"]):
+            return {
+                "activity_id": f"lfa_math_{difficulty.lower()}",
+                "activity_title": f"Shadow Trigonometry, Geometric Scaling & Pebble Combinatorics for {topic or 'Applied Mathematics'}",
+                "title": f"Shadow Trigonometry, Geometric Scaling & Pebble Combinatorics for {topic or 'Applied Mathematics'}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Trigonometric Ratios, Similarity & Discrete Probability",
+                    "unit": "Applied Mathematics & Geometric Analysis",
+                    "curriculum_reference": "Standard Mathematics Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Mathematics & Science",
+                    "department": department or "Mathematics"
+                },
+                "learning_objectives": [
+                    "Calculate inaccessible vertical heights using similar triangle ratios and solar shadow measurements (Thales' Theorem).",
+                    "Model arithmetic series, permutations, and probability distributions using discrete pebble grid arrays."
+                ],
+                "real_world_concept": "Linear proportional scaling (H1/S1 = H2/S2) and discrete triangular number series: sum(k, 1 to n) = n*(n+1)/2.",
+                "materials_student_has": [
+                    "A vertical stick of known length (e.g. exactly 100 cm or 1 meter)",
+                    "A measuring string, tape, or marked ruler",
+                    "50 small identical smooth pebbles or dry chickpeas",
+                    "Sunlight on level open ground"
+                ],
+                "safe_substitutions": [
+                    "A walking cane or umbrella of measured length instead of stick",
+                    "Uniform pacing steps of calibrated length (e.g. 1 step = 0.75 m) instead of measuring tape"
+                ],
+                "no_purchase_alternative": "Use stones gathered from the path and a stick marked using hand spans.",
+                "steps": [
+                    "Step 1: Place the 1-meter stick vertically on level sunlit ground and measure its shadow length (s1).",
+                    "Step 2: Immediately measure the shadow length (s2) of a tall village structure (tree, water tank, or electricity pole).",
+                    "Step 3: Apply Thales' similar triangle formula to determine the structure's height: H2 = (H1 / s1) * s2.",
+                    "Step 4: Arrange pebbles in a triangular grid: Row 1 = 1 pebble, Row 2 = 2 pebbles, up to Row n = n pebbles.",
+                    "Step 5: Combine two identical pebble triangles into a rectangle of size n * (n + 1) to visually prove the summation formula."
+                ],
+                "simple_explanation": "Because sunlight hits all objects in your village at the exact same angle at any given minute, tall objects cast shadows that are strictly in the exact same proportion as short sticks. We can also see mathematical formulas by physically arranging stones into rectangles on the ground.",
+                "academic_theory": "Similar right triangles share identical interior angles theta: tan(theta) = H_stick / S_stick = H_tree / S_tree. Hence, H_tree = (H_stick / S_stick) * S_tree. For discrete series, arranging n rows of pebbles yields S_n = 1 + 2 + ... + n = n*(n+1)/2. For probability, sampling r marked pebbles from N total pebbles follows the hypergeometric distribution P(X=k) = [C(K,k) * C(N-K, n-k)] / C(N,n).",
+                "everyday_applications": "Essential for village carpenters constructing angled roof trusses, farmers estimating crop yields through random quadrat sampling, and land surveyors estimating field boundaries without electronic theodolites.",
+                "expected_observations": "Shadow lengths change continuously with Earth's rotation, but the ratio H/S remains strictly invariant across all nearby vertical objects at any given instant.",
+                "limitations_and_misconceptions": "Slope error: Ground must be flat; if the shadow falls on sloped ground, the measured length must be adjusted by dividing by cos(slope angle).",
+                "safety_precautions": "Avoid staring into direct sunlight during measurements.",
+                "understanding_questions": [
+                    {
+                        "question": "If a 1.5 m vertical stick casts a 2.0 m shadow, how tall is a grain silo that casts an 18.0 m shadow at the same moment?",
+                        "answer": "The grain silo is 13.5 meters tall (H = (1.5 / 2.0) * 18.0 = 0.75 * 18.0 = 13.5 m).",
+                        "explanation": "Applying similar triangle proportionality directly: H2 = (H1 / s1) * s2."
+                    },
+                    {
+                        "question": "Why does adding two identical triangular pebble patterns of n rows create a rectangle of dimensions n by (n + 1)?",
+                        "answer": "Because flipping and interlocking one triangle against the other pairs row k with row (n - k + 1), giving exactly (n + 1) pebbles in every single row across n total rows.",
+                        "explanation": "Total pebbles = n * (n + 1), so one single triangle has half: n*(n + 1)/2."
+                    },
+                    {
+                        "question": "Why must shadow measurements for height calculation be taken within a 2-minute window?",
+                        "answer": "Because the Earth's rotation shifts the solar elevation angle theta continuously (about 15 degrees per hour), altering shadow ratios.",
+                        "explanation": "A significant time gap causes solar elevation angle mismatch between the two measurements."
+                    }
+                ],
+                "reflection_task": "Measure the shadow of a wall at 9:00 AM, 12:00 PM, and 4:00 PM. Calculate the solar angle tan(theta) at each time. When is the sun highest?",
+                "follow_up_practice": "Use 36 pebbles to construct all possible distinct rectangular arrays (factors of 36) and identify which produces a perfect square.",
+                "is_supported": True
+            }
+
+        # 5. Engineering / Computer Science / General Technology / Mechanisms
+        elif any(w in sub_lower or w in top_lower for w in ["engin", "technol", "siphon", "gear", "machine", "comput", "circuit"]):
+            return {
+                "activity_id": f"lfa_eng_{difficulty.lower()}",
+                "activity_title": f"Everyday Mechanical Advantage, Siphon Fluidics & Algorithmic Sorting for {topic or subject}",
+                "title": f"Everyday Mechanical Advantage, Siphon Fluidics & Algorithmic Sorting for {topic or subject}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Mechanical Advantage, Fluid Flow & Algorithmic Principles",
+                    "unit": "Applied Engineering & Practical Systems",
+                    "curriculum_reference": "Standard Technical & Science Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Engineering & Applied Technology",
+                    "department": department or "Applied Technology"
+                },
+                "learning_objectives": [
+                    "Demonstrate mechanical gear ratios and moment equilibrium on simple lever mechanisms.",
+                    "Verify Bernoulli's principle and atmospheric hydrostatic siphon flow using low-cost flexible tubing."
+                ],
+                "real_world_concept": "Torque transmission ratio (N1/N2 = omega2/omega1) and hydrostatic head potential driving continuous siphon fluid transport.",
+                "materials_student_has": [
+                    "A standard multi-speed bicycle wheel and pedal gear set (or simple lever stick)",
+                    "1 meter of clear plastic water hose / tubing (or straw)",
+                    "Two buckets or clay pots at different elevation levels",
+                    "Clean water"
+                ],
+                "safe_substitutions": [
+                    "A wooden plank balanced on a log fulcrum instead of bicycle gears",
+                    "A bendable drinking straw or flexible PVC pipe instead of garden hose"
+                ],
+                "no_purchase_alternative": "Use any household bucket and common bicycle gears or a balanced wooden rod.",
+                "steps": [
+                    "Step 1: Count the number of teeth on the front pedal chainring (N1) and the rear wheel cog (N2).",
+                    "Step 2: Rotate the pedal one full 360-degree revolution and count the exact revolutions completed by the rear wheel to compute gear ratio = N1 / N2.",
+                    "Step 3: Fill elevated Bucket A with water and place empty Bucket B 50 cm lower on the ground.",
+                    "Step 4: Submerge the flexible tube completely in Bucket A to purge air, clamp both ends with fingers, and place one end in Bucket B.",
+                    "Step 5: Release fingers and observe continuous spontaneous water flow driven by gravity and hydrostatic pressure difference."
+                ],
+                "simple_explanation": "Bicycle gears let you trade speed for pushing force. Siphons let water climb up over a bucket rim and down into another container automatically as long as the second container is placed lower than the first.",
+                "academic_theory": "Gear ratio GR = N_drive / N_driven = omega_driven / omega_drive = Torque_drive / Torque_driven. Siphon flow velocity is governed by Torricelli's Law and Bernoulli's equation: v = sqrt(2 * g * Delta_h), where Delta_h is the vertical height difference between the free water surfaces.",
+                "everyday_applications": "Underpins rural irrigation channels, fuel transfer from village tractor tanks, human-powered water pumps, and flour mill mechanical power transmission.",
+                "expected_observations": "Higher gear ratio yields more wheel revolutions per pedal turn with increased resistance. Siphon flow rate increases proportionally with vertical drop height Delta_h.",
+                "limitations_and_misconceptions": "A siphon cannot lift water higher than the barometric atmospheric head limit (approx. 10 meters for water at sea level) because cavitation will break the liquid column.",
+                "safety_precautions": "Ensure fingers are kept clear of moving bicycle chain spokes during gear rotation.",
+                "understanding_questions": [
+                    {
+                        "question": "Why is it easier to ride a bicycle uphill when shifting to a smaller front gear and larger rear gear?",
+                        "answer": "It reduces the gear ratio (GR < 1), multiplying torque applied to the rear wheel at the expense of rotational speed.",
+                        "explanation": "Conservation of mechanical energy dictates that Power = Torque * angular velocity (P = tau * omega)."
+                    },
+                    {
+                        "question": "Why does water continue flowing upward over the rim of Bucket A in a siphon?",
+                        "answer": "The longer fluid column in the lower tube creates a net gravitational suction, lowering pressure at the siphon crest below atmospheric pressure.",
+                        "explanation": "Liquid cohesion and atmospheric pressure push water up into the low-pressure crest zone."
+                    },
+                    {
+                        "question": "What happens to the siphon flow rate if you lower Bucket B by another 30 cm?",
+                        "answer": "The flow rate increases because the gravitational potential head Delta_h is greater (v = sqrt(2*g*Delta_h)).",
+                        "explanation": "Flow velocity scales with the square root of vertical drop height."
+                    }
+                ],
+                "reflection_task": "Observe how water is transferred or pumped in your local village. How does elevation difference reduce the energy needed?",
+                "follow_up_practice": "Calculate the theoretical flow rate (liters per minute) through a 1 cm diameter tube for Delta_h = 0.8 meters.",
+                "is_supported": True
+            }
+
+        # 6. Physics / Mechanics / Optics / Fluid Dynamics
+        elif any(w in sub_lower or w in top_lower for w in ["physic", "mechanic", "optic", "fluid", "force", "motion", "wave", "sound", "friction", "inertia"]):
+            return {
+                "activity_id": f"lfa_phy_{difficulty.lower()}",
+                "activity_title": f"Soil Capillarity, Fluid Surface Tension & Mechanical Lever Analysis for {topic or 'Physics'}",
+                "title": f"Soil Capillarity, Fluid Surface Tension & Mechanical Lever Analysis for {topic or 'Physics'}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Capillarity, Surface Tension & Moment Equilibrium",
+                    "unit": "Fluid Mechanics & Classical Statics",
+                    "curriculum_reference": "Standard Technical & Science Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Science & Engineering",
+                    "department": department or "Physics"
+                },
+                "learning_objectives": [
+                    "Understand capillary action, surface tension, and permeability across differing soil particle diameters.",
+                    "Derive how pore radius inversely controls fluid elevation according to Jurin's Law."
+                ],
+                "real_world_concept": "Capillary fluid lift in porous natural media driven by molecular adhesion and surface tension, and rotational torque balance.",
+                "materials_student_has": [
+                    "3 transparent plastic water bottles with bases cut off (or cloth pouches)",
+                    "Samples of local clay soil, sandy riverbed soil, and organic compost",
+                    "A cup of water and a clean white cotton cloth strip",
+                    "A flat wooden ruler or marked stick"
+                ],
+                "safe_substitutions": [
+                    "Clay pots or coconut shells with bottom pinholes instead of plastic bottles",
+                    "Dry cotton string or jute rope instead of cloth strip"
+                ],
+                "no_purchase_alternative": "Use discarded plastic bottles or coconut halves and natural dry cotton fiber.",
+                "steps": [
+                    "Step 1: Invert the cut bottles and plug their narrow spouts with loose cotton cloth to act as a soil filter.",
+                    "Step 2: Fill bottle 1 with dry pulverized clay, bottle 2 with coarse river sand, and bottle 3 with organic loam compost.",
+                    "Step 3: Pour an equal half-cup (100ml) of water slowly into the top of each soil column simultaneously.",
+                    "Step 4: Measure the time taken for the first drop to filter into a collection cup below (drainage rate).",
+                    "Step 5: In a separate cup, suspend a vertical dry cotton strip 1 cm into standing water and record height rise every 2 minutes."
+                ],
+                "simple_explanation": "Water climbs up tiny spaces on its own because water molecules stick to solid particles stronger than to each other. Small clay soil pores pull water up higher and hold it longer, while coarse sand lets water drain quickly.",
+                "academic_theory": "Capillary action is governed by Jurin's Law: h = (2 * gamma * cos(theta)) / (r * rho * g), where gamma is liquid surface tension, theta is contact angle, r is pore radius, rho is fluid density, and g is gravitational acceleration. As pore radius r decreases, capillary rise h increases and hydraulic conductivity K decreases.",
+                "everyday_applications": "Guides local farmers on crop selection based on soil moisture retention (clay for paddy, sandy loam for root crops) and determines drip irrigation frequency to avoid root waterlogging.",
+                "expected_observations": "Water filters almost immediately through sand within seconds, whereas clay retains moisture for hours. Note that initial moisture content and compaction pressure will cause real-world variations in filtration rates.",
+                "limitations_and_misconceptions": "Common misconception: thinking denser soil always drains faster. In reality, smaller pore diameter increases capillary hold despite higher mass density.",
+                "safety_precautions": "Handle soil with clean tools, avoid breathing fine dry clay dust, and wash hands thoroughly with soap after handling soil samples.",
+                "understanding_questions": [
+                    {
+                        "question": "Why does water climb higher in clay soil than in coarse river sand?",
+                        "answer": "Because clay has microscopic pore radii, and capillary lift height is inversely proportional to pore radius (h ~ 1/r).",
+                        "explanation": "Jurin's Law establishes that narrower channels produce stronger net upward adhesive forces against gravity."
+                    },
+                    {
+                        "question": "How does surface tilling after rain conserve deep soil moisture?",
+                        "answer": "Tilling breaks continuous microscopic capillary pore channels in the topsoil, disrupting upward evaporative water transport.",
+                        "explanation": "Destroying the top capillary tubes traps moisture in the crop root zone below."
+                    },
+                    {
+                        "question": "What happens to capillary lift if temperature rises significantly?",
+                        "answer": "Capillary height slightly decreases because water surface tension (gamma) decreases with increasing temperature.",
+                        "explanation": "Higher thermal agitation weakens intermolecular hydrogen bonding at the liquid-air interface."
+                    }
+                ],
+                "reflection_task": "Observe your local farmland 24 hours after rainfall. Which patches stay muddy and which dry first? How does this match your experiment?",
+                "follow_up_practice": "Calculate the theoretical capillary rise height for water (gamma = 0.0728 N/m) in a pore of radius r = 0.05 mm versus r = 0.005 mm.",
+                "is_supported": True
+            }
+
+        # 6. Chemistry / Materials / Chemical Reactions / Acids & Bases
+        elif any(w in sub_lower or w in top_lower for w in ["chem", "reaction", "acid", "base", "ph", "element", "compound", "bond", "solution", "solubil"]):
+            return {
+                "activity_id": f"lfa_chem_{difficulty.lower()}",
+                "activity_title": f"Natural Botanical pH Indicators & Reversible Protonation for {topic or 'Acid-Base Equilibria'}",
+                "title": f"Natural Botanical pH Indicators & Reversible Protonation for {topic or 'Acid-Base Equilibria'}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Acid-Base Neutralization & Natural Indicators",
+                    "unit": "Chemical Equilibrium & Bio-Molecules",
+                    "curriculum_reference": "Standard Technical & Science Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Science & Engineering",
+                    "department": department or "Chemistry"
+                },
+                "learning_objectives": [
+                    "Demonstrate chemical indicator equilibrium and reversible protonation using natural botanical extracts.",
+                    "Classify local water, soil extracts, and household liquids as acidic, neutral, or alkaline."
+                ],
+                "real_world_concept": "Chromophore molecular structure transformation under changing hydrogen ion concentration (pH).",
+                "materials_student_has": [
+                    "Fresh turmeric powder (Curcuma longa) or crushed red hibiscus flower petals",
+                    "Warm water in clear glass tumblers or clean bowls",
+                    "Local test samples: Lemon juice (citric acid), wood ash water (potassium carbonate), sour buttermilk (lactic acid), rainwater, well water",
+                    "Clean banana leaf or white paper strip"
+                ],
+                "safe_substitutions": [
+                    "Red cabbage or purple beetroot juice instead of hibiscus",
+                    "Baking soda solution instead of wood ash water"
+                ],
+                "no_purchase_alternative": "Use kitchen turmeric or wild hibiscus flowers and clear glass cups.",
+                "steps": [
+                    "Step 1: Dissolve 1/2 teaspoon of turmeric in warm water to prepare a vibrant yellow indicator extract.",
+                    "Step 2: Paint strips of white paper or a banana leaf surface with the turmeric extract and let dry for 3 minutes.",
+                    "Step 3: Drop a spot of lemon juice on strip A, sour buttermilk on strip B, and wood ash water on strip C.",
+                    "Step 4: Observe the instant color transition from golden yellow to deep reddish-brown with alkaline ash water.",
+                    "Step 5: Add a few drops of lemon juice over the reddish-brown spot on strip C and observe the reversible neutralization back to yellow."
+                ],
+                "simple_explanation": "Turmeric contains a yellow natural dye called curcumin. When it touches an alkaline (basic) substance like wood ash or soap, it loses a proton and turns deep red. Adding an acid gives the proton back, restoring the yellow color.",
+                "academic_theory": "Curcumin acts as a weak polybasic acid undergoing keto-enol tautomerism. In neutral/acidic media (pH < 7.4), the bis-keto form predominates (yellow, max absorption ~425nm). In alkaline media (pH > 8.0), deprotonation yields the fully conjugated enolate anion (red-brown, bathochromic shift to ~490nm). The reversible reaction: H-Ind (yellow) + OH- <==> Ind- (red) + H2O.",
+                "everyday_applications": "Enables farmers to conduct rapid on-site tests for soil and well-water alkalinity to detect salinity issues or lime imbalances without electronic spectrophotometers.",
+                "expected_observations": "Acidic and neutral substances keep turmeric yellow. Alkaline solutions turn it red-brown immediately. Real-world color intensity may vary with solution concentration and freshness of the botanical extract.",
+                "limitations_and_misconceptions": "Turmeric does not distinguish between strong and weak acids (both stay yellow); it is exclusively a base/alkali indicator (turning red between pH 7.8 and 9.2).",
+                "safety_precautions": "Avoid getting wood ash solution into eyes. If contact occurs, rinse immediately with abundant clean water. Do not ingest test solutions.",
+                "understanding_questions": [
+                    {
+                        "question": "Why does a turmeric curry stain turn red when washed with laundry soap?",
+                        "answer": "Because soap contains alkaline sodium/potassium fatty acid salts (pH > 8), deprotonating the yellow curcumin into its red enolate form.",
+                        "explanation": "The bathochromic shift in light absorption creates the characteristic red coloration."
+                    },
+                    {
+                        "question": "Why does squeezing lemon juice over the red stain restore the original yellow color?",
+                        "answer": "Citric acid neutralizes the alkaline soap, donating protons (H+) back to curcumin to reform the yellow neutral tautomer.",
+                        "explanation": "Le Chatelier's principle shifts the indicator equilibrium back toward the protonated H-Ind state."
+                    },
+                    {
+                        "question": "Can turmeric be used to determine whether well water is neutral (pH 7) or acidic (pH 5)?",
+                        "answer": "No, because turmeric remains yellow across both neutral and acidic pH ranges below 7.4.",
+                        "explanation": "A multi-range indicator like red hibiscus or red cabbage extract is needed for acid-range differentiation."
+                    }
+                ],
+                "reflection_task": "Test your local well water and drinking water with the turmeric strip. Does it change color? What does this tell you about its pH balance?",
+                "follow_up_practice": "Prepare a red hibiscus petal extract in warm water and test both lemon juice and wood ash water. Tabulate the resulting color changes.",
+                "is_supported": True
+            }
+
+        # 7. Engineering / Computer Science / General Technology / Mechanisms
+        else:
+            return {
+                "activity_id": f"lfa_eng_{difficulty.lower()}",
+                "activity_title": f"Everyday Mechanical Advantage, Siphon Fluidics & Algorithmic Sorting for {topic or subject}",
+                "title": f"Everyday Mechanical Advantage, Siphon Fluidics & Algorithmic Sorting for {topic or subject}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Mechanical Advantage, Fluid Flow & Algorithmic Principles",
+                    "unit": "Applied Engineering & Practical Systems",
+                    "curriculum_reference": "Standard Technical & Science Curriculum",
+                    "grade_or_semester": semester,
+                    "program": program or "Engineering & Applied Technology",
+                    "department": department or "Applied Technology"
+                },
+                "learning_objectives": [
+                    "Demonstrate mechanical gear ratios and moment equilibrium on simple lever mechanisms.",
+                    "Verify Bernoulli's principle and atmospheric hydrostatic siphon flow using low-cost flexible tubing."
+                ],
+                "real_world_concept": "Torque transmission ratio (N1/N2 = omega2/omega1) and hydrostatic head potential driving continuous siphon fluid transport.",
+                "materials_student_has": [
+                    "A standard multi-speed bicycle wheel and pedal gear set (or simple lever stick)",
+                    "1 meter of clear plastic water hose / tubing (or straw)",
+                    "Two buckets or clay pots at different elevation levels",
+                    "Clean water"
+                ],
+                "safe_substitutions": [
+                    "A wooden plank balanced on a log fulcrum instead of bicycle gears",
+                    "A bendable drinking straw or flexible PVC pipe instead of garden hose"
+                ],
+                "no_purchase_alternative": "Use any household bucket and common bicycle gears or a balanced wooden rod.",
+                "steps": [
+                    "Step 1: Count the number of teeth on the front pedal chainring (N1) and the rear wheel cog (N2).",
+                    "Step 2: Rotate the pedal one full 360-degree revolution and count the exact revolutions completed by the rear wheel to compute gear ratio = N1 / N2.",
+                    "Step 3: Fill elevated Bucket A with water and place empty Bucket B 50 cm lower on the ground.",
+                    "Step 4: Submerge the flexible tube completely in Bucket A to purge air, clamp both ends with fingers, and place one end in Bucket B.",
+                    "Step 5: Release fingers and observe continuous spontaneous water flow driven by gravity and hydrostatic pressure difference."
+                ],
+                "simple_explanation": "Bicycle gears let you trade speed for pushing force. Siphons let water climb up over a bucket rim and down into another container automatically as long as the second container is placed lower than the first.",
+                "academic_theory": "Gear ratio GR = N_drive / N_driven = omega_driven / omega_drive = Torque_drive / Torque_driven. Siphon flow velocity is governed by Torricelli's Law and Bernoulli's equation: v = sqrt(2 * g * Delta_h), where Delta_h is the vertical height difference between the free water surfaces.",
+                "everyday_applications": "Underpins rural irrigation channels, fuel transfer from village tractor tanks, human-powered water pumps, and flour mill mechanical power transmission.",
+                "expected_observations": "Higher gear ratio yields more wheel revolutions per pedal turn with increased resistance. Siphon flow rate increases proportionally with vertical drop height Delta_h.",
+                "limitations_and_misconceptions": "A siphon cannot lift water higher than the barometric atmospheric head limit (approx. 10 meters for water at sea level) because cavitation will break the liquid column.",
+                "safety_precautions": "Ensure fingers are kept clear of moving bicycle chain spokes during gear rotation.",
+                "understanding_questions": [
+                    {
+                        "question": "Why is it easier to ride a bicycle uphill when shifting to a smaller front gear and larger rear gear?",
+                        "answer": "It reduces the gear ratio (GR < 1), multiplying torque applied to the rear wheel at the expense of rotational speed.",
+                        "explanation": "Conservation of mechanical energy dictates that Power = Torque * angular velocity (P = tau * omega)."
+                    },
+                    {
+                        "question": "Why does water continue flowing upward over the rim of Bucket A in a siphon?",
+                        "answer": "The longer fluid column in the lower tube creates a net gravitational suction, lowering pressure at the siphon crest below atmospheric pressure.",
+                        "explanation": "Liquid cohesion and atmospheric pressure push water up into the low-pressure crest zone."
+                    },
+                    {
+                        "question": "What happens to the siphon flow rate if you lower Bucket B by another 30 cm?",
+                        "answer": "The flow rate increases because the gravitational potential head Delta_h is greater (v = sqrt(2*g*Delta_h)).",
+                        "explanation": "Flow velocity scales with the square root of vertical drop height."
+                    }
+                ],
+                "reflection_task": "Observe how water is transferred or pumped in your local village. How does elevation difference reduce the energy needed?",
+                "follow_up_practice": "Calculate the theoretical flow rate (liters per minute) through a 1 cm diameter tube for Delta_h = 0.8 meters.",
+                "is_supported": True
+            }
+
+
     def generate_knowledge_transfer(self, subject: str, topic: str, semester: str = "", program: str = "", department: str = "", syllabus_context: str = "") -> Dict[str, Any]:
         """
         Generate a strictly semester-aware Knowledge Transfer activity grounded in the student's uploaded syllabus.

@@ -30,7 +30,7 @@ from pathlib import Path
 
 import requests  # type: ignore
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_file, send_from_directory, session
+from flask import Flask, jsonify, request, send_file, send_from_directory, session, has_request_context
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -445,6 +445,10 @@ def _normalize_user_doc(doc: dict) -> dict:
 
 def _lookup_user_by_id(user_id: str):
     """Fetch user document from MongoDB or SQLite by their stored id."""
+    if has_request_context():
+        sess_user = session.get("user")
+        if isinstance(sess_user, dict) and (str(sess_user.get("id")) == str(user_id) or str(sess_user.get("_id")) == str(user_id) or str(sess_user.get("user_id")) == str(user_id)):
+            return sess_user
     mongo_db = get_mongodb()
     if mongo_db is not None:
         doc = None
@@ -454,10 +458,14 @@ def _lookup_user_by_id(user_id: str):
             except Exception:
                 pass
         if not doc:
+            doc = mongo_db["users"].find_one({"_id": str(user_id)})
+        if not doc:
             doc = mongo_db["users"].find_one({"id": str(user_id)})
         if not doc:
             doc = mongo_db["users"].find_one({"user_id": str(user_id)})
-        return _normalize_user_doc(mongo_serialize(doc)) if doc else None
+        if doc:
+            return _normalize_user_doc(mongo_serialize(doc))
+        return sess_user if isinstance(sess_user, dict) else None
 
     conn = get_sqlite_db()
     cursor = conn.cursor()
@@ -3904,6 +3912,805 @@ def evaluate_reality_lab_endpoint():
         eval_res = gemini_service.evaluate_reality_lab(scenario_title, task, student_response, subject)
         return jsonify({"success": True, "evaluation": eval_res}), 200
     except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LEARN FROM ANYWHERE (RURAL & LOW-RESOURCE PRACTICAL LEARNING)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/learn-anywhere/generate", methods=["POST"])
+@require_auth
+def generate_learn_anywhere_endpoint():
+    try:
+        user_id = _current_user_id()
+        user    = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        data    = request.get_json(force=True) or {}
+        idempotency_key = str(data.get("idempotency_key") or data.get("request_id") or "").strip()
+
+        # Deduplication check: prevent duplicate activity generation on retry
+        mongo_db = get_mongodb()
+        if idempotency_key and mongo_db is not None:
+            existing_act = mongo_db.learn_anywhere_cache.find_one({"user_id": user_id, "idempotency_key": idempotency_key})
+            if existing_act and existing_act.get("activity"):
+                logger.info(f"[LearnAnywhere] Returning deduplicated activity for user {user_id}, key {idempotency_key}")
+                return jsonify({
+                    "success": True,
+                    "activity": existing_act["activity"],
+                    "subject": existing_act.get("subject"),
+                    "topic": existing_act.get("topic"),
+                    "deduplicated": True,
+                    "cached_response": True
+                }), 200
+
+        subject_id  = str(data.get("subject_id") or data.get("subjectId") or data.get("id") or data.get("code") or "").strip()
+        syllabus_id = str(data.get("syllabus_id") or data.get("syllabusId") or data.get("curriculum_id") or data.get("curriculumId") or "").strip()
+
+        # Fetch authoritative active validated curriculum
+        curriculum_doc = _get_authoritative_curriculum(user_id, user, syllabus_id=syllabus_id or None)
+
+        active_semester = user.get("semester") or user.get("current_semester")
+        program         = user.get("degree") or user.get("program") or user.get("board") or "Academic Curriculum"
+        department      = user.get("department") or user.get("branch") or (f"Class {user.get('grade_level')}" if user.get("grade_level") else "Science & Engineering")
+
+        # Validated subjects check
+        valid_subjects = []
+        raw_subs = []
+        syllabus_ctx = str(data.get("syllabus_context") or "")
+        if curriculum_doc:
+            raw_subs = curriculum_doc.get("subjects") or []
+            if isinstance(raw_subs, str):
+                try:
+                    raw_subs = json.loads(raw_subs)
+                except Exception:
+                    raw_subs = []
+            valid_subjects = [s.get("name") if isinstance(s, dict) else str(s) for s in raw_subs]
+            if not syllabus_ctx and curriculum_doc.get("blueprint"):
+                syllabus_ctx = str(curriculum_doc.get("blueprint"))[:1200]
+
+        if not curriculum_doc or not valid_subjects:
+            return jsonify({
+                "success": False,
+                "error": "No active validated syllabus found. Please upload your curriculum in the Syllabus Analyzer to unlock Learn from Anywhere.",
+                "curriculum_required": True,
+                "is_valid": False,
+                "subjects": []
+            }), 400
+
+        requested_subject = str(data.get("subject") or data.get("subject_name") or "").strip()
+        matched_subj = None
+        matched_sub_id = subject_id
+        matched_sub_obj = None
+
+        if subject_id:
+            for s in raw_subs:
+                if isinstance(s, dict):
+                    sid = str(s.get("subject_id") or s.get("subjectId") or s.get("id") or s.get("code") or "").strip().lower()
+                    if sid and sid == subject_id.lower():
+                        matched_subj = s.get("name")
+                        matched_sub_id = s.get("subject_id") or s.get("subjectId") or s.get("code") or subject_id
+                        matched_sub_obj = s
+                        break
+
+        if not matched_subj and requested_subject:
+            for s in raw_subs:
+                if isinstance(s, dict):
+                    s_name = str(s.get("name") or "")
+                    if s_name.lower() == requested_subject.lower() or requested_subject.lower() in s_name.lower():
+                        matched_subj = s_name
+                        matched_sub_id = s.get("subject_id") or s.get("subjectId") or s.get("code") or matched_sub_id
+                        matched_sub_obj = s
+                        break
+                elif str(s).lower() == requested_subject.lower() or requested_subject.lower() in str(s).lower():
+                    matched_subj = str(s)
+                    break
+
+        selected_subject = matched_subj or requested_subject or (valid_subjects[0] if valid_subjects else "")
+        if selected_subject and selected_subject not in valid_subjects and not matched_subj:
+            return jsonify({
+                "success": False,
+                "error": f"Subject '{selected_subject}' is not present in your validated curriculum.",
+                "valid_subjects": valid_subjects
+            }), 400
+
+        selected_subject = selected_subject or valid_subjects[0]
+        
+        # Extract validated topics for this subject
+        subject_topics = []
+        if curriculum_doc:
+            chapters_dict = curriculum_doc.get("chapters") or curriculum_doc.get("units") or {}
+            if selected_subject in chapters_dict:
+                sub_units = chapters_dict[selected_subject]
+                if isinstance(sub_units, list):
+                    for u in sub_units:
+                        if isinstance(u, dict):
+                            u_name = u.get("name", "")
+                            c_list = u.get("concepts", [])
+                            if u_name:
+                                subject_topics.append(u_name)
+                            subject_topics.extend(c_list)
+                        elif isinstance(u, str):
+                            subject_topics.append(u)
+
+        requested_topic      = str(data.get("topic") or data.get("concept") or data.get("module") or "").strip()
+        selected_topic       = requested_topic or (subject_topics[0] if subject_topics else "Practical Principles")
+        unit_name            = str(data.get("unit") or data.get("module") or "").strip()
+        curriculum_reference = str(curriculum_doc.get("document_name") or curriculum_doc.get("file_name") or "Validated Syllabus").strip()
+        preferred_language   = str(data.get("preferred_language") or data.get("language") or "English").strip()
+        accessibility_notes  = str(data.get("accessibility_notes") or data.get("constraints") or "").strip()
+
+        resource_env     = str(data.get("resource_category") or data.get("environment") or "All Local Resources").strip()
+        difficulty       = str(data.get("difficulty") or "Medium")
+        custom_materials = str(data.get("custom_materials") or data.get("materials_description") or data.get("materials") or "").strip()
+        constraint_mode  = str(data.get("constraint_mode") or "strict_only").strip()
+        image_data       = str(data.get("image_data") or data.get("image") or "").strip()
+
+        # Backend Image Validation: Supported Formats & 5MB Size Limit
+        if image_data:
+            import base64
+            import io
+            allowed_mimes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp"]
+            b64_str = image_data
+            mime_type = "image/jpeg"
+
+            if "data:" in image_data and ";base64," in image_data:
+                try:
+                    header, b64_str = image_data.split(";base64,", 1)
+                    mime_type = header.replace("data:", "").strip().lower()
+                    if mime_type not in allowed_mimes:
+                        return jsonify({
+                            "success": False,
+                            "error": f"Unsupported image format '{mime_type}'. Supported formats are JPEG, PNG, WEBP, GIF, and BMP.",
+                            "is_valid": False
+                        }), 400
+                except Exception:
+                    b64_str = image_data
+
+            try:
+                raw_bytes = base64.b64decode(b64_str)
+            except Exception:
+                return jsonify({
+                    "success": False,
+                    "error": "Invalid base64 image payload.",
+                    "is_valid": False
+                }), 400
+
+            if len(raw_bytes) > 5 * 1024 * 1024:
+                return jsonify({
+                    "success": False,
+                    "error": "Image file size exceeds the maximum limit of 5 MB.",
+                    "is_valid": False
+                }), 400
+
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(io.BytesIO(raw_bytes)) as test_img:
+                    test_img.verify()
+            except Exception as img_err:
+                logger.warning(f"[LearnAnywhere] Image header verification failed: {img_err}")
+                return jsonify({
+                    "success": False,
+                    "error": "Corrupted or invalid image file. Please re-take or re-upload your photograph.",
+                    "is_valid": False
+                }), 400
+
+        activity_data = gemini_service.generate_learn_anywhere(
+            subject=selected_subject,
+            subject_id=str(matched_sub_id or ""),
+            topic=selected_topic,
+            unit=unit_name,
+            curriculum_reference=curriculum_reference,
+            resource_environment=resource_env,
+            difficulty=difficulty,
+            validated_topics=subject_topics,
+            syllabus_context=syllabus_ctx,
+            semester=str(active_semester or ""),
+            program=program,
+            department=department,
+            custom_materials=custom_materials,
+            constraint_mode=constraint_mode,
+            image_data=image_data,
+            preferred_language=preferred_language,
+            accessibility_notes=accessibility_notes
+        )
+
+        syllabus_id_str = str(curriculum_doc.get("syllabus_id") or curriculum_doc.get("_id") or "")
+        activity_id = str(activity_data.get("activity_id") or activity_data.get("id") or f"act_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:6]}")
+        activity_data["activity_id"] = activity_id
+        activity_data["syllabus_id"] = syllabus_id_str
+        activity_data["subject_id"] = str(matched_sub_id or "")
+
+        if idempotency_key and mongo_db is not None:
+            try:
+                mongo_db.learn_anywhere_cache.update_one(
+                    {"user_id": user_id, "idempotency_key": idempotency_key},
+                    {"$set": {
+                        "user_id": user_id,
+                        "idempotency_key": idempotency_key,
+                        "activity": activity_data,
+                        "subject": selected_subject,
+                        "topic": selected_topic,
+                        "updated_at": datetime.utcnow()
+                    }},
+                    upsert=True
+                )
+            except Exception as cache_err:
+                logger.warning(f"[LearnAnywhere] Could not save deduplication cache: {cache_err}")
+
+        # Persist to learn_anywhere_history for activity history tracking
+        now_ts = datetime.utcnow()
+        history_doc = {
+            "activity_id": activity_id,
+            "user_id": user_id,
+            "syllabus_id": syllabus_id_str,
+            "curriculum_reference": curriculum_reference,
+            "title": str(activity_data.get("title") or f"{selected_topic} Practical Activity"),
+            "subject": selected_subject,
+            "topic": selected_topic,
+            "updated_at": now_ts,
+            "completion_status": "not_started",
+            "attempts": [],
+            "reflections": "",
+            "activity": activity_data
+        }
+        if mongo_db is not None:
+            try:
+                mongo_db.learn_anywhere_history.create_index([("user_id", 1), ("created_at", -1)])
+                mongo_db.learn_anywhere_history.update_one(
+                    {"user_id": user_id, "activity_id": activity_id},
+                    {"$set": history_doc, "$setOnInsert": {"created_at": now_ts}},
+                    upsert=True
+                )
+            except Exception as h_err:
+                logger.warning(f"[LearnAnywhere] History save warning: {h_err}")
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    sqlite_db.execute("""
+                        CREATE TABLE IF NOT EXISTS learn_anywhere_history (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            activity_id TEXT NOT NULL,
+                            syllabus_id TEXT,
+                            curriculum_reference TEXT,
+                            title TEXT,
+                            subject TEXT,
+                            topic TEXT,
+                            completion_status TEXT,
+                            attempts_json TEXT,
+                            reflections TEXT,
+                            activity_json TEXT,
+                            created_at TEXT,
+                            updated_at TEXT
+                        )
+                    """)
+                    sqlite_db.execute("""
+                        INSERT OR REPLACE INTO learn_anywhere_history
+                        (id, user_id, activity_id, syllabus_id, curriculum_reference, title, subject, topic, completion_status, attempts_json, reflections, activity_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        f"{user_id}_{activity_id}", user_id, activity_id, syllabus_id_str, curriculum_reference,
+                        str(activity_data.get("title") or f"{selected_topic} Practical Activity"), selected_subject, selected_topic,
+                        "not_started", "[]", "", json.dumps(activity_data), now_ts.isoformat(), now_ts.isoformat()
+                    ))
+
+        return jsonify({
+            "success": True,
+            "activity": activity_data,
+            "subject": selected_subject,
+            "subject_id": str(matched_sub_id or ""),
+            "topic": selected_topic,
+            "resource_category": resource_env,
+            "constraint_mode": constraint_mode,
+            "validated_topics": subject_topics,
+            "active_semester": active_semester,
+            "syllabus_id": syllabus_id_str,
+            "curriculum_trace": {
+                "syllabus_id": syllabus_id_str,
+                "document_name": curriculum_doc.get("document_name") or curriculum_doc.get("file_name") or "Validated Syllabus",
+                "semester": active_semester,
+                "program": program,
+                "department": department
+            }
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/evaluate-answer", methods=["POST"])
+@require_auth
+def evaluate_learn_anywhere_answer_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        data = request.get_json(force=True) or {}
+
+        subject = str(data.get("subject") or "General Science").strip()
+        topic = str(data.get("topic") or "Practical Concept").strip()
+        question = str(data.get("question") or "").strip()
+        expected_answer = str(data.get("expected_answer") or data.get("answer") or "").strip()
+        student_answer = str(data.get("student_answer") or "").strip()
+        attempt_number = int(data.get("attempt_number") or 1)
+        preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        if not student_answer:
+            return jsonify({
+                "success": False,
+                "error": "Student answer cannot be empty.",
+                "is_valid": False
+            }), 400
+
+        eval_res = gemini_service.evaluate_learn_anywhere_answer(
+            subject=subject,
+            topic=topic,
+            question=question,
+            expected_answer=expected_answer,
+            student_answer=student_answer,
+            attempt_number=attempt_number,
+            preferred_language=preferred_language
+        )
+
+        return jsonify({
+            "success": True,
+            "evaluation": eval_res,
+            "user_id": user_id
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Evaluate answer error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/progress", methods=["POST"])
+@require_auth
+def save_learn_anywhere_progress_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        data = request.get_json(force=True) or {}
+
+        activity_id = str(data.get("activity_id") or f"act_{int(datetime.utcnow().timestamp())}").strip()
+        syllabus_id = str(data.get("syllabus_id") or "").strip()
+        subject = str(data.get("subject") or "").strip()
+        topic = str(data.get("topic") or "").strip()
+
+        attempts = data.get("attempts") or []
+        completed_steps = data.get("completed_steps") or []
+        total_steps = int(data.get("total_steps") or 0)
+
+        correct_count = sum(1 for a in attempts if isinstance(a, dict) and a.get("is_correct"))
+        total_attempts = len(attempts)
+        accuracy_percent = round((correct_count / total_attempts) * 100) if total_attempts > 0 else 0
+
+        steps_done = len(completed_steps)
+        is_completed = (total_steps > 0 and steps_done >= total_steps) or (total_attempts >= 3 and accuracy_percent >= 70)
+        completion_status = "completed" if is_completed else "in_progress"
+
+        incorrect_count = total_attempts - correct_count
+        additional_practice_needed = (incorrect_count >= 2) or (total_attempts >= 2 and accuracy_percent < 60)
+
+        now = datetime.utcnow()
+        record_doc = {
+            "user_id": user_id,
+            "activity_id": activity_id,
+            "syllabus_id": syllabus_id,
+            "subject": subject,
+            "topic": topic,
+            "attempts": attempts,
+            "completed_steps": completed_steps,
+            "total_steps": total_steps,
+            "completion_status": completion_status,
+            "accuracy_percent": accuracy_percent,
+            "correct_count": correct_count,
+            "total_attempts": total_attempts,
+            "additional_practice_needed": additional_practice_needed,
+            "updated_at": now
+        }
+
+        # MongoDB Persistence (isolated strictly in learn_anywhere_progress collection & history)
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            mongo_db.learn_anywhere_progress.update_one(
+                {"user_id": user_id, "activity_id": activity_id},
+                {"$set": record_doc, "$setOnInsert": {"created_at": now}},
+                upsert=True
+            )
+            # Sync attempts and completion status into learn_anywhere_history
+            mongo_db.learn_anywhere_history.update_one(
+                {"user_id": user_id, "activity_id": activity_id},
+                {"$set": {
+                    "attempts": attempts,
+                    "completion_status": completion_status,
+                    "updated_at": now
+                }}
+            )
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    sqlite_db.execute("""
+                        CREATE TABLE IF NOT EXISTS learn_anywhere_progress (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            activity_id TEXT NOT NULL,
+                            syllabus_id TEXT,
+                            subject TEXT,
+                            topic TEXT,
+                            attempts_json TEXT,
+                            completion_status TEXT,
+                            accuracy_percent INTEGER,
+                            updated_at TEXT
+                        )
+                    """)
+                    rec_id = f"{user_id}_{activity_id}"
+                    sqlite_db.execute("""
+                        INSERT OR REPLACE INTO learn_anywhere_progress
+                        (id, user_id, activity_id, syllabus_id, subject, topic, attempts_json, completion_status, accuracy_percent, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        rec_id, user_id, activity_id, syllabus_id, subject, topic,
+                        json.dumps(attempts), completion_status, accuracy_percent, now.isoformat()
+                    ))
+                    sqlite_db.execute("""
+                        UPDATE learn_anywhere_history
+                        SET attempts_json = ?, completion_status = ?, updated_at = ?
+                        WHERE user_id = ? AND activity_id = ?
+                    """, (json.dumps(attempts), completion_status, now.isoformat(), user_id, activity_id))
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "activity_id": activity_id,
+            "completion_status": completion_status,
+            "accuracy_percent": accuracy_percent,
+            "additional_practice_needed": additional_practice_needed,
+            "record": record_doc
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Save progress error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ── Learn Anywhere Activity History Endpoints ───────────────────────────────
+
+@app.route("/api/learn-anywhere/history", methods=["GET"])
+@require_auth
+def get_learn_anywhere_history_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+
+        page = max(1, int(request.args.get("page", 1)))
+        limit = min(50, max(1, int(request.args.get("limit", 10))))
+        skip = (page - 1) * limit
+
+        curriculum_doc = _get_authoritative_curriculum(user_id, user)
+        active_syllabus_id = str(curriculum_doc.get("syllabus_id") or curriculum_doc.get("_id") or "") if curriculum_doc else ""
+
+        mongo_db = get_mongodb()
+        records = []
+        total = 0
+
+        if mongo_db is not None:
+            total = mongo_db.learn_anywhere_history.count_documents({"user_id": user_id})
+            cursor = mongo_db.learn_anywhere_history.find({"user_id": user_id}).sort("created_at", -1).skip(skip).limit(limit)
+            for doc in cursor:
+                if "_id" in doc:
+                    doc["_id"] = str(doc["_id"])
+                doc_syl_id = str(doc.get("syllabus_id") or "")
+                is_current = bool(active_syllabus_id and doc_syl_id == active_syllabus_id)
+                doc["is_current_curriculum"] = is_current
+                doc["curriculum_status"] = "Current Curriculum" if is_current else "Previous Curriculum"
+                records.append(doc)
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    sqlite_db.execute("""
+                        CREATE TABLE IF NOT EXISTS learn_anywhere_history (
+                            id TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            activity_id TEXT NOT NULL,
+                            syllabus_id TEXT,
+                            curriculum_reference TEXT,
+                            title TEXT,
+                            subject TEXT,
+                            topic TEXT,
+                            completion_status TEXT,
+                            attempts_json TEXT,
+                            reflections TEXT,
+                            activity_json TEXT,
+                            created_at TEXT,
+                            updated_at TEXT
+                        )
+                    """)
+                    cur_cnt = sqlite_db.execute("SELECT COUNT(*) FROM learn_anywhere_history WHERE user_id = ?", (user_id,))
+                    total = cur_cnt.fetchone()[0]
+                    cur = sqlite_db.execute("""
+                        SELECT activity_id, syllabus_id, curriculum_reference, title, subject, topic, completion_status, attempts_json, reflections, activity_json, created_at, updated_at
+                        FROM learn_anywhere_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+                    """, (user_id, limit, skip))
+                    for row in cur.fetchall():
+                        doc_syl_id = str(row[1] or "")
+                        is_current = bool(active_syllabus_id and doc_syl_id == active_syllabus_id)
+                        records.append({
+                            "user_id": user_id,
+                            "activity_id": row[0],
+                            "syllabus_id": doc_syl_id,
+                            "curriculum_reference": row[2] or "Validated Syllabus",
+                            "title": row[3] or "Practical Activity",
+                            "subject": row[4] or "",
+                            "topic": row[5] or "",
+                            "completion_status": row[6] or "not_started",
+                            "attempts": json.loads(row[7] or "[]"),
+                            "reflections": row[8] or "",
+                            "activity": json.loads(row[9] or "{}"),
+                            "created_at": row[10],
+                            "updated_at": row[11],
+                            "is_current_curriculum": is_current,
+                            "curriculum_status": "Current Curriculum" if is_current else "Previous Curriculum"
+                        })
+
+        return jsonify({
+            "success": True,
+            "history": records,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "has_more": (skip + len(records)) < total
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] History list error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/history/<activity_id>", methods=["GET"])
+@require_auth
+def get_learn_anywhere_history_item_endpoint(activity_id):
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+
+        activity_id = str(activity_id).strip()
+        curriculum_doc = _get_authoritative_curriculum(user_id, user)
+        active_syllabus_id = str(curriculum_doc.get("syllabus_id") or curriculum_doc.get("_id") or "") if curriculum_doc else ""
+
+        mongo_db = get_mongodb()
+        item = None
+
+        if mongo_db is not None:
+            doc = mongo_db.learn_anywhere_history.find_one({"user_id": user_id, "activity_id": activity_id})
+            if doc:
+                if "_id" in doc:
+                    doc["_id"] = str(doc["_id"])
+                doc_syl_id = str(doc.get("syllabus_id") or "")
+                is_current = bool(active_syllabus_id and doc_syl_id == active_syllabus_id)
+                doc["is_current_curriculum"] = is_current
+                doc["curriculum_status"] = "Current Curriculum" if is_current else "Previous Curriculum"
+                item = doc
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                cur = sqlite_db.execute("""
+                    SELECT activity_id, syllabus_id, curriculum_reference, title, subject, topic, completion_status, attempts_json, reflections, activity_json, created_at, updated_at
+                    FROM learn_anywhere_history WHERE user_id = ? AND activity_id = ?
+                """, (user_id, activity_id))
+                row = cur.fetchone()
+                if row:
+                    doc_syl_id = str(row[1] or "")
+                    is_current = bool(active_syllabus_id and doc_syl_id == active_syllabus_id)
+                    item = {
+                        "user_id": user_id,
+                        "activity_id": row[0],
+                        "syllabus_id": doc_syl_id,
+                        "curriculum_reference": row[2] or "Validated Syllabus",
+                        "title": row[3] or "Practical Activity",
+                        "subject": row[4] or "",
+                        "topic": row[5] or "",
+                        "completion_status": row[6] or "not_started",
+                        "attempts": json.loads(row[7] or "[]"),
+                        "reflections": row[8] or "",
+                        "activity": json.loads(row[9] or "{}"),
+                        "created_at": row[10],
+                        "updated_at": row[11],
+                        "is_current_curriculum": is_current,
+                        "curriculum_status": "Current Curriculum" if is_current else "Previous Curriculum"
+                    }
+
+        if not item:
+            return jsonify({"success": False, "error": "Activity history record not found or access denied."}), 404
+
+        return jsonify({
+            "success": True,
+            "item": item
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] History item fetch error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/history/<activity_id>", methods=["PUT"])
+@require_auth
+def update_learn_anywhere_history_item_endpoint(activity_id):
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+
+        activity_id = str(activity_id).strip()
+        data = request.get_json(force=True) or {}
+
+        update_fields = {"updated_at": datetime.utcnow()}
+        if "reflections" in data:
+            update_fields["reflections"] = str(data.get("reflections") or "").strip()
+        if "completion_status" in data:
+            update_fields["completion_status"] = str(data.get("completion_status") or "in_progress").strip()
+
+        mongo_db = get_mongodb()
+        updated = False
+
+        if mongo_db is not None:
+            res = mongo_db.learn_anywhere_history.update_one(
+                {"user_id": user_id, "activity_id": activity_id},
+                {"$set": update_fields}
+            )
+            updated = (res.matched_count > 0)
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    sets = []
+                    vals = []
+                    if "reflections" in update_fields:
+                        sets.append("reflections = ?")
+                        vals.append(update_fields["reflections"])
+                    if "completion_status" in update_fields:
+                        sets.append("completion_status = ?")
+                        vals.append(update_fields["completion_status"])
+                    sets.append("updated_at = ?")
+                    vals.append(datetime.utcnow().isoformat())
+
+                    vals.extend([user_id, activity_id])
+                    cur = sqlite_db.execute(f"UPDATE learn_anywhere_history SET {', '.join(sets)} WHERE user_id = ? AND activity_id = ?", tuple(vals))
+                    updated = (cur.rowcount > 0)
+
+        if not updated:
+            return jsonify({"success": False, "error": "Activity history record not found or access denied."}), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Activity history record updated successfully.",
+            "activity_id": activity_id,
+            "updated_fields": update_fields
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] History item update error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/history/<activity_id>", methods=["DELETE"])
+@require_auth
+def delete_learn_anywhere_history_item_endpoint(activity_id):
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+
+        activity_id = str(activity_id).strip()
+        mongo_db = get_mongodb()
+        deleted = False
+
+        if mongo_db is not None:
+            res = mongo_db.learn_anywhere_history.delete_one({"user_id": user_id, "activity_id": activity_id})
+            deleted = (res.deleted_count > 0)
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    cur = sqlite_db.execute("DELETE FROM learn_anywhere_history WHERE user_id = ? AND activity_id = ?", (user_id, activity_id))
+                    deleted = (cur.rowcount > 0)
+
+        if not deleted:
+            return jsonify({"success": False, "error": "Activity history record not found or access denied."}), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Activity history record deleted successfully.",
+            "activity_id": activity_id
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] History item delete error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/progress", methods=["GET"])
+@require_auth
+def get_learn_anywhere_progress_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        mongo_db = get_mongodb()
+        records = []
+
+        if mongo_db is not None:
+            raw_docs = list(mongo_db.learn_anywhere_progress.find({"user_id": user_id}).sort("updated_at", -1))
+            for doc in raw_docs:
+                if "_id" in doc:
+                    doc["_id"] = str(doc["_id"])
+                records.append(doc)
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                cursor = sqlite_db.execute(
+                    "SELECT activity_id, syllabus_id, subject, topic, attempts_json, completion_status, accuracy_percent, updated_at FROM learn_anywhere_progress WHERE user_id = ? ORDER BY updated_at DESC",
+                    (user_id,)
+                )
+                for row in cursor.fetchall():
+                    records.append({
+                        "user_id": user_id,
+                        "activity_id": row[0],
+                        "syllabus_id": row[1],
+                        "subject": row[2],
+                        "topic": row[3],
+                        "attempts": json.loads(row[4] or "[]"),
+                        "completion_status": row[5],
+                        "accuracy_percent": row[6],
+                        "updated_at": row[7]
+                    })
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "progress_records": records
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Get progress error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/additional-practice", methods=["POST"])
+@require_auth
+def get_additional_practice_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        data = request.get_json(force=True) or {}
+        subject = str(data.get("subject") or "General Science").strip()
+        topic = str(data.get("topic") or "Core Practical Topic").strip()
+        preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        questions = gemini_service.generate_additional_practice_questions(
+            subject=subject,
+            topic=topic,
+            preferred_language=preferred_language
+        )
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "subject": subject,
+            "topic": topic,
+            "questions": questions
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Additional practice error: {exc}")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

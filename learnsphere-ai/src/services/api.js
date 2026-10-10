@@ -247,6 +247,34 @@ export const api = {
       body: { title, task, student_response: studentResponse, subject },
     }),
 
+  // ── Learn from Anywhere (Rural & Low-Resource Practical Learning) ──────────
+
+  generateLearnAnywhere: (payload) =>
+    request('/api/learn-anywhere/generate', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  evaluateLearnAnywhereAnswer: (payload) =>
+    request('/api/learn-anywhere/evaluate-answer', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  saveLearnAnywhereProgress: (payload) =>
+    request('/api/learn-anywhere/progress', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  getLearnAnywhereProgress: () => request('/api/learn-anywhere/progress'),
+
+  getLearnAnywhereAdditionalPractice: (payload) =>
+    request('/api/learn-anywhere/additional-practice', {
+      method: 'POST',
+      body: payload,
+    }),
+
   // ── Misconceptions ────────────────────────────────────────────────────────
 
   getMisconceptions: (params = {}) => {
@@ -310,4 +338,17 @@ export const api = {
     request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'PUT', body: data }),
   deleteTeacherClass: (classId) =>
     request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'DELETE' }),
+
+  // ── Learn Anywhere Activity History ───────────────────────────────────────
+
+  getLearnAnywhereHistory: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/learn-anywhere/history${qs ? '?' + qs : ''}`)
+  },
+  getLearnAnywhereHistoryItem: (activityId) =>
+    request(`/api/learn-anywhere/history/${encodeURIComponent(activityId)}`),
+  updateLearnAnywhereHistory: (activityId, payload) =>
+    request(`/api/learn-anywhere/history/${encodeURIComponent(activityId)}`, { method: 'PUT', body: payload }),
+  deleteLearnAnywhereHistory: (activityId) =>
+    request(`/api/learn-anywhere/history/${encodeURIComponent(activityId)}`, { method: 'DELETE' }),
 }

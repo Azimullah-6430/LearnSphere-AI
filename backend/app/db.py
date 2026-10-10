@@ -93,7 +93,7 @@ def get_mongodb():
         tls_options.append({
             "serverSelectionTimeoutMS": 2500,
             "connectTimeoutMS": 2500,
-            "socketTimeoutMS": 4000,
+            "socketTimeoutMS": 20000,
             "tlsCAFile": certifi.where(),
         })
     except ImportError:
@@ -102,7 +102,7 @@ def get_mongodb():
     tls_options.append({
         "serverSelectionTimeoutMS": 2500,
         "connectTimeoutMS": 2500,
-        "socketTimeoutMS": 4000,
+        "socketTimeoutMS": 20000,
         "tlsAllowInvalidCertificates": True,
     })
 

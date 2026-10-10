@@ -27,6 +27,7 @@ const RealityLab = lazy(() => import('./pages/RealityLab.jsx'))
 const CurrentOpportunities = lazy(() => import('./pages/CurrentOpportunities.jsx'))
 const CreateClassPage = lazy(() => import('./pages/CreateClassPage.jsx'))
 const SelectClass = lazy(() => import('./pages/SelectClass.jsx'))
+const LearnAnywhere = lazy(() => import('./pages/LearnAnywhere.jsx'))
 
 function Lazy({ children }) {
   return <Suspense fallback={<RouteLoader />}>{children}</Suspense>
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="action-center" element={<Lazy><ActionCenter /></Lazy>} />
         <Route path="reality-lab" element={<Lazy><RealityLab /></Lazy>} />
         <Route path="opportunities" element={<Lazy><CurrentOpportunities /></Lazy>} />
+        <Route path="learn-anywhere" element={<Lazy><LearnAnywhere /></Lazy>} />
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="*" element={<Lazy><NotFound /></Lazy>} />
       </Route>
