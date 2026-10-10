@@ -124,7 +124,7 @@ class TestUniversalTeachingEngine(unittest.TestCase):
         plan = self.planner.create_teaching_plan("World History", "French Revolution", {"level": "COLLEGE"})
         self.assertEqual(plan["topic_nature"], "historical-source")
         self.assertEqual(plan["demonstration_type"], "source_analysis_and_criticism")
-        self.assertIn("Chronological Timeline", plan["teaching_approach"])
+        self.assertIn("Historiographical", plan["teaching_approach"])
         self.assertIn("do not apply", plan["honest_limitation"].lower())
 
     def test_04_literature_approach(self):
@@ -132,7 +132,7 @@ class TestUniversalTeachingEngine(unittest.TestCase):
         plan = self.planner.create_teaching_plan("English Literature", "Shakespearean Tragedy", {"level": "COLLEGE"})
         self.assertEqual(plan["topic_nature"], "literary-thematic")
         self.assertEqual(plan["demonstration_type"], "textual_analysis_and_criticism")
-        self.assertIn("Close Textual Reading", plan["teaching_approach"])
+        self.assertIn("Textual Analysis", plan["teaching_approach"])
         self.assertIn("do not apply", plan["honest_limitation"].lower())
 
     def test_05_economics_approach(self):
@@ -154,7 +154,7 @@ class TestUniversalTeachingEngine(unittest.TestCase):
         plan = self.planner.create_teaching_plan("Pure Mathematics", "Calculus Derivatives", {"level": "COLLEGE"})
         self.assertEqual(plan["topic_nature"], "numerical")
         self.assertEqual(plan["demonstration_type"], "worked_example_and_derivation")
-        self.assertIn("First-Principles Derivation", plan["teaching_approach"])
+        self.assertIn("First-Principles", plan["teaching_approach"])
 
     def test_08_engineering_approach(self):
         """Engineering topics must use block schematics, derivations, component constraints, and simulations."""

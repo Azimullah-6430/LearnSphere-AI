@@ -4280,7 +4280,7 @@ def get_learn_anywhere_plan_endpoint():
     """
     try:
         user_id = _current_user_id()
-        user_dict = session.get("user") or {}
+        user_dict = _lookup_user_by_id(user_id) or session.get("user") or {}
         if str(user_dict.get("role") or "").lower() == "teacher":
             return jsonify({"error": "Learn from Anywhere is reserved exclusively for Student Portal accounts.", "success": False}), 403
 
@@ -4304,10 +4304,12 @@ def get_learn_anywhere_plan_endpoint():
             else:
                 return jsonify({"success": False, "error": f"Subject '{requested_subject}' is not present in your active validated curriculum.", "valid_subjects": valid_subjects}), 400
 
+        # Saved DB Student Profile is the sole source of truth (do not trust client profile overrides)
         student_profile = {
             "role": "student",
             "level": user_dict.get("level") or ("SCHOOL" if user_dict.get("grade") or user_dict.get("class_level") else "COLLEGE"),
             "grade": user_dict.get("grade") or user_dict.get("class_level"),
+            "class_level": user_dict.get("class_level") or user_dict.get("grade"),
             "program": user_dict.get("program") or user_dict.get("degree") or curriculum_doc.get("program"),
             "department": user_dict.get("department") or user_dict.get("stream") or curriculum_doc.get("department"),
             "year": user_dict.get("year") or user_dict.get("academic_year"),
