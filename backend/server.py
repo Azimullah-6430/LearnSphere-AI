@@ -4148,6 +4148,13 @@ def generate_learn_anywhere_endpoint():
         )
 
         if not isinstance(activity_data, dict) or activity_data.get("error"):
+            if isinstance(activity_data, dict) and activity_data.get("needs_clarification"):
+                return jsonify({
+                    "success": False,
+                    "needs_clarification": True,
+                    "clarification_question": activity_data.get("clarification_question"),
+                    "error": activity_data.get("clarification_question")
+                }), 400
             err_msg = activity_data.get("error") if (isinstance(activity_data, dict) and activity_data.get("error")) else "AI Generation service is currently unavailable. Please retry."
             return jsonify({
                 "success": False,
@@ -4242,6 +4249,7 @@ def generate_learn_anywhere_endpoint():
         return jsonify({
             "success": True,
             "activity": activity_data,
+            "teaching_plan": activity_data.get("teaching_plan"),
             "subject": selected_subject,
             "subject_id": str(matched_sub_id or ""),
             "topic": selected_topic,
@@ -4260,6 +4268,77 @@ def generate_learn_anywhere_endpoint():
         }), 200
     except Exception as exc:
         logger.warning(f"[LearnAnywhere] Error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/plan", methods=["POST"])
+@require_auth
+def get_learn_anywhere_plan_endpoint():
+    """
+    Generate a dynamic teaching plan for any subject/topic in student's validated curriculum.
+    Requires student authentication and valid curriculum.
+    """
+    try:
+        user_id = _current_user_id()
+        user_dict = session.get("user") or {}
+        if str(user_dict.get("role") or "").lower() == "teacher":
+            return jsonify({"error": "Learn from Anywhere is reserved exclusively for Student Portal accounts.", "success": False}), 403
+
+        data = request.get_json() or {}
+        requested_subject = str(data.get("subject") or "").strip()
+        requested_topic = str(data.get("topic") or "").strip()
+
+        mongo_db = get_mongodb()
+        curriculum_doc = None
+        if mongo_db is not None:
+            curriculum_doc = mongo_db.syllabi.find_one({"user_id": user_id, "is_active": True})
+
+        if not curriculum_doc:
+            return jsonify({"success": False, "error": "No active validated syllabus found for student.", "is_valid": False}), 400
+
+        valid_subjects = [s.get("name") if isinstance(s, dict) else str(s) for s in curriculum_doc.get("subjects", []) if (isinstance(s, dict) and s.get("name")) or (isinstance(s, str) and s)]
+        if requested_subject and requested_subject not in valid_subjects:
+            matched = [s for s in valid_subjects if s.lower() == requested_subject.lower()]
+            if matched:
+                requested_subject = matched[0]
+            else:
+                return jsonify({"success": False, "error": f"Subject '{requested_subject}' is not present in your active validated curriculum.", "valid_subjects": valid_subjects}), 400
+
+        student_profile = {
+            "role": "student",
+            "level": user_dict.get("level") or ("SCHOOL" if user_dict.get("grade") or user_dict.get("class_level") else "COLLEGE"),
+            "grade": user_dict.get("grade") or user_dict.get("class_level"),
+            "program": user_dict.get("program") or user_dict.get("degree") or curriculum_doc.get("program"),
+            "department": user_dict.get("department") or user_dict.get("stream") or curriculum_doc.get("department"),
+            "year": user_dict.get("year") or user_dict.get("academic_year"),
+            "semester": user_dict.get("semester") or curriculum_doc.get("target_semester")
+        }
+
+        syllabus_ctx = {
+            "description": curriculum_doc.get("document_name") or "Validated Syllabus",
+            "topics": [requested_topic] if requested_topic else [],
+            "learning_objectives": [f"Master {requested_topic} in {requested_subject}"] if requested_topic else []
+        }
+
+        from app.teaching_planner import teaching_planner
+        plan = teaching_planner.create_teaching_plan(
+            subject=requested_subject,
+            topic=requested_topic,
+            student_profile=student_profile,
+            syllabus_context=syllabus_ctx,
+            custom_materials=str(data.get("custom_materials") or ""),
+            resource_environment=str(data.get("resource_category") or "")
+        )
+
+        status_code = 200 if plan.get("is_valid") and not plan.get("needs_clarification") else 400
+        return jsonify({
+            "success": plan.get("is_valid", False) and not plan.get("needs_clarification", False),
+            "teaching_plan": plan,
+            "needs_clarification": plan.get("needs_clarification", False),
+            "clarification_question": plan.get("clarification_question")
+        }), status_code
+    except Exception as exc:
+        logger.warning(f"[LearnAnywherePlan] Error: {exc}")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

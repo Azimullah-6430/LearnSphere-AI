@@ -2430,6 +2430,37 @@ Return ONLY a valid JSON list of question objects:
         active_topic = topic or (validated_topics[0] if validated_topics else "Core Practical Principle")
         topics_str = ", ".join(validated_topics[:10]) if validated_topics else active_topic
 
+        # Invoke Dynamic Teaching Planner
+        from .teaching_planner import teaching_planner
+        student_prof = {
+            "level": semester or "COLLEGE",
+            "semester": semester,
+            "program": program,
+            "department": department,
+            "grade": semester if "grade" in str(semester).lower() or "class" in str(semester).lower() else ""
+        }
+        syl_ctx = {
+            "description": syllabus_context if isinstance(syllabus_context, str) else str(syllabus_context or ""),
+            "topics": validated_topics or [active_topic],
+            "learning_objectives": [f"Understand {active_topic} in {subject}"]
+        }
+        teaching_plan = teaching_planner.create_teaching_plan(
+            subject=subject,
+            topic=active_topic,
+            student_profile=student_prof,
+            syllabus_context=syl_ctx,
+            custom_materials=custom_materials,
+            resource_environment=resource_environment
+        )
+
+        if teaching_plan.get("needs_clarification"):
+            return {
+                "error": teaching_plan.get("clarification_question"),
+                "needs_clarification": True,
+                "clarification_question": teaching_plan.get("clarification_question"),
+                "is_supported": False
+            }
+
         constraint_instruction = "STRICT CONSTRAINT: You MUST design the activity using ONLY the exact objects and materials specified by the student. Do not introduce any external or store-bought materials." if constraint_mode == "strict_only" else "CONSTRAINT: Base the activity primarily around the student's available materials, but you may include minimal, common household items (e.g. clean water, spoon, paper, cotton thread, ruler, small cup) if strictly necessary."
 
         custom_mat_section = f"- Student's Specific Available Objects / Surroundings: {custom_materials}" if custom_materials else "- Student's General Environment: Rural/Village surroundings with natural objects (soil, plants, water, stones, tools)"
@@ -2458,6 +2489,16 @@ Academic & Curriculum Grounding:
 - Material Constraint Mode: {constraint_mode} ({constraint_instruction})
 - Difficulty Level: {difficulty}
 - Preferred Language: {preferred_language} ({lang_instruction})
+
+DYNAMIC TEACHING PLANNER BLUEPRINT:
+- Target Student Level: {teaching_plan.get('student_type')} ({teaching_plan.get('academic_profile')})
+- Topic Nature: {teaching_plan.get('topic_nature')}
+- Teaching Approach: {teaching_plan.get('teaching_approach')}
+- Learning Objective: {teaching_plan.get('learning_objective')}
+- Prerequisites: {", ".join(teaching_plan.get('prerequisites', []))}
+- Explanation Strategy: {teaching_plan.get('explanation_strategy')}
+- Practice Method: {teaching_plan.get('practice_method')}
+- Understanding Checks: {", ".join(teaching_plan.get('understanding_checks', []))}
 
 Supported Pedagogical Approaches by Subject:
 1. Household-Object Demonstrations: Water cups, cloth strips, spoons, cardboard, thread, clay pots.
@@ -2572,7 +2613,7 @@ Return ONLY a valid JSON object matching this exact schema:
             raw = self.generate_content(prompt, files=files_payload, json_output=True)
             res = self.parse_json_response(raw)
             if isinstance(res, dict) and (res.get("title") or res.get("activity_title") or res.get("academic_theory") or res.get("scientific_principle")):
-                return self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
+                return self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan)
         except Exception as e:
             logger.warning(f"[GeminiService] generate_learn_anywhere API call error: {e}")
             err_str = str(e)
@@ -2583,7 +2624,7 @@ Return ONLY a valid JSON object matching this exact schema:
                 }
 
         fallback = self._build_deterministic_learn_anywhere(subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department)
-        return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
+        return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan)
 
     def _normalize_learn_anywhere_response(
         self,
@@ -2597,12 +2638,16 @@ Return ONLY a valid JSON object matching this exact schema:
         semester: str,
         program: str,
         department: str,
-        constraint_mode: str
+        constraint_mode: str,
+        teaching_plan: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Normalize and enforce the strict 16-point schema, approach metadata, and backward compatibility."""
+        """Normalize and enforce the strict 16-point schema, approach metadata, dynamic teaching plan, and backward compatibility."""
         title = res.get("activity_title") or res.get("title") or f"Hands-on Investigation of {topic}"
         res["activity_title"] = title
         res["title"] = title
+
+        if teaching_plan:
+            res["teaching_plan"] = teaching_plan
 
         grounding = res.get("academic_grounding") or {}
         if not isinstance(grounding, dict):
