@@ -2575,6 +2575,12 @@ Return ONLY a valid JSON object matching this exact schema:
                 return self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
         except Exception as e:
             logger.warning(f"[GeminiService] generate_learn_anywhere API call error: {e}")
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str or "quota" in err_str.lower() or "429" in err_str:
+                return {
+                    "error": f"AI service is currently busy or rate-limited ({subject} - {active_topic}). Please click Retry in a few moments.",
+                    "is_supported": False
+                }
 
         fallback = self._build_deterministic_learn_anywhere(subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department)
         return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode)
@@ -2601,18 +2607,19 @@ Return ONLY a valid JSON object matching this exact schema:
         grounding = res.get("academic_grounding") or {}
         if not isinstance(grounding, dict):
             grounding = {}
-        grounding.setdefault("subject", subject)
-        grounding.setdefault("topic", topic)
-        grounding.setdefault("unit", unit or "Standard Unit")
-        grounding.setdefault("curriculum_reference", curriculum_ref or "Active Validated Syllabus")
-        grounding.setdefault("grade_or_semester", semester)
-        grounding.setdefault("program", program)
-        grounding.setdefault("department", department)
+        grounding["subject"] = subject
+        grounding["topic"] = topic
+        grounding["unit"] = unit or grounding.get("unit") or "Standard Unit"
+        grounding["curriculum_reference"] = curriculum_ref or grounding.get("curriculum_reference") or "Active Validated Syllabus"
+        grounding["grade_or_semester"] = semester or grounding.get("grade_or_semester") or ""
+        grounding["program"] = program or grounding.get("program") or ""
+        grounding["department"] = department or grounding.get("department") or ""
         res["academic_grounding"] = grounding
 
-        res.setdefault("subject", subject)
-        res.setdefault("syllabus_topic", topic)
-        res.setdefault("resource_category", resource_env)
+        res["subject"] = subject
+        res["topic"] = topic
+        res["syllabus_topic"] = topic
+        res["resource_category"] = resource_env
         res.setdefault("constraint_mode", constraint_mode)
         res.setdefault("is_supported", True)
 
@@ -2810,7 +2817,7 @@ Return ONLY a valid JSON object matching this exact schema:
             }
 
         # 2. Biology / Agriculture / Botany / Life Sciences
-        elif any(w in sub_lower or w in top_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "crop", "seed", "transpir"]):
+        elif any(w in sub_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "crop", "life science"]) or (not any(k in sub_lower for k in ["chem", "physic", "math", "comput", "engin", "electr", "mechanic", "data structure", "algorithm"]) and any(w in top_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "seed", "transpir"])):
             return {
                 "activity_id": f"lfa_bio_{difficulty.lower()}",
                 "activity_title": f"Non-Invasive Plant Transpiration & Stomatal Regulation Investigation for {topic or 'Plant Physiology'}",
@@ -2877,7 +2884,7 @@ Return ONLY a valid JSON object matching this exact schema:
             }
 
         # 3. Environmental Science / Ecology / Geography / Water Conservation
-        elif any(w in sub_lower or w in top_lower for w in ["environ", "ecolog", "earth", "geograph", "water conservation", "sustainab", "weather"]):
+        elif any(w in sub_lower for w in ["environ", "ecolog", "earth", "geograph", "sustainab", "weather", "atmosphere"]) or (not any(k in sub_lower for k in ["chem", "physic", "math", "comput", "engin", "electr", "mechanic", "data structure", "algorithm"]) and any(w in top_lower for w in ["environ", "ecolog", "soil runoff", "watershed"])):
             return {
                 "activity_id": f"lfa_env_{difficulty.lower()}",
                 "activity_title": f"Soil Runoff, Watershed Conservation & Natural Terracotta Cooling for {topic or 'Environmental Systems'}",
@@ -2944,7 +2951,7 @@ Return ONLY a valid JSON object matching this exact schema:
             }
 
         # 4. Mathematics / Geometry / Statistics / Logic
-        elif any(w in sub_lower or w in top_lower for w in ["math", "algebra", "geometr", "trig", "calculus", "probab", "statist", "matrix", "number"]):
+        elif any(w in sub_lower for w in ["math", "algebra", "geometr", "trig", "calculus", "probab", "statist", "matrix", "number", "linear algebra"]) or (not any(k in sub_lower for k in ["chem", "physic", "comput", "engin", "electr", "mechanic", "data structure", "algorithm"]) and any(w in top_lower for w in ["math", "algebra", "geometr", "trig", "calculus", "probability"])):
             return {
                 "activity_id": f"lfa_math_{difficulty.lower()}",
                 "activity_title": f"Shadow Trigonometry, Geometric Scaling & Pebble Combinatorics for {topic or 'Applied Mathematics'}",
@@ -3078,7 +3085,7 @@ Return ONLY a valid JSON object matching this exact schema:
             }
 
         # 6. Physics / Mechanics / Optics / Fluid Dynamics
-        elif any(w in sub_lower or w in top_lower for w in ["physic", "mechanic", "optic", "fluid", "force", "motion", "wave", "sound", "friction", "inertia"]):
+        elif any(w in sub_lower for w in ["physic", "mechanic", "optic", "fluid", "force", "motion", "wave", "sound", "friction", "inertia"]) or (not any(k in sub_lower for k in ["chem", "comput", "engin", "math", "bio", "data structure", "algorithm"]) and any(w in top_lower for w in ["physic", "mechanic", "optic", "capillar", "surface tension"])):
             return {
                 "activity_id": f"lfa_phy_{difficulty.lower()}",
                 "activity_title": f"Soil Capillarity, Fluid Surface Tension & Mechanical Lever Analysis for {topic or 'Physics'}",
@@ -3145,7 +3152,7 @@ Return ONLY a valid JSON object matching this exact schema:
             }
 
         # 6. Chemistry / Materials / Chemical Reactions / Acids & Bases
-        elif any(w in sub_lower or w in top_lower for w in ["chem", "reaction", "acid", "base", "ph", "element", "compound", "bond", "solution", "solubil"]):
+        elif any(w in sub_lower for w in ["chem", "acid", "reaction", "element", "compound", "bond", "solution", "solubil", "organic", "inorganic"]) or (not any(k in sub_lower for k in ["physic", "comput", "engin", "math", "bio", "data structure", "algorithm"]) and any(w in top_lower for w in ["chem", "acid", "base", "ph indicator", "protonation"])):
             return {
                 "activity_id": f"lfa_chem_{difficulty.lower()}",
                 "activity_title": f"Natural Botanical pH Indicators & Reversible Protonation for {topic or 'Acid-Base Equilibria'}",
@@ -3208,6 +3215,73 @@ Return ONLY a valid JSON object matching this exact schema:
                 ],
                 "reflection_task": "Test your local well water and drinking water with the turmeric strip. Does it change color? What does this tell you about its pH balance?",
                 "follow_up_practice": "Prepare a red hibiscus petal extract in warm water and test both lemon juice and wood ash water. Tabulate the resulting color changes.",
+                "is_supported": True
+            }
+
+        # 7. Computer Science / Software Engineering / Data Structures & Algorithms
+        elif any(w in sub_lower for w in ["comput", "data structure", "algorithm", "software", "programm", "code", "database", "network", "python", "java", "it", "information technology"]) or any(w in top_lower for w in ["data structure", "algorithm", "sorting", "binary tree", "graph traversal", "array"]):
+            return {
+                "activity_id": f"lfa_cs_{difficulty.lower()}",
+                "activity_title": f"Physical Array Sorting, Grid Traversal & Logic Simulation for {topic or subject}",
+                "title": f"Physical Array Sorting, Grid Traversal & Logic Simulation for {topic or subject}",
+                "demonstration_type": "household_demonstration",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Algorithms, Data Structures & Computational Logic",
+                    "unit": "Computer Science & Algorithmic Foundations",
+                    "curriculum_reference": "Accredited Computer Science Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "B.Tech Computer Science",
+                    "department": department or "Computer Science & Engineering"
+                },
+                "learning_objectives": [
+                    "Simulate algorithmic execution steps (comparison, swapping, index pointer movement) using physical cards/pebbles.",
+                    "Analyze time complexity O(N), space complexity, and invariants for {topic}."
+                ],
+                "real_world_concept": "Algorithmic control structures, memory state transitions, and step-by-step state machine execution.",
+                "materials_student_has": [
+                    "10 numbered paper cards or numbered pebbles (values 1 to 10)",
+                    "A flat surface or table divided into indexed slots (0 to 9)",
+                    "Two distinct markers (twigs or colored caps) as index pointers (i and j)",
+                    "Paper and pencil for recording trace logs"
+                ],
+                "safe_substitutions": [
+                    "Playing cards or numbered bottle caps instead of paper cards",
+                    "Drawn chalk lines on floor instead of paper slots"
+                ],
+                "no_purchase_alternative": "Use 10 small stones marked with charcoal numbers 1 through 10.",
+                "steps": [
+                    "Step 1: Arrange 7 unsorted numbered cards randomly in slots 0 through 6 to represent an input array.",
+                    "Step 2: Place pointer 'i' at slot 0 and pointer 'j' at slot 1 to execute the core logic for {topic}.",
+                    "Step 3: Compare values at slot i and slot j. Swap cards physically if they violate the ordering invariant.",
+                    "Step 4: Increment pointer j across the array, recording each comparison and swap in your trace log table.",
+                    "Step 5: Trace the step-by-step state change and verify the final sorted array or target output structure."
+                ],
+                "simple_explanation": "Computers process data by moving items between memory slots one step at a time according to fixed rules. By moving numbered stones on a drawn grid, you are manually executing the exact same step-by-step logic that a microprocessor executes in code.",
+                "academic_theory": "Grounded in Turing machine state transitions and algorithmic complexity theory. For array operations, comparison-based sorting requires Omega(N log N) operations in the worst case. Pointer movement tracks index variables, demonstrating how memory addresses (pointers) isolate and mutate data structures deterministically.",
+                "everyday_applications": "Underpins database query searching, mobile app sorting, network packet routing, and file compression software.",
+                "expected_observations": "Each iteration strictly reduces the un-ordered sub-array size until the invariant holds across all slots. Total comparisons match theoretical bounds.",
+                "limitations_and_misconceptions": "Physical simulation represents deterministic sequential execution; parallel execution on multi-core processors involves concurrent memory locking which is modeled separately.",
+                "safety_precautions": "Safe hands-on cognitive activity with zero hazardous equipment.",
+                "understanding_questions": [
+                    {
+                        "question": f"Why does moving two pointers (i and j) allow efficient tracking of array elements in {topic}?",
+                        "answer": "Pointers hold memory index offsets, allowing algorithm steps to inspect and swap elements in O(1) auxiliary space.",
+                        "explanation": "In-place pointer manipulation avoids allocating extra memory buffers."
+                    },
+                    {
+                        "question": "What is the worst-case comparison count when executing this step-by-step process on N items?",
+                        "answer": "For simple comparison loops, worst-case time complexity is O(N^2) for N elements.",
+                        "explanation": "Summation of 1 + 2 + ... + (N-1) yields N*(N-1)/2 total comparison steps."
+                    },
+                    {
+                        "question": "How does physical manual execution help identify logic bugs in pseudo-code?",
+                        "answer": "It forces complete tracing of variable state changes at every single step, exposing boundary errors (e.g. off-by-one errors).",
+                        "explanation": "Manual execution acts as a deterministic state machine trace."
+                    }
+                ],
+                "reflection_task": "Trace how your local post office or market vendor sorts letters or packages by location code. How does their manual process mirror array sorting algorithms?",
+                "follow_up_practice": "Trace the execution of binary search on a 10-element sorted array, recording mid-point index calculations at each step.",
                 "is_supported": True
             }
 

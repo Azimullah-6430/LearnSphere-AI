@@ -3929,24 +3929,9 @@ def generate_learn_anywhere_endpoint():
             return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
         data    = request.get_json(force=True) or {}
         idempotency_key = str(data.get("idempotency_key") or data.get("request_id") or "").strip()
-
-        # Deduplication check: prevent duplicate activity generation on retry
-        mongo_db = get_mongodb()
-        if idempotency_key and mongo_db is not None:
-            existing_act = mongo_db.learn_anywhere_cache.find_one({"user_id": user_id, "idempotency_key": idempotency_key})
-            if existing_act and existing_act.get("activity"):
-                logger.info(f"[LearnAnywhere] Returning deduplicated activity for user {user_id}, key {idempotency_key}")
-                return jsonify({
-                    "success": True,
-                    "activity": existing_act["activity"],
-                    "subject": existing_act.get("subject"),
-                    "topic": existing_act.get("topic"),
-                    "deduplicated": True,
-                    "cached_response": True
-                }), 200
-
         subject_id  = str(data.get("subject_id") or data.get("subjectId") or data.get("id") or data.get("code") or "").strip()
         syllabus_id = str(data.get("syllabus_id") or data.get("syllabusId") or data.get("curriculum_id") or data.get("curriculumId") or "").strip()
+        requested_subject = str(data.get("subject") or data.get("subject_name") or "").strip()
 
         # Fetch authoritative active validated curriculum
         curriculum_doc = _get_authoritative_curriculum(user_id, user, syllabus_id=syllabus_id or None)
@@ -3979,7 +3964,6 @@ def generate_learn_anywhere_endpoint():
                 "subjects": []
             }), 400
 
-        requested_subject = str(data.get("subject") or data.get("subject_name") or "").strip()
         matched_subj = None
         matched_sub_id = subject_id
         matched_sub_obj = None
@@ -4007,16 +3991,16 @@ def generate_learn_anywhere_endpoint():
                     matched_subj = str(s)
                     break
 
-        selected_subject = matched_subj or requested_subject or (valid_subjects[0] if valid_subjects else "")
-        if selected_subject and selected_subject not in valid_subjects and not matched_subj:
+        selected_subject = matched_subj or (requested_subject if requested_subject in valid_subjects else "")
+        if requested_subject and not selected_subject:
             return jsonify({
                 "success": False,
-                "error": f"Subject '{selected_subject}' is not present in your validated curriculum.",
+                "error": f"Subject '{requested_subject}' is not present in your active validated curriculum.",
                 "valid_subjects": valid_subjects
             }), 400
 
         selected_subject = selected_subject or valid_subjects[0]
-        
+
         # Extract validated topics for this subject
         subject_topics = []
         if curriculum_doc:
@@ -4034,8 +4018,55 @@ def generate_learn_anywhere_endpoint():
                         elif isinstance(u, str):
                             subject_topics.append(u)
 
-        requested_topic      = str(data.get("topic") or data.get("concept") or data.get("module") or "").strip()
-        selected_topic       = requested_topic or (subject_topics[0] if subject_topics else "Practical Principles")
+            if matched_sub_obj and isinstance(matched_sub_obj, dict):
+                if isinstance(matched_sub_obj.get("topics"), list):
+                    subject_topics.extend(matched_sub_obj.get("topics"))
+                if isinstance(matched_sub_obj.get("units"), list):
+                    for u in matched_sub_obj.get("units"):
+                        if isinstance(u, dict):
+                            if u.get("name"):
+                                subject_topics.append(u.get("name"))
+                            if isinstance(u.get("concepts"), list):
+                                subject_topics.extend(u.get("concepts"))
+                        elif isinstance(u, str):
+                            subject_topics.append(u)
+
+        subject_topics = list(dict.fromkeys([t for t in subject_topics if t]))
+
+        requested_topic = str(data.get("topic") or data.get("concept") or data.get("module") or "").strip()
+        selected_topic = requested_topic
+        if requested_topic and subject_topics:
+            topic_matched = False
+            for st in subject_topics:
+                if st.lower() == requested_topic.lower() or requested_topic.lower() in st.lower() or st.lower() in requested_topic.lower():
+                    selected_topic = st
+                    topic_matched = True
+                    break
+            if not topic_matched:
+                selected_topic = subject_topics[0]
+        elif not selected_topic and subject_topics:
+            selected_topic = subject_topics[0]
+        elif not selected_topic:
+            selected_topic = f"Core Concepts of {selected_subject}"
+
+        # Deduplication check AFTER subject & topic resolution: verify subject matches
+        mongo_db = get_mongodb()
+        if idempotency_key and mongo_db is not None:
+            existing_act = mongo_db.learn_anywhere_cache.find_one({"user_id": user_id, "idempotency_key": idempotency_key})
+            if existing_act and existing_act.get("activity"):
+                cached_sub = str(existing_act.get("subject") or "").strip().lower()
+                cached_top = str(existing_act.get("topic") or "").strip().lower()
+                if cached_sub == selected_subject.lower() and (not selected_topic or cached_top == selected_topic.lower()):
+                    logger.info(f"[LearnAnywhere] Returning deduplicated activity for user {user_id}, key {idempotency_key}")
+                    return jsonify({
+                        "success": True,
+                        "activity": existing_act["activity"],
+                        "subject": existing_act.get("subject"),
+                        "topic": existing_act.get("topic"),
+                        "deduplicated": True,
+                        "cached_response": True
+                    }), 200
+
         unit_name            = str(data.get("unit") or data.get("module") or "").strip()
         curriculum_reference = str(curriculum_doc.get("document_name") or curriculum_doc.get("file_name") or "Validated Syllabus").strip()
         preferred_language   = str(data.get("preferred_language") or data.get("language") or "English").strip()
@@ -4116,11 +4147,22 @@ def generate_learn_anywhere_endpoint():
             accessibility_notes=accessibility_notes
         )
 
+        if not isinstance(activity_data, dict) or activity_data.get("error"):
+            err_msg = activity_data.get("error") if (isinstance(activity_data, dict) and activity_data.get("error")) else "AI Generation service is currently unavailable. Please retry."
+            return jsonify({
+                "success": False,
+                "error": err_msg,
+                "can_retry": True
+            }), 503
+
         syllabus_id_str = str(curriculum_doc.get("syllabus_id") or curriculum_doc.get("_id") or "")
         activity_id = str(activity_data.get("activity_id") or activity_data.get("id") or f"act_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:6]}")
         activity_data["activity_id"] = activity_id
         activity_data["syllabus_id"] = syllabus_id_str
         activity_data["subject_id"] = str(matched_sub_id or "")
+        activity_data["subject"] = selected_subject
+        activity_data["topic"] = selected_topic
+        activity_data["curriculum_version"] = str(curriculum_doc.get("version") or "1.0")
 
         if idempotency_key and mongo_db is not None:
             try:

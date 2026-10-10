@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
@@ -87,6 +87,7 @@ export default function LearnAnywhere() {
   const { user, recordActivity } = useApp()
   const { curriculum, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
+  const requestIdRef = useRef(0)
 
   const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
   const [selectedTopic, setSelectedTopic] = useState('')
@@ -295,6 +296,46 @@ export default function LearnAnywhere() {
     setErrorMsg('')
   }, [activeSyllabusId])
 
+  // Handle Subject selection and synchronously set topic to prevent stale cross-subject topic leakage
+  const handleSubjectSelect = useCallback((newSub) => {
+    setSelectedSubject(newSub)
+    const topics = []
+    const chaptersDict = curriculum?.chapters || curriculum?.units || allUnits || {}
+    if (chaptersDict[newSub]) {
+      const uList = chaptersDict[newSub]
+      if (Array.isArray(uList)) {
+        uList.forEach(u => {
+          if (typeof u === 'object' && u !== null) {
+            if (u.name) topics.push(u.name)
+            if (Array.isArray(u.concepts)) topics.push(...u.concepts)
+          } else if (typeof u === 'string') {
+            topics.push(u)
+          }
+        })
+      }
+    }
+    if (Array.isArray(curriculum?.subjects)) {
+      const subObj = curriculum.subjects.find(s =>
+        (typeof s === 'object' && s.name === newSub) || s === newSub
+      )
+      if (subObj && typeof subObj === 'object') {
+        if (Array.isArray(subObj.topics)) topics.push(...subObj.topics)
+        if (Array.isArray(subObj.units)) {
+          subObj.units.forEach(u => {
+            if (typeof u === 'object' && u !== null) {
+              if (u.name) topics.push(u.name)
+              if (Array.isArray(u.concepts)) topics.push(...u.concepts)
+            } else if (typeof u === 'string') {
+              topics.push(u)
+            }
+          })
+        }
+      }
+    }
+    const cleanTopics = Array.from(new Set(topics.filter(Boolean)))
+    setSelectedTopic(cleanTopics[0] || '')
+  }, [curriculum, allUnits])
+
   // Set default topic when subject topics change
   useEffect(() => {
     if (validatedSubjectTopics.length > 0 && (!selectedTopic || !validatedSubjectTopics.includes(selectedTopic))) {
@@ -344,6 +385,9 @@ export default function LearnAnywhere() {
       return
     }
 
+    requestIdRef.current += 1
+    const currentRequestId = requestIdRef.current
+
     setLoading(true)
     setErrorMsg('')
     setShowReflectionAnswer(false)
@@ -359,13 +403,14 @@ export default function LearnAnywhere() {
     setSaveStatus('idle')
 
     const currentUid = String(user?.id || user?._id || user?.email || 'anon')
-    const idempotencyKey = `lfa_req_${currentUid}_${selectedSubject.replace(/\s+/g, '_')}_${(selectedTopic || 'concept').replace(/\s+/g, '_')}_${Date.now()}`
+    const activeTopicTarget = selectedTopic || validatedSubjectTopics[0] || 'Core Practical Concept'
+    const idempotencyKey = `lfa_req_${currentUid}_${selectedSubject.replace(/\s+/g, '_')}_${activeTopicTarget.replace(/\s+/g, '_')}_${Date.now()}`
 
     try {
       const res = await api.generateLearnAnywhere({
         subject: selectedSubject,
         subject_id: activeSubjectId || undefined,
-        topic: selectedTopic || validatedSubjectTopics[0] || 'Core Practical Concept',
+        topic: activeTopicTarget,
         resource_category: selectedEnv,
         difficulty,
         preferred_language: preferredLanguage,
@@ -376,7 +421,20 @@ export default function LearnAnywhere() {
         idempotency_key: idempotencyKey
       })
 
+      if (currentRequestId !== requestIdRef.current) {
+        console.warn('Superseded generation request completed; discarding out-of-order response.')
+        return
+      }
+
       if (res && res.success && res.activity) {
+        const returnedSub = String(res.activity?.academic_grounding?.subject || res.activity?.subject || res.subject || '').trim().toLowerCase()
+        if (returnedSub && returnedSub !== selectedSubject.trim().toLowerCase()) {
+          console.warn(`Mismatched subject returned from API: expected '${selectedSubject}', got '${returnedSub}'`)
+          setActivity(null)
+          setErrorMsg(`Returned activity did not match requested subject '${selectedSubject}'. Please click Retry to generate a clean activity.`)
+          return
+        }
+
         setActivity(res.activity)
         if (currentUid && currentUid !== 'anon') {
           try {
@@ -393,17 +451,22 @@ export default function LearnAnywhere() {
         if (recordActivity) {
           recordActivity('activity', `Generated Learn from Anywhere experiment: ${res.activity.title || selectedSubject}`, {
             subject: selectedSubject,
-            topic: selectedTopic,
+            topic: activeTopicTarget,
             syllabus_id: activeSyllabusId
           })
         }
       } else {
+        setActivity(null)
         setErrorMsg(res?.error || 'Failed to design practical activity. Please check your connection and retry.')
       }
     } catch (err) {
+      if (currentRequestId !== requestIdRef.current) return
+      setActivity(null)
       setErrorMsg(err?.message || 'Connection error while contacting the activity generator. Please try again.')
     } finally {
-      setLoading(false)
+      if (currentRequestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
   }, [selectedSubject, activeSubjectId, selectedTopic, validatedSubjectTopics, selectedEnv, difficulty, preferredLanguage, customMaterials, constraintMode, imageData, activeSyllabusId, recordActivity, user])
 
@@ -619,7 +682,7 @@ export default function LearnAnywhere() {
                 <button
                   key={sub}
                   type="button"
-                  onClick={() => setSelectedSubject(sub)}
+                  onClick={() => handleSubjectSelect(sub)}
                   className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
