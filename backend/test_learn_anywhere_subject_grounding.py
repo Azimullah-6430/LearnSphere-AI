@@ -198,7 +198,7 @@ class TestLearnAnywhereSubjectGrounding(unittest.TestCase):
         )
         self.assertEqual(norm_cs["subject"], "Data Structures & Algorithms")
         self.assertEqual(norm_cs["topic"], "B-Trees")
-        self.assertIn("Array", norm_cs["title"])
+        self.assertIn("Algorithmic", norm_cs["title"])
 
         res_chem = gemini_service._build_deterministic_learn_anywhere(
             subject="Organic Chemistry",

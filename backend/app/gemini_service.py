@@ -2794,8 +2794,407 @@ Return ONLY a valid JSON object matching this exact schema:
         sub_lower = subject.lower()
         top_lower = topic.lower()
 
-        # 1. Abstract / Theoretical / Non-Demonstrable Topics (Quantum, Nuclear, Relativity, Abstract Pure Math)
-        if any(w in top_lower or w in sub_lower for w in ["quantum", "nuclear", "relativity", "astrophysic", "atomic structure", "subatomic", "particle physics"]):
+        from .teaching_planner import teaching_planner
+        nature = teaching_planner.detect_topic_nature(subject, topic)
+
+        # 1. Computer Science & Software Algorithms (programming-oriented)
+        if nature == "programming-oriented" or any(w in sub_lower for w in ["computer", "data structure", "algorithm", "software", "web dev"]):
+            return {
+                "activity_id": f"lfa_cs_{difficulty.lower()}",
+                "activity_title": f"Algorithmic Logic Breakdown & Code Execution Trace Table: Exploring {topic or 'Data Structures & Algorithms'}",
+                "title": f"Algorithmic Logic Breakdown & Code Execution Trace Table: Exploring {topic or 'Data Structures & Algorithms'}",
+                "demonstration_type": "code_and_logic_simulation",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Algorithmic Logic & Data Structures",
+                    "unit": "Core Software Engineering & Algorithms",
+                    "curriculum_reference": "Accredited Computer Science Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Computer Science & Engineering",
+                    "department": department or "Computer Science"
+                },
+                "learning_objectives": [
+                    f"Analyze the algorithmic logic, step-by-step state transitions, and memory allocation of {topic}.",
+                    "Calculate asymptotic time complexity O(N) and space complexity O(1) for worst-case inputs."
+                ],
+                "real_world_concept": f"Deterministic state transformations and algorithmic control flow in software systems implementing {topic}.",
+                "materials_student_has": [
+                    "A code editor, IDE, or paper notebook for variable trace tables",
+                    "A marked grid for array memory locations",
+                    "Sample input datasets"
+                ],
+                "safe_substitutions": [
+                    "Pen and paper grid trace table instead of digital IDE",
+                    "Index cards or numbered pebbles representing array elements"
+                ],
+                "no_purchase_alternative": "Draw memory slots on paper and trace variable updates step-by-step using a pencil.",
+                "steps": [
+                    f"Step 1: Write down the formal algorithm / code logic for {topic}.",
+                    "Step 2: Construct a variable trace table with columns for Iteration Counter, Current Index, Target Element, and Array State.",
+                    "Step 3: Dry-run execution step-by-step using a sample unsorted/input array [45, 12, 89, 34, 23].",
+                    "Step 4: Record how pointer state or loop bounds update at each comparison.",
+                    "Step 5: Compute worst-case comparison count and verify asymptotic Big-O complexity."
+                ],
+                "simple_explanation": f"Software algorithms like {topic} are step-by-step recipes that tell a computer how to re-order or locate information quickly. By writing down a trace table on paper, we can see exactly how the computer updates its memory at every single step.",
+                "academic_theory": f"Governed by fundamental computer science principles of state machine transitions and asymptotic analysis. For {topic}, the worst-case time complexity T(N) is derived by summing comparison steps across N input elements.",
+                "everyday_applications": "Underpins database query searching, mobile app search bars, flight reservation systems, and high-frequency transaction routing.",
+                "expected_observations": "The trace table shows deterministic array state transformations terminating in a fully processed state within predictable step bounds.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Software algorithms run purely in digital memory. Physical lab experiments are not applicable; this topic is taught via dry-run execution trace tables and logic verification.",
+                "safety_precautions": "Take regular eye breaks when staring at code screens or detailed paper trace tables.",
+                "understanding_questions": [
+                    {
+                        "question": f"What is the worst-case time complexity of {topic} for an input array of size N?",
+                        "answer": "Worst-case time complexity is determined by evaluating the total comparison loop iterations as a function of N.",
+                        "explanation": "Big-O notation measures the growth rate of algorithm execution time relative to input size."
+                    },
+                    {
+                        "question": "Why is a dry-run variable trace table essential when debugging complex code logic?",
+                        "answer": "It exposes off-by-one errors, infinite loop traps, and unexpected variable overwrites before deploying code.",
+                        "explanation": "Trace tables track continuous memory state mutations at every execution instruction."
+                    },
+                    {
+                        "question": "How does memory allocation differ between contiguous arrays and linked pointer nodes?",
+                        "answer": "Arrays allocate fixed contiguous memory blocks with O(1) random access, whereas linked nodes use dynamic pointers scattered across heap memory.",
+                        "explanation": "Contiguous memory enables direct index offset arithmetic."
+                    }
+                ],
+                "reflection_task": f"Trace how {topic} handles an already sorted array vs a reverse-sorted array. Does the step count differ?",
+                "follow_up_practice": f"Implement {topic} in Python or pseudocode and write 3 unit test cases testing boundary conditions (empty input, single element, duplicate elements).",
+                "is_supported": True
+            }
+
+        # 2. Commerce & Accounting (accounting-financial)
+        elif nature == "accounting-financial" or any(w in sub_lower for w in ["account", "commerce", "finance", "audit", "tax"]):
+            return {
+                "activity_id": f"lfa_acc_{difficulty.lower()}",
+                "activity_title": f"Double-Entry Journal & T-Account Balance Analysis for {topic or 'Financial Accounting'}",
+                "title": f"Double-Entry Journal & T-Account Balance Analysis for {topic or 'Financial Accounting'}",
+                "demonstration_type": "financial_case_study",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Financial Accounting & Transaction Analysis",
+                    "unit": "Accounting Principles & Financial Statements",
+                    "curriculum_reference": "Accredited Accounting Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Commerce & Business Administration",
+                    "department": department or "Accounting & Finance"
+                },
+                "learning_objectives": [
+                    f"Record double-entry transaction journal entries and post to T-account ledgers for {topic}.",
+                    "Verify the fundamental Accounting Equation (Assets = Liabilities + Owner's Equity) after balance reconciliation."
+                ],
+                "real_world_concept": "Dual-aspect economic transaction recording where every financial event yields equal and opposite debit and credit entries.",
+                "materials_student_has": [
+                    "Accounting journal paper or ledger grid notebook",
+                    "Calculated financial transaction scenario data",
+                    "Pen and calculator"
+                ],
+                "safe_substitutions": [
+                    "Hand-drawn T-account grid on standard paper notebook",
+                    "Mental arithmetic or basic smartphone calculator"
+                ],
+                "no_purchase_alternative": "Draw T-accounts (Debit on left, Credit on right) using a ruler on plain paper.",
+                "steps": [
+                    f"Step 1: Analyze the financial scenario for {topic} and identify affected accounts (Assets, Liabilities, Equity, Revenue, Expense).",
+                    "Step 2: Apply Golden Rules of Accounting: Debit what comes in / receiver, Credit what goes out / giver.",
+                    "Step 3: Record chronological journal entries with complete narrations.",
+                    "Step 4: Post journal entries into individual T-account ledgers.",
+                    "Step 5: Calculate closing ledger balances and compile the Trial Balance to confirm debit-credit equilibrium."
+                ],
+                "simple_explanation": f"Accounting for {topic} relies on a simple rule: every time money or value moves into one bucket (Debit), an equal amount must leave another bucket (Credit). By tracking both sides in T-accounts, we ensure zero financial errors.",
+                "academic_theory": "Governed by the Dual Aspect Principle and Generally Accepted Accounting Principles (GAAP / IFRS). The fundamental identity: Assets = Liabilities + Equity must remain balanced after every transaction entry.",
+                "everyday_applications": "Essential for small business cash flow tracking, rural cooperative auditing, tax compliance, bank credit evaluations, and financial health reporting.",
+                "expected_observations": "Total debit column sum in the Trial Balance equals total credit column sum exactly.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Physical science experiments do not apply to accounting. This topic is taught using double-entry journal entries, T-account ledgers, balance sheets, and financial case studies.",
+                "safety_precautions": "Double-check numerical entries to avoid transcription errors.",
+                "understanding_questions": [
+                    {
+                        "question": f"How does a transaction involving {topic} affect the Accounting Equation?",
+                        "answer": "It alters specific asset, liability, or equity balances while preserving equal net changes on both sides of the equation.",
+                        "explanation": "Dual-entry recording maintains structural identity balance."
+                    },
+                    {
+                        "question": "What is the key difference between a nominal account and a real account?",
+                        "answer": "Nominal accounts track temporary revenues and expenses closed at year-end, while real accounts track permanent assets and liabilities carried forward.",
+                        "explanation": "Nominal accounts reset to zero each financial year."
+                    },
+                    {
+                        "question": "Why must the Trial Balance balance before preparing final income statements?",
+                        "answer": "To ensure mathematical equality between debits and credits across all ledger accounts.",
+                        "explanation": "Unbalanced trial balances indicate posting or mathematical errors."
+                    }
+                ],
+                "reflection_task": "Review a local store owner's daily sales register. How could converting single-entry cash notes into double-entry T-accounts prevent missing funds?",
+                "follow_up_practice": f"Prepare journal entries, T-accounts, and a trial balance for 5 transactions involving {topic}.",
+                "is_supported": True
+            }
+
+        # 3. History (historical-source)
+        elif nature == "historical-source" or any(w in sub_lower for w in ["history", "histori", "civilization"]):
+            return {
+                "activity_id": f"lfa_hist_{difficulty.lower()}",
+                "activity_title": f"Chronological Cause-and-Effect Analysis & Source Evaluation for {topic or 'Historical Study'}",
+                "title": f"Chronological Cause-and-Effect Analysis & Source Evaluation for {topic or 'Historical Study'}",
+                "demonstration_type": "source_analysis_and_criticism",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Historical Chronology & Primary Source Criticism",
+                    "unit": "Historical Methods & Contextual Analysis",
+                    "curriculum_reference": "Accredited History Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Humanities & Social Sciences",
+                    "department": department or "History"
+                },
+                "learning_objectives": [
+                    f"Evaluate primary and secondary source evidence regarding {topic}.",
+                    "Construct chronological timelines and analyze short-term triggers vs long-term socio-economic causes."
+                ],
+                "real_world_concept": "Historiographical evidence evaluation and causal chain mapping in historical developments.",
+                "materials_student_has": [
+                    "Primary source document excerpt or historical text",
+                    "Chronological timeline chart template",
+                    "Analytical notebook"
+                ],
+                "safe_substitutions": [
+                    "Hand-drawn timeline line on paper notebook",
+                    "Textbook passage excerpt"
+                ],
+                "no_purchase_alternative": "Draw a horizontal timeline arrow on paper and mark key dates and causal triggers.",
+                "steps": [
+                    f"Step 1: Read the primary source excerpt concerning {topic}.",
+                    "Step 2: Plot key events, treaties, speeches, or social shifts chronologically on your timeline.",
+                    "Step 3: Categorize factors into Long-Term Structural Causes, Short-Term Triggers, and Immediate Consequences.",
+                    "Step 4: Evaluate the author's background, perspective, intended audience, and potential bias.",
+                    "Step 5: Synthesize a structured 3-paragraph historical argument supported by direct source evidence."
+                ],
+                "simple_explanation": f"History isn't just memorizing dates; it's investigating why major events like {topic} happened. By examining documents written during that era and mapping causes on a timeline, we can understand how human choices shaped our world.",
+                "academic_theory": "Governed by historical criticism methods (External and Internal Criticism). Primary sources provide direct contemporary testimony, while secondary sources analyze and synthesize past events within broader historiographical frameworks.",
+                "everyday_applications": "Develops critical thinking skills needed to spot misinformation, analyze political speeches, understand contemporary global conflicts, and evaluate media bias.",
+                "expected_observations": "The causal chain reveals that major historical events result from complex intersections of economic, social, and political factors rather than single isolated events.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Physical science experiments or coding do not apply to history. This topic is taught using chronological timelines, primary source excerpt evaluation, cause-and-effect mapping, and historical context breakdown.",
+                "safety_precautions": "Engage with historical perspectives objectively and critically.",
+                "understanding_questions": [
+                    {
+                        "question": f"What is the difference between a primary source and a secondary source regarding {topic}?",
+                        "answer": "A primary source is an eye-witness document or artifact created during the era, while a secondary source is a later analysis written by a historian.",
+                        "explanation": "Primary sources give direct historical evidence; secondary sources provide interpretation."
+                    },
+                    {
+                        "question": "Why must historians evaluate author bias and intended audience when reading historical documents?",
+                        "answer": "Because political, cultural, or personal motives often shape how events are reported in historical records.",
+                        "explanation": "Internal criticism identifies perspective and selective reporting."
+                    },
+                    {
+                        "question": "How do short-term triggers differ from long-term structural causes in historical events?",
+                        "answer": "Long-term causes build socio-economic tension over decades, whereas short-term triggers ignite the immediate crisis.",
+                        "explanation": "Causal analysis separates underlying conditions from immediate catalysts."
+                    }
+                ],
+                "reflection_task": f"Imagine living during the era of {topic}. How would your daily life differ depending on your social or economic standing?",
+                "follow_up_practice": f"Write a 300-word historical essay analyzing two major causes and two long-term impacts of {topic}.",
+                "is_supported": True
+            }
+
+        # 4. Literature (literary-thematic)
+        elif nature == "literary-thematic" or any(w in sub_lower for w in ["literat", "poem", "novel", "drama", "prose"]):
+            return {
+                "activity_id": f"lfa_lit_{difficulty.lower()}",
+                "activity_title": f"Thematic Analysis & Close Textual Reading for {topic or 'Literary Analysis'}",
+                "title": f"Thematic Analysis & Close Textual Reading for {topic or 'Literary Analysis'}",
+                "demonstration_type": "textual_analysis_and_criticism",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Thematic Interpretation & Literary Criticism",
+                    "unit": "Literary Studies & Textual Interpretation",
+                    "curriculum_reference": "Accredited Literature Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Arts & Literature",
+                    "department": department or "English & Literature"
+                },
+                "learning_objectives": [
+                    f"Perform close reading of literary passages exploring {topic}.",
+                    "Analyze thematic motifs, figurative language, tone, and character development using textual evidence."
+                ],
+                "real_world_concept": "Textual interpretation, rhetorical analysis, and evidence-based literary criticism.",
+                "materials_student_has": [
+                    "Selected literary text passage or poem excerpt",
+                    "Highlighter or pen for text annotation",
+                    "Reading journal notebook"
+                ],
+                "safe_substitutions": [
+                    "Textbook literary excerpt",
+                    "Standard notebook paper"
+                ],
+                "no_purchase_alternative": "Write down key lines from the literary text on paper and underline figurative language devices.",
+                "steps": [
+                    f"Step 1: Conduct a first reading of the literary passage focused on {topic} for general plot and tone.",
+                    "Step 2: Conduct a second close reading, annotating metaphors, similes, personification, and recurring motifs.",
+                    "Step 3: Analyze character motivations, internal conflicts, and narrative perspective.",
+                    "Step 4: Connect specific textual quotes to the broader central theme of {topic}.",
+                    "Step 5: Formulate a clear thesis statement supported by at least two textual citations."
+                ],
+                "simple_explanation": f"Literary analysis of {topic} is like being a detective with words. By looking closely at how authors choose specific imagery, metaphors, and dialogue, we unlock deeper themes about human nature and society.",
+                "academic_theory": "Governed by formalist textual criticism, structuralism, and thematic analysis. Literary devices (imagery, symbolism, tone, irony) function together to communicate complex philosophical and human experiences.",
+                "everyday_applications": "Enhances reading comprehension, persuasive writing, empathy, cultural awareness, and clear communication in professional careers.",
+                "expected_observations": "Close reading reveals layers of meaning, subtext, and irony that are not apparent during a superficial first reading.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Physical science experiments do not apply to literature. This topic is taught using close textual reading, thematic interpretation, rhetorical analysis, and evidence-based argumentation.",
+                "safety_precautions": "Express analytical interpretations clearly with supporting textual evidence.",
+                "understanding_questions": [
+                    {
+                        "question": f"How does the author's use of figurative language deepen the theme of {topic}?",
+                        "answer": "Figurative language creates visual and emotional associations that evoke subtext beyond literal word definitions.",
+                        "explanation": "Metaphors and symbols connect concrete details to abstract themes."
+                    },
+                    {
+                        "question": "What is the function of recurring motifs in a novel or play?",
+                        "answer": "Motifs reinforce central themes by reappearing at key dramatic moments in the narrative.",
+                        "explanation": "Repetition builds symbolic weight and emotional resonance."
+                    },
+                    {
+                        "question": "Why must literary claims be supported by direct textual quotes?",
+                        "answer": "Direct quotes provide verifiable evidence that Grounds analytical assertions in the text.",
+                        "explanation": "Evidence-based criticism distinguishes grounded analysis from baseless opinion."
+                    }
+                ],
+                "reflection_task": f"Select one key line from the text regarding {topic}. Rewrite it in modern casual language while preserving its core emotional meaning.",
+                "follow_up_practice": f"Write a 250-word close-reading analytical response on a 10-line excerpt exploring {topic}.",
+                "is_supported": True
+            }
+
+        # 5. Languages & Grammar (language-grammar)
+        elif nature == "language-grammar" or any(w in sub_lower for w in ["grammar", "syntax", "language", "french", "spanish", "german", "english"]):
+            return {
+                "activity_id": f"lfa_lang_{difficulty.lower()}",
+                "activity_title": f"Structural Syntax Breakdown & Contextual Communication Drill for {topic or 'Language & Grammar'}",
+                "title": f"Structural Syntax Breakdown & Contextual Communication Drill for {topic or 'Language & Grammar'}",
+                "demonstration_type": "textual_analysis_and_criticism",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Grammatical Rules & Syntactic Structures",
+                    "unit": "Linguistics & Applied Grammar",
+                    "curriculum_reference": "Accredited Language Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Languages & Humanities",
+                    "department": department or "Languages & Linguistics"
+                },
+                "learning_objectives": [
+                    f"Master the grammatical rules, sentence structures, and usage conventions of {topic}.",
+                    "Execute sentence transformation, tense adjustment, and contextual drill exercises."
+                ],
+                "real_world_concept": "Syntactic rules, morphological transformations, and contextual linguistic fluency.",
+                "materials_student_has": [
+                    "Grammar rule reference chart",
+                    "Sentence transformation drill worksheet",
+                    "Writing notebook and pen"
+                ],
+                "safe_substitutions": [
+                    "Standard notebook paper",
+                    "Textbook grammar summary page"
+                ],
+                "no_purchase_alternative": "Write target sentence formulas on paper and practice transforming 5 sample sentences.",
+                "steps": [
+                    f"Step 1: Review the formal grammatical rule and formula governing {topic}.",
+                    "Step 2: Deconstruct sample sentences into Subject, Verb, Object, and Modifiers.",
+                    "Step 3: Execute sentence transformation drills (e.g. Active to Passive, Direct to Indirect, Tense shifts).",
+                    "Step 4: Identify and correct intentional grammatical or syntactic errors in 5 practice sentences.",
+                    "Step 5: Compose a original 5-sentence paragraph applying {topic} naturally in context."
+                ],
+                "simple_explanation": f"Learning {topic} is like mastering building blocks for communication. By understanding how words fit together according to clear rules, you can express your thoughts accurately and fluently in {subject}.",
+                "academic_theory": "Governed by structural linguistics, transformational-generative grammar, and communicative competence principles. Mastery requires acquiring both explicit rule knowledge and implicit procedural automaticity.",
+                "everyday_applications": "Essential for formal essay writing, professional email communication, public speaking, translation, and standardized exam success.",
+                "expected_observations": "Applying systematic grammar rules eliminates sentence ambiguity, run-on structures, and agreement errors.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Physical science experiments or code do not apply to language grammar. This topic is taught using syntactic breakdowns, vocabulary in context, sentence transformation drills, and structured writing.",
+                "safety_precautions": "Practice writing and speaking clearly.",
+                "understanding_questions": [
+                    {
+                        "question": f"What rule governs word order and agreement when applying {topic}?",
+                        "answer": "Subject-verb agreement and specific syntactic placement rules determine correct word ordering.",
+                        "explanation": "Syntactic rules mandate structural alignment between components."
+                    },
+                    {
+                        "question": "How does altering the verb tense or mood change the meaning of a sentence?",
+                        "answer": "Tense specifies time orientation (past/present/future), while mood expresses attitude (fact/command/hypothesis).",
+                        "explanation": "Morphological changes communicate temporal and modal distinctions."
+                    },
+                    {
+                        "question": "Why is contextual practice more effective than memorizing isolated grammar rules?",
+                        "answer": "Contextual practice integrates grammar into active production, building procedural fluency.",
+                        "explanation": "Communicative application converts passive knowledge into functional skill."
+                    }
+                ],
+                "reflection_task": f"Write 3 common mistakes people make with {topic} and explain how to correct them.",
+                "follow_up_practice": f"Complete 10 sentence transformation exercises focusing on {topic}.",
+                "is_supported": True
+            }
+
+        # 6. Economics (economics-analytical)
+        elif nature == "economics-analytical" or any(w in sub_lower for w in ["econom", "macro", "micro"]):
+            return {
+                "activity_id": f"lfa_econ_{difficulty.lower()}",
+                "activity_title": f"Supply/Demand Equilibrium & Elasticity Analysis for {topic or 'Economic Principles'}",
+                "title": f"Supply/Demand Equilibrium & Elasticity Analysis for {topic or 'Economic Principles'}",
+                "demonstration_type": "worked_example_and_derivation",
+                "academic_grounding": {
+                    "subject": subject,
+                    "topic": topic or "Micro/Macro Economic Models & Equilibrium Analysis",
+                    "unit": "Economic Principles & Market Systems",
+                    "curriculum_reference": "Accredited Economics Syllabus",
+                    "grade_or_semester": semester,
+                    "program": program or "Economics & Business",
+                    "department": department or "Economics"
+                },
+                "learning_objectives": [
+                    f"Analyze supply/demand equilibrium shifts and calculate elasticity coefficients for {topic}.",
+                    "Evaluate real-world policy interventions (taxes, subsidies, price ceilings) on market efficiency."
+                ],
+                "real_world_concept": "Market price determination through supply-demand interaction, price elasticity, and consumer/producer surplus.",
+                "materials_student_has": [
+                    "Economic graph grid paper",
+                    "Price and Quantity numerical data set",
+                    "Calculator and ruler"
+                ],
+                "safe_substitutions": [
+                    "Hand-drawn graph axes on notebook paper",
+                    "Standard ruler or straight edge"
+                ],
+                "no_purchase_alternative": "Draw X-axis (Quantity) and Y-axis (Price) on plain paper using a straight edge.",
+                "steps": [
+                    f"Step 1: Plot the initial Demand curve (downward sloping) and Supply curve (upward sloping) for {topic}.",
+                    "Step 2: Identify the intersection point establishing Equilibrium Price (P*) and Equilibrium Quantity (Q*).",
+                    "Step 3: Calculate Price Elasticity of Demand: E_d = (% Change in Q) / (% Change in P).",
+                    "Step 4: Model a market shock (e.g. input cost increase or tax imposition) by shifting the appropriate curve.",
+                    "Step 5: Determine the new equilibrium and calculate deadweight loss or surplus reallocation."
+                ],
+                "simple_explanation": f"Economics models how buyers and sellers agree on prices for things like crops or tools in your village. When demand goes up or supply drops, price curves shift on a graph, showing us exactly how market prices balance out.",
+                "academic_theory": "Governed by the Law of Demand, Law of Supply, and Market Equilibrium principles. Elasticity measures responsiveness of quantity demanded to price changes. Government interventions like price floors or taxes alter economic surplus.",
+                "everyday_applications": "Helps farmers understand crop price fluctuations, informs government food subsidy policies, and explains inflation.",
+                "expected_observations": "Equilibrium price adjusts dynamically to clear the market where quantity demanded equals quantity supplied.",
+                "limitations_and_misconceptions": "FEASIBILITY LIMITATION: Physical experiments do not apply to economics. This topic is taught using supply/demand equilibrium graphs, elasticity numerical calculations, and real-world policy case studies.",
+                "safety_precautions": "Label graph axes clearly with Price on Y-axis and Quantity on X-axis.",
+                "understanding_questions": [
+                    {
+                        "question": f"If demand for a product is highly inelastic, how will a price increase affect total seller revenue?",
+                        "answer": "Total revenue will increase because the percentage drop in quantity demanded is smaller than the percentage price increase.",
+                        "explanation": "Inelastic demand means consumers are insensitive to price changes."
+                    },
+                    {
+                        "question": "What happens to equilibrium price and quantity when supply decreases while demand remains constant?",
+                        "answer": "Equilibrium price rises and equilibrium quantity falls.",
+                        "explanation": "Leftward supply shift creates temporary shortage at original price, driving prices up."
+                    },
+                    {
+                        "question": "What is deadweight loss in an economic market?",
+                        "answer": "It is the loss of total economic surplus caused by market distortions like taxes or price controls.",
+                        "explanation": "Distortions prevent mutually beneficial trades from occurring."
+                    }
+                ],
+                "reflection_task": "Think of a crop or item sold in your local market. Is its demand elastic or inelastic? Why?",
+                "follow_up_practice": f"Calculate price elasticity of demand when price rises from $10 to $12 and quantity drops from 100 to 90 units.",
+                "is_supported": True
+            }
+
+        # 7. Default Theoretical & STEM Fallbacks (Mathematics, Physics, Chemistry, Biology, Engineering)
+        elif any(w in top_lower or w in sub_lower for w in ["quantum", "nuclear", "relativity", "astrophysic", "atomic structure", "subatomic", "particle physics"]):
             return {
                 "activity_id": f"lfa_theo_{difficulty.lower()}",
                 "activity_title": f"Thought Experiment & Ripple Analogy: Exploring {topic or 'Quantum / Theoretical Concepts'}",
@@ -2860,8 +3259,6 @@ Return ONLY a valid JSON object matching this exact schema:
                 "follow_up_practice": "Calculate the de Broglie wavelength of an electron (mass = 9.11e-31 kg) moving at 10^6 m/s.",
                 "is_supported": True
             }
-
-        # 2. Biology / Agriculture / Botany / Life Sciences
         elif any(w in sub_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "crop", "life science"]) or (not any(k in sub_lower for k in ["chem", "physic", "math", "comput", "engin", "electr", "mechanic", "data structure", "algorithm"]) and any(w in top_lower for w in ["bio", "botany", "zoolog", "plant", "agri", "seed", "transpir"])):
             return {
                 "activity_id": f"lfa_bio_{difficulty.lower()}",
