@@ -57,40 +57,40 @@ class DynamicTeachingPlanner:
     TEACHING_METHODS = {
         "programming-oriented": {
             "SCHOOL": {
-                "method": "Visual Loop/Logic Flowchart & Everyday Repetition Analogy",
-                "explanation_focus": "Explain control flow and repetition using clear, simple language and a daily routine analogy (like counting laps). Define technical terms ('loop', 'variable', 'condition') before using them extensively. Break logic into simple steps.",
-                "practice_focus": "Tracing a simple loop step-by-step using a paper-and-pencil table to find the final counter value, demonstrating one complete guided example first.",
+                "method": "Age-Appropriate Logic, Pseudocode & Step-by-Step Execution Trace",
+                "explanation_focus": "Teach the actual curriculum topic using age-appropriate logic, algorithms, flowcharts, pseudocode, or simple code when appropriate. Clearly explain inputs, processing steps, outputs, and expected results. Define technical terms ('variable', 'loop', 'condition', 'input', 'output') before using them extensively.",
+                "practice_focus": "Tracing inputs, processing steps, and expected outputs step-by-step using paper trace tables or simple pseudocode, demonstrating one guided example first.",
                 "demonstration_type": "worked_example_and_derivation",
                 "honest_limitation": "Physical lab experiments do not apply to software algorithms. This topic uses simple visual flowcharts, step-by-step logic traces, and paper-based debugging.",
-                "learning_depth": "Introductory control flow logic, step-by-step counter tracing, and basic syntax fundamentals.",
+                "learning_depth": "Introductory control flow logic, pseudocode walkthroughs, input/output tracing, and basic syntax fundamentals.",
                 "checks": [
-                    "What is the starting value of the counter variable in this loop?",
-                    "How many times will this loop repeat before stopping?",
-                    "What condition causes the loop to stop running?"
+                    "What are the input values provided to this algorithm?",
+                    "What processing step updates the variable inside the loop?",
+                    "What is the final expected output printed at the end?"
                 ]
             },
             "COLLEGE": {
-                "method": "Algorithmic Logic Breakdown, Memory State Trace & Big-O Complexity Analysis",
-                "explanation_focus": "Data structures, iteration mechanisms, loop invariants, time/space complexity (Big-O), memory/register allocation, and conditional branch prediction.",
-                "practice_focus": "Tracing memory execution state, analyzing Big-O time/space complexity, optimizing loop invariants, handling boundary edge cases (empty arrays, off-by-one errors, overflow), and writing unit tests.",
+                "method": "Topic-Appropriate Language Implementation, Execution, Debugging & Complexity Analysis",
+                "explanation_focus": "Explain prerequisites, technical concepts, implementation, execution, expected output, debugging, testing, and performance considerations (Big-O). Use the language and tools appropriate to the topic and curriculum (e.g., C/C++ for systems/pointers/OS, Python/Java for Data Structures/OOP, SQL for Databases, HTML/JS for Web) rather than defaulting to one single language.",
+                "practice_focus": "Providing a clear objective, required tools/setup, small readable code snippet, step-by-step logic breakdown, run instructions, expected output, testing tasks, and debugging guidance. Never force coding onto pure theory/proofs.",
                 "demonstration_type": "code_and_logic_simulation",
-                "honest_limitation": "Physical lab experiments are not applicable to software algorithms. This topic is taught using algorithmic logic flowcharts, code execution trace tables, and formal debugging tasks.",
-                "learning_depth": "Advanced algorithmic complexity theory, loop invariants, memory allocation, edge-case handling, and production software engineering.",
+                "honest_limitation": "Physical lab experiments are not applicable to software algorithms. This topic is taught using algorithmic flowcharts, runnable code snippets, execution trace tables, and formal debugging tasks.",
+                "learning_depth": "Advanced technical concepts, topic-appropriate language implementation, Big-O complexity, edge-case testing, and production debugging.",
                 "checks": [
                     "What is the exact time and space complexity (Big-O) of this algorithm?",
-                    "How does the code handle boundary/edge cases (e.g. empty arrays, null pointers, or integer overflow)?",
-                    "State the formal loop invariant that holds true prior to each iteration."
+                    "How does the code handle boundary/edge cases (e.g., empty arrays, null pointers, or integer overflow)?",
+                    "What execution command and tools are required to compile, run, and test this implementation?"
                 ]
             }
         },
         "numerical": {
             "SCHOOL": {
-                "method": "Step-by-Step Visual Calculation & Everyday Problem Solving",
-                "explanation_focus": "Explain mathematical operations using clear, simple language and concrete everyday examples (like sharing items or measuring distances). Define formulas and symbols before applying them. Walk through calculations in manageable steps.",
-                "practice_focus": "Solving a step-by-step worked numerical problem together first, then completing 1 similar practice problem with guidance.",
+                "method": "Visual Reasoning, Step-by-Step Calculation & Topic-Relevant Situations",
+                "explanation_focus": "Explain mathematical operations using clear, simple language, visual reasoning, and step-by-step calculations. Use familiar real-world situations (shopping, time, distance, measurement, farming, or everyday quantities) ONLY when directly relevant to the selected topic. Define formulas and symbols before applying them.",
+                "practice_focus": "Solving a step-by-step worked numerical calculation together first, demonstrating the method clearly before asking the student to complete a similar practice problem.",
                 "demonstration_type": "worked_example_and_derivation",
                 "honest_limitation": "Physical science lab experiments do not apply to mathematical calculations. This topic uses visual geometric reasoning and step-by-step worked calculations.",
-                "learning_depth": "Fundamental arithmetic/algebraic steps, unit conversions, and everyday problem solving.",
+                "learning_depth": "Fundamental arithmetic/algebraic steps, visual reasoning, unit conversions, and topic-relevant problem solving.",
                 "checks": [
                     "What operation do we perform first in this step-by-step calculation?",
                     "What units should we write next to our final numerical answer?",
@@ -98,16 +98,16 @@ class DynamicTeachingPlanner:
                 ]
             },
             "COLLEGE": {
-                "method": "First-Principles Formal Derivation, Proofs & Quantitative Modeling",
-                "explanation_focus": "Mathematical axioms, first-principles derivations, formal notation, vector/matrix spaces, differential operators, and existence proofs.",
-                "practice_focus": "Deriving mathematical theorems from axioms, solving multivariable calculus/differential equations, and analyzing asymptotic boundary conditions.",
+                "method": "First-Principles Formal Derivation, Mathematical Reasoning & Domain-Specific Applications",
+                "explanation_focus": "Include prerequisites, appropriate mathematical notation, step-by-step worked examples, mathematical reasoning/proofs, and domain applications in engineering, physics, finance, or computer science.",
+                "practice_focus": "Deriving mathematical theorems from axioms, solving domain-specific quantitative problems, and completing progressively challenging practice exercises.",
                 "demonstration_type": "worked_example_and_derivation",
-                "honest_limitation": "Physical lab experiments are not applicable to pure mathematical derivations. This topic uses formal proofs, vector spaces, and mathematical modeling.",
-                "learning_depth": "Rigorous first-principles derivations, formal mathematical notation, multivariable analysis, and boundary limits.",
+                "honest_limitation": "Physical lab experiments are not applicable to pure mathematical derivations. This topic uses formal proofs, vector/calculus notation, and mathematical domain modeling.",
+                "learning_depth": "Rigorous first-principles derivations, formal mathematical notation, multivariable analysis, domain applications, and boundary limits.",
                 "checks": [
                     "Derive the governing equation from first-principles mathematical axioms.",
                     "Under what domain constraints or boundary conditions does this theorem hold?",
-                    "Analyze the limiting behavior of the function as key variables approach zero or infinity."
+                    "How does this mathematical principle apply to real-world problems in engineering, physics, finance, or CS?"
                 ]
             }
         },
@@ -696,7 +696,15 @@ class DynamicTeachingPlanner:
         practice_method = f"{method_meta['practice_focus']} Resource Environment: '{resource_environment or 'Standard learning resources'}'."
         understanding_checks = method_meta["checks"]
 
-        # Resource Requirements
+        # Resource Requirements & Material Query Determination
+        useful_material_types = {"physical_demonstration", "outdoor_observation", "household_demonstration"}
+        useful_natures = {"practical", "physical-chemical", "biological-agricultural"}
+        asks_available_materials = (demonstration_type in useful_material_types) or (topic_nature in useful_natures)
+        if asks_available_materials:
+            materials_query_rationale = f"This topic ({top_clean}) involves hands-on physical or biological observation. Querying available local materials helps customize the practical activity."
+        else:
+            materials_query_rationale = f"This topic ({top_clean}) is best taught through {teaching_approach.lower()} (worked problems, coding, diagrams, or textual analysis). Querying physical materials is unnecessary."
+
         resources = []
         if custom_materials:
             resources.append(f"Student provided materials: {custom_materials}")
@@ -725,6 +733,8 @@ class DynamicTeachingPlanner:
             "practice_method": practice_method,
             "understanding_checks": understanding_checks,
             "resource_requirements": resources,
+            "asks_available_materials": asks_available_materials,
+            "materials_query_rationale": materials_query_rationale,
             "curriculum_validated": True,
             "validation_notes": f"Validated against active student syllabus for {subj_clean} ({student_type} mode).",
             "needs_clarification": False,

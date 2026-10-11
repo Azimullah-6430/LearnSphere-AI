@@ -269,6 +269,17 @@ export const api = {
 
   getLearnAnywhereProgress: () => request('/api/learn-anywhere/progress'),
 
+  generateLearnAnywhereAction: (payload) =>
+    request('/api/learn-anywhere/action', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  getLearnAnywhereSession: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/learn-anywhere/session${qs ? '?' + qs : ''}`)
+  },
+
   getLearnAnywhereAdditionalPractice: (payload) =>
     request('/api/learn-anywhere/additional-practice', {
       method: 'POST',

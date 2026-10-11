@@ -127,17 +127,17 @@ class TestAdaptiveTeachingStrategies(unittest.TestCase):
         self.assertEqual(plan_college["student_type"], "COLLEGE")
 
         # Verify teaching methods differ meaningfully
-        self.assertIn("Visual Loop", plan_school["teaching_approach"])
-        self.assertIn("Big-O Complexity", plan_college["teaching_approach"])
+        self.assertIn("Age-Appropriate", plan_school["teaching_approach"])
+        self.assertIn("Complexity Analysis", plan_college["teaching_approach"])
 
         # Verify terminology and depth differ
-        self.assertIn("simple language", plan_school["explanation_strategy"].lower())
+        self.assertIn("age-appropriate logic", plan_school["explanation_strategy"].lower())
         self.assertIn("big-o", plan_college["explanation_strategy"].lower())
         self.assertIn("introductory", plan_school["learning_depth"].lower())
         self.assertIn("advanced", plan_college["learning_depth"].lower())
 
         # Verify understanding checks differ
-        self.assertIn("starting value", plan_school["understanding_checks"][0].lower())
+        self.assertIn("input", plan_school["understanding_checks"][0].lower())
         self.assertIn("big-o", plan_college["understanding_checks"][0].lower())
 
     def test_02_mathematics_rate_of_change_school_vs_college(self):
@@ -155,11 +155,11 @@ class TestAdaptiveTeachingStrategies(unittest.TestCase):
         self.assertEqual(plan_school["student_type"], "SCHOOL")
         self.assertEqual(plan_college["student_type"], "COLLEGE")
 
-        self.assertIn("Step-by-Step Visual", plan_school["teaching_approach"])
+        self.assertIn("Visual Reasoning", plan_school["teaching_approach"])
         self.assertIn("First-Principles", plan_college["teaching_approach"])
 
-        self.assertIn("everyday examples", plan_school["explanation_strategy"].lower())
-        self.assertIn("axioms", plan_college["explanation_strategy"].lower())
+        self.assertIn("real-world situations", plan_school["explanation_strategy"].lower())
+        self.assertIn("prerequisites", plan_college["explanation_strategy"].lower())
 
     def test_03_accounting_cash_ledger_school_vs_college(self):
         """
@@ -234,6 +234,79 @@ class TestAdaptiveTeachingStrategies(unittest.TestCase):
         self.assertEqual(plan.get("student_type"), "SCHOOL")
         self.assertEqual(plan.get("academic_profile", {}).get("grade"), "Grade 8")
 
+    def test_06_math_school_topic_relevant_context(self):
+        """
+        Math School Mode:
+        - Abstract topic ('Polynomial Factorization') uses visual/step-by-step reasoning without forcing shopping/farming.
+        - Applied topic ('Perimeter and Area') uses measurement/everyday quantities.
+        """
+        school_prof = {"level": "SCHOOL", "grade": "Grade 9"}
+        plan_abstract = self.planner.create_teaching_plan("Mathematics", "Polynomial Factorization", school_prof)
+        plan_applied = self.planner.create_teaching_plan("Mathematics", "Perimeter and Area", school_prof)
+
+        self.assertEqual(plan_abstract["student_type"], "SCHOOL")
+        self.assertIn("Visual Reasoning", plan_abstract["teaching_approach"])
+        self.assertIn("step-by-step", plan_abstract["explanation_strategy"].lower())
+
+        self.assertIn("Visual Reasoning", plan_applied["teaching_approach"])
+
+    def test_07_math_college_prerequisites_notation_proofs(self):
+        """
+        Math College Mode:
+        - Includes prerequisites, formal mathematical notation, worked step-by-step derivations,
+          first-principles proofs, and domain applications in engineering/CS/physics.
+        """
+        college_prof = {"level": "COLLEGE", "department": "Mathematics", "semester": 4}
+        plan = self.planner.create_teaching_plan("Mathematics", "Matrix Diagonalization", college_prof)
+
+        self.assertEqual(plan["student_type"], "COLLEGE")
+        self.assertIn("First-Principles", plan["teaching_approach"])
+        self.assertTrue(len(plan["prerequisites"]) > 0)
+        self.assertIn("prerequisites", plan["explanation_strategy"].lower())
+        self.assertIn("rigorous", plan["learning_depth"].lower())
+
+    def test_08_cs_school_inputs_processing_outputs(self):
+        """
+        CS School Mode:
+        - Uses age-appropriate logic, algorithms, flowcharts, pseudocode, and explicitly defines inputs, processing, outputs.
+        """
+        school_prof = {"level": "SCHOOL", "grade": "Grade 8"}
+        plan = self.planner.create_teaching_plan("Computer Science", "Sorting Algorithms", school_prof)
+
+        self.assertEqual(plan["student_type"], "SCHOOL")
+        self.assertIn("Age-Appropriate", plan["teaching_approach"])
+        self.assertIn("inputs", plan["explanation_strategy"].lower())
+        self.assertIn("pseudocode", plan["practice_method"].lower())
+
+    def test_09_cs_college_language_selection_and_performance(self):
+        """
+        CS College Mode:
+        - Specifies topic-appropriate language (C/C++ for OS/Pointers, SQL for Databases, Python/Java for DS),
+          execution, debugging, testing, and Big-O performance considerations.
+        """
+        college_prof = {"level": "COLLEGE", "department": "Computer Science", "semester": 5}
+        plan_os = self.planner.create_teaching_plan("Computer Science", "Pointer Arithmetic & Memory Management", college_prof)
+        plan_db = self.planner.create_teaching_plan("Computer Science", "Relational Database SQL Joins", college_prof)
+
+        self.assertEqual(plan_os["student_type"], "COLLEGE")
+        self.assertIn("Topic-Appropriate Language", plan_os["teaching_approach"])
+        self.assertIn("big-o", plan_os["explanation_strategy"].lower())
+
+        self.assertIn("Topic-Appropriate Language", plan_db["teaching_approach"])
+
+    def test_10_cs_non_coding_theory_guardrail(self):
+        """
+        CS Non-Coding Guardrail:
+        - Pure theoretical CS topics (e.g. 'Automata Theory & DFA') avoid forcing coding and focus on state transition diagrams/proofs.
+        """
+        college_prof = {"level": "COLLEGE", "department": "Computer Science", "semester": 6}
+        plan = self.planner.create_teaching_plan("Computer Science", "Automata Theory & Turing Machines", college_prof)
+
+        self.assertEqual(plan["student_type"], "COLLEGE")
+        self.assertIn("Socratic Conceptual", plan["teaching_approach"])
+        self.assertIn("theoretical", plan["explanation_strategy"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -3925,7 +3925,8 @@ def generate_learn_anywhere_endpoint():
     try:
         user_id = _current_user_id()
         user    = _lookup_user_by_id(user_id) or {}
-        if user.get("role") == "teacher":
+        role    = user.get("role") or session.get("user_role")
+        if role == "teacher":
             return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
         data    = request.get_json(force=True) or {}
         idempotency_key = str(data.get("idempotency_key") or data.get("request_id") or "").strip()
@@ -4386,6 +4387,165 @@ def evaluate_learn_anywhere_answer_endpoint():
         }), 200
     except Exception as exc:
         logger.warning(f"[LearnAnywhere] Evaluate answer error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/action", methods=["POST"])
+@require_auth
+def learn_anywhere_action_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        if user.get("role") == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+        data = request.get_json(force=True) or {}
+
+        action_type = str(data.get("action_type") or "simpler_explanation").strip()
+        subject = str(data.get("subject") or "General Science").strip()
+        topic = str(data.get("topic") or "Practical Concept").strip()
+        question = str(data.get("question") or "").strip()
+        current_explanation = str(data.get("current_explanation") or "").strip()
+        current_example = str(data.get("current_example") or "").strip()
+        preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        action_res = gemini_service.generate_learn_anywhere_action(
+            action_type=action_type,
+            subject=subject,
+            topic=topic,
+            question=question,
+            current_explanation=current_explanation,
+            current_example=current_example,
+            preferred_language=preferred_language
+        )
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "result": action_res,
+            "action_result": action_res
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Action endpoint error: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/learn-anywhere/session", methods=["GET"])
+@require_auth
+def get_learn_anywhere_session_endpoint():
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        role = user.get("role") or session.get("user_role")
+        if role == "teacher":
+            return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
+
+        activity_id = str(request.args.get("activity_id") or "").strip()
+        topic = str(request.args.get("topic") or "").strip()
+
+        record = None
+        mongo_db = get_mongodb()
+        query = {"user_id": user_id}
+        if activity_id:
+            query["activity_id"] = activity_id
+        elif topic:
+            query["topic"] = topic
+
+        if mongo_db is not None:
+            record = mongo_db.learn_anywhere_progress.find_one(query, sort=[("updated_at", -1)])
+            if not record:
+                record = mongo_db.learn_anywhere_history.find_one(query, sort=[("updated_at", -1)])
+        else:
+            sqlite_db = get_sqlite_db()
+            if sqlite_db:
+                with sqlite_db:
+                    if activity_id:
+                        row = sqlite_db.execute(
+                            "SELECT * FROM learn_anywhere_progress WHERE user_id = ? AND activity_id = ? ORDER BY updated_at DESC LIMIT 1",
+                            (user_id, activity_id)
+                        ).fetchone()
+                    elif topic:
+                        row = sqlite_db.execute(
+                            "SELECT * FROM learn_anywhere_progress WHERE user_id = ? AND topic = ? ORDER BY updated_at DESC LIMIT 1",
+                            (user_id, topic)
+                        ).fetchone()
+                    else:
+                        row = sqlite_db.execute(
+                            "SELECT * FROM learn_anywhere_progress WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+                            (user_id,)
+                        ).fetchone()
+
+                    if not row:
+                        if activity_id:
+                            row = sqlite_db.execute(
+                                "SELECT * FROM learn_anywhere_history WHERE user_id = ? AND activity_id = ? ORDER BY updated_at DESC LIMIT 1",
+                                (user_id, activity_id)
+                            ).fetchone()
+                        elif topic:
+                            row = sqlite_db.execute(
+                                "SELECT * FROM learn_anywhere_history WHERE user_id = ? AND topic = ? ORDER BY updated_at DESC LIMIT 1",
+                                (user_id, topic)
+                            ).fetchone()
+                        else:
+                            row = sqlite_db.execute(
+                                "SELECT * FROM learn_anywhere_history WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+                                (user_id,)
+                            ).fetchone()
+
+                    if row:
+                        record = dict(row)
+                        if record.get("attempts_json"):
+                            try:
+                                record["attempts"] = json.loads(record["attempts_json"])
+                            except Exception:
+                                record["attempts"] = []
+                        if record.get("activity_json"):
+                            try:
+                                record["activity"] = json.loads(record["activity_json"])
+                            except Exception:
+                                pass
+
+        if not record:
+            return jsonify({
+                "success": True,
+                "session_exists": False,
+                "user_id": user_id,
+                "message": "No existing session found for this student and activity."
+            }), 200
+
+        attempts = record.get("attempts") or []
+        correct_count = sum(1 for a in attempts if isinstance(a, dict) and a.get("is_correct"))
+        total_attempts = len(attempts)
+
+        consecutive_correct = 0
+        for a in reversed(attempts):
+            if isinstance(a, dict) and a.get("is_correct"):
+                consecutive_correct += 1
+            else:
+                break
+
+        is_mastered = consecutive_correct >= 2 or (total_attempts >= 3 and (correct_count / total_attempts) >= 0.8)
+        mastery_status = "mastered" if is_mastered else ("needs_practice" if (total_attempts - correct_count) >= 2 else "in_progress")
+        adaptive_difficulty = "advanced" if consecutive_correct >= 2 else ("introductory" if (total_attempts - correct_count) >= 2 else "standard")
+
+        return jsonify({
+            "success": True,
+            "session_exists": True,
+            "user_id": user_id,
+            "activity_id": record.get("activity_id"),
+            "activity": record.get("activity"),
+            "subject": record.get("subject"),
+            "topic": record.get("topic"),
+            "attempts": attempts,
+            "completed_steps": record.get("completed_steps") or [],
+            "total_steps": record.get("total_steps") or 0,
+            "completion_status": record.get("completion_status") or "in_progress",
+            "accuracy_percent": record.get("accuracy_percent") or 0,
+            "mastery_status": mastery_status,
+            "adaptive_difficulty": adaptive_difficulty,
+            "updated_at": str(record.get("updated_at") or "")
+        }), 200
+    except Exception as exc:
+        logger.warning(f"[LearnAnywhere] Session restoration error: {exc}")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

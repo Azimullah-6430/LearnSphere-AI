@@ -40,7 +40,16 @@ import {
   Calendar,
   Clock,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  FileText,
+  Code,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  Terminal,
+  Play,
+  Bug,
+  BookOpenCheck
 } from 'lucide-react'
 
 const RESOURCE_ENVIRONMENTS = [
@@ -83,6 +92,16 @@ const EXPLANATION_LANGUAGES = [
   { id: 'Odia', label: 'Odia (ଓଡ଼ିଆ)' }
 ]
 
+const LEARNING_METHODS = [
+  { id: 'auto', label: 'Auto (Optimal Strategy)', icon: Sparkles, desc: 'AI dynamically picks best approach' },
+  { id: 'practical', label: 'Hands-on Activity', icon: Wrench, desc: 'Experiment with low/zero-cost items' },
+  { id: 'real_world', label: 'Real-World Example', icon: Sun, desc: 'Relatable everyday applications' },
+  { id: 'worked_example', label: 'Worked Problem', icon: Target, desc: 'Step-by-step math or logic solution' },
+  { id: 'coding', label: 'Code & Logic Task', icon: Code, desc: 'Algorithms & executable code' },
+  { id: 'simulation', label: 'Thought Simulation', icon: Eye, desc: 'Visual intuition & thought experiment' },
+  { id: 'theory', label: 'Reading & Analysis', icon: BookOpen, desc: 'Structured conceptual reading' }
+]
+
 export default function LearnAnywhere() {
   const { user, recordActivity } = useApp()
   const { curriculum, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
@@ -91,6 +110,7 @@ export default function LearnAnywhere() {
 
   const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
   const [selectedTopic, setSelectedTopic] = useState('')
+  const [learningMethod, setLearningMethod] = useState('auto')
   const [customMaterials, setCustomMaterials] = useState('')
   const [constraintMode, setConstraintMode] = useState('strict_only') // 'strict_only' | 'allow_minimal_common'
   const [selectedEnv, setSelectedEnv] = useState('All Local Resources')
@@ -105,7 +125,13 @@ export default function LearnAnywhere() {
   const [checkedMaterials, setCheckedMaterials] = useState({})
   const [revealedQuestions, setRevealedQuestions] = useState({})
   const [showReflectionAnswer, setShowReflectionAnswer] = useState(false)
+  const [showAcademicTheory, setShowAcademicTheory] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  // Student On-Demand Assistance Action State
+  const [actionLoading, setActionLoading] = useState(false)
+  const [actionResult, setActionResult] = useState(null)
+  const [copyCodeSuccess, setCopyCodeSuccess] = useState(false)
 
   // Interactive Learning & Attempt Tracking State
   const [userAnswers, setUserAnswers] = useState({})
@@ -207,10 +233,12 @@ export default function LearnAnywhere() {
     setAttemptsCount({})
     setAdditionalPractice([])
     setHistoryList([])
+    setActionResult(null)
 
     if (!user?.id && !user?._id && !user?.email) return
     const currentUid = String(user?.id || user?._id || user?.email)
     const cacheKey = `learn_anywhere_activity_${currentUid}`
+    let restoredFromCache = false
     try {
       const rawCache = sessionStorage.getItem(cacheKey)
       if (rawCache) {
@@ -218,12 +246,67 @@ export default function LearnAnywhere() {
         if (parsed && parsed.user_id === currentUid && parsed.activity) {
           setActivity(parsed.activity)
           if (parsed.completedSteps) setCompletedSteps(parsed.completedSteps)
+          restoredFromCache = true
         }
       }
     } catch (e) {
       console.warn('Could not read user activity cache', e)
     }
+
+    // If no session cached locally, check server session endpoint to restore active activity
+    if (!restoredFromCache && navigator.onLine) {
+      api.getLearnAnywhereSession().then(res => {
+        if (res && res.success && res.activity) {
+          setActivity(res.activity)
+          if (res.subject) setSelectedSubject(res.subject)
+          if (res.topic) setSelectedTopic(res.topic)
+        }
+      }).catch(err => {
+        console.warn('Session restoration check skipped:', err)
+      })
+    }
   }, [user])
+
+  // Handle On-Demand Student Assistance Actions (Simpler Explanation, Another Example, Worked Solution, Challenge Task)
+  const handleStudentAction = async (actionType) => {
+    if (!selectedSubject) return
+    setActionLoading(true)
+    setErrorMsg('')
+    try {
+      const activeTopicTarget = selectedTopic || validatedSubjectTopics[0] || 'Core Concept'
+      const firstQ = activity?.understanding_questions?.[0]?.question || ''
+      const res = await api.generateLearnAnywhereAction({
+        action_type: actionType,
+        subject: selectedSubject,
+        topic: activeTopicTarget,
+        question: firstQ,
+        current_explanation: activity?.simple_explanation || activity?.scientific_principle || '',
+        current_example: activity?.expected_observation || '',
+        preferred_language: preferredLanguage
+      })
+
+      if (res && res.success && res.result) {
+        setActionResult(res.result)
+      } else {
+        setErrorMsg(res?.error || 'Could not process request. Please try again.')
+      }
+    } catch (err) {
+      setErrorMsg(err?.message || 'Error communicating with assistant.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Copy Code Helper for Coding Block
+  const handleCopyCode = (codeText) => {
+    if (!codeText || typeof navigator === 'undefined') return
+    navigator.clipboard.writeText(codeText).then(() => {
+      setCopyCodeSuccess(true)
+      setTimeout(() => setCopyCodeSuccess(false), 2000)
+    }).catch(err => {
+      console.warn('Failed to copy code:', err)
+    })
+  }
 
   // Sync selectedSubject with authoritative subjects
   useEffect(() => {
@@ -293,12 +376,33 @@ export default function LearnAnywhere() {
     setActivity(null)
     setCompletedSteps({})
     setCheckedMaterials({})
+    setUserAnswers({})
+    setEvaluations({})
+    setAttemptsCount({})
+    setAdditionalPractice([])
+    setActionResult(null)
     setErrorMsg('')
   }, [activeSyllabusId])
 
-  // Handle Subject selection and synchronously set topic to prevent stale cross-subject topic leakage
+  // Clear incompatible previous activity content when selection changes
+  const clearActivityState = useCallback(() => {
+    setActivity(null)
+    setCompletedSteps({})
+    setCheckedMaterials({})
+    setRevealedQuestions({})
+    setUserAnswers({})
+    setEvaluations({})
+    setAttemptsCount({})
+    setAdditionalPractice([])
+    setActionResult(null)
+    setErrorMsg('')
+  }, [])
+
+  // Handle Subject selection and synchronously reset topic and transient activity state
   const handleSubjectSelect = useCallback((newSub) => {
+    if (newSub === selectedSubject) return
     setSelectedSubject(newSub)
+    clearActivityState()
     const topics = []
     const chaptersDict = curriculum?.chapters || curriculum?.units || allUnits || {}
     if (chaptersDict[newSub]) {
@@ -334,7 +438,14 @@ export default function LearnAnywhere() {
     }
     const cleanTopics = Array.from(new Set(topics.filter(Boolean)))
     setSelectedTopic(cleanTopics[0] || '')
-  }, [curriculum, allUnits])
+  }, [selectedSubject, clearActivityState, curriculum, allUnits])
+
+  // Handle Topic selection and clear incompatible activity content
+  const handleTopicSelect = useCallback((newTopic) => {
+    if (newTopic === selectedTopic) return
+    setSelectedTopic(newTopic)
+    clearActivityState()
+  }, [selectedTopic, clearActivityState])
 
   // Set default topic when subject topics change
   useEffect(() => {
@@ -411,6 +522,7 @@ export default function LearnAnywhere() {
         subject: selectedSubject,
         subject_id: activeSubjectId || undefined,
         topic: activeTopicTarget,
+        learning_method: learningMethod,
         resource_category: selectedEnv,
         difficulty,
         preferred_language: preferredLanguage,
@@ -711,7 +823,7 @@ export default function LearnAnywhere() {
                   <button
                     key={top}
                     type="button"
-                    onClick={() => setSelectedTopic(top)}
+                    onClick={() => handleTopicSelect(top)}
                     className={`min-h-[42px] px-3.5 py-2 rounded-xl text-left text-xs font-medium border transition-all truncate flex items-center justify-between gap-2 cursor-pointer ${
                       isSelected
                         ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-bold shadow-2xs'
@@ -728,11 +840,47 @@ export default function LearnAnywhere() {
           </div>
         )}
 
-        {/* 3. Local Surroundings & Material Environment Mode */}
+        {/* 3. Learning Strategy & Method Selector */}
+        <div>
+          <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <BookOpenCheck size={13} className="text-[var(--accent)]" />
+            <span>3. Choose Learning Method (Optional)</span>
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {LEARNING_METHODS.map(({ id, label, icon: Icon, desc }) => {
+              const isSelected = learningMethod === id
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setLearningMethod(id)
+                    clearActivityState()
+                  }}
+                  className={`min-h-[50px] p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] shadow-2xs'
+                      : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <Icon size={13} className={isSelected ? 'text-[var(--accent)]' : 'opacity-70'} />
+                    <span className="truncate">{label}</span>
+                  </div>
+                  <span className="text-[10px] text-[var(--text-faint)] font-normal line-clamp-1 mt-0.5">
+                    {desc}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* 4. Local Surroundings & Material Environment Mode */}
         <div>
           <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <Compass size={13} className="text-[var(--accent)]" />
-            <span>3. Available Natural / Village Environment</span>
+            <span>4. Available Natural / Village Environment</span>
           </label>
           <div className="flex gap-2 flex-wrap">
             {RESOURCE_ENVIRONMENTS.map(({ id, label, icon: Icon }) => {
@@ -1242,18 +1390,206 @@ export default function LearnAnywhere() {
               </div>
             </div>
 
-            {/* Academic Theory & Governing Formulas */}
-            {(activity.academic_theory || activity.scientific_principle) && (
-              <div className="p-4 md:p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
-                  <Sparkles size={16} className="text-[var(--accent)]" />
-                  <span>Rigorous Academic Theory & Textbook Formulation</span>
+            {/* Readable Dark Monospace Code Block Component (for Computer Science / Coding Tasks) */}
+            {(activity.coding_task || activity.code_snippet) && (() => {
+              const codeObj = activity.coding_task || { code: activity.code_snippet, language: 'python', task_objective: 'Algorithm Implementation' }
+              return (
+                <div className="rounded-2xl bg-gray-900 border border-gray-800 text-gray-100 overflow-hidden shadow-md space-y-0 my-4">
+                  <div className="px-4 py-3 bg-gray-950 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold text-emerald-400">
+                      <Code size={15} />
+                      <span className="uppercase">{codeObj.language || 'Python / Pseudocode'}</span>
+                      <span className="text-[10px] text-gray-400 font-normal border border-gray-700 rounded-md px-2 py-0.5">
+                        {codeObj.task_objective || 'Executable Code Task'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCode(codeObj.code)}
+                      className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      {copyCodeSuccess ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                      <span>{copyCodeSuccess ? 'Copied!' : 'Copy Code'}</span>
+                    </button>
+                  </div>
+
+                  {/* Code Editor Body */}
+                  <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre font-normal bg-gray-900/90 selection:bg-emerald-900 selection:text-white">
+                    <code>{codeObj.code}</code>
+                  </pre>
+
+                  {/* Logic Breakdown & Execution Box */}
+                  <div className="p-4 bg-gray-950/80 border-t border-gray-800 text-xs text-gray-300 space-y-3">
+                    {codeObj.logic_breakdown && codeObj.logic_breakdown.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-mono font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+                          <Terminal size={13} /> Logic Breakdown:
+                        </div>
+                        <ul className="space-y-1 pl-1">
+                          {codeObj.logic_breakdown.map((lb, lbIdx) => (
+                            <li key={lbIdx} className="text-[11px] text-gray-300 flex items-start gap-1.5">
+                              <span className="text-emerald-500 font-mono shrink-0">•</span>
+                              <span className="leading-snug">{lb}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="grid sm:grid-cols-2 gap-3 pt-1">
+                      {codeObj.run_command && (
+                        <div className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
+                          <div className="text-[10px] font-mono font-bold text-gray-400 uppercase flex items-center gap-1">
+                            <Play size={11} className="text-emerald-400" /> How to Run:
+                          </div>
+                          <div className="text-[11px] font-mono text-emerald-300 font-bold">
+                            {codeObj.run_command}
+                          </div>
+                        </div>
+                      )}
+
+                      {codeObj.expected_output && (
+                        <div className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
+                          <div className="text-[10px] font-mono font-bold text-gray-400 uppercase flex items-center gap-1">
+                            <CheckCircle2 size={11} className="text-sky-400" /> Expected Output:
+                          </div>
+                          <div className="text-[11px] font-mono text-sky-300">
+                            {codeObj.expected_output}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {codeObj.debugging_tips && (
+                      <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/40 text-amber-300 text-[11px] flex items-start gap-2">
+                        <Bug size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Debugging Guidance: </strong>
+                          {codeObj.debugging_tips}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-[var(--text-soft)] leading-relaxed font-mono text-[11px] bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)]">
-                  {activity.academic_theory || activity.scientific_principle}
-                </p>
+              )
+            })()}
+
+            {/* Expandable Accordion for Academic Theory (Avoid Walls of Text) */}
+            {(activity.academic_theory || activity.scientific_principle) && (
+              <div className="rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] overflow-hidden transition-all">
+                <button
+                  type="button"
+                  onClick={() => setShowAcademicTheory(!showAcademicTheory)}
+                  className="w-full p-4 flex items-center justify-between text-left cursor-pointer hover:bg-[var(--surface)] transition-colors"
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
+                    <Sparkles size={16} className="text-[var(--accent)]" />
+                    <span>Academic Theory & Textbook Formulation</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-dim)] text-[var(--accent)] font-semibold">
+                      {showAcademicTheory ? 'Click to collapse' : 'Click to expand'}
+                    </span>
+                  </div>
+                  {showAcademicTheory ? <ChevronUp size={16} className="text-[var(--text-soft)]" /> : <ChevronDown size={16} className="text-[var(--text-soft)]" />}
+                </button>
+
+                {showAcademicTheory && (
+                  <div className="p-4 pt-0 border-t border-[var(--border)] animate-fadeIn space-y-2 mt-2">
+                    <p className="text-xs text-[var(--text-soft)] leading-relaxed font-mono text-[11px] bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)]">
+                      {activity.academic_theory || activity.scientific_principle}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Interactive Student On-Demand Assistance Actions */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-[var(--accent)]" />
+                  <span>On-Demand Learning Assistance</span>
+                </div>
+                <span className="text-[10px] text-[var(--text-faint)] font-medium">
+                  Tap button for instant AI support
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleStudentAction('simpler_explanation')}
+                  disabled={actionLoading}
+                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Lightbulb size={14} className="text-amber-500" />
+                  <span>Simpler Explanation</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleStudentAction('another_example')}
+                  disabled={actionLoading}
+                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <FileText size={14} className="text-blue-500" />
+                  <span>Another Example</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleStudentAction('worked_solution')}
+                  disabled={actionLoading}
+                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Target size={14} className="text-emerald-500" />
+                  <span>Worked Solution</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleStudentAction('more_challenging_task')}
+                  disabled={actionLoading}
+                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Sparkles size={14} className="text-purple-500" />
+                  <span>Challenge Task</span>
+                </button>
+              </div>
+
+              {actionLoading && (
+                <div className="py-4 text-center text-xs text-[var(--text-soft)] font-medium flex items-center justify-center gap-2">
+                  <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
+                  <span>Generating tailored learning response...</span>
+                </div>
+              )}
+
+              {actionResult && (
+                <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--accent-dim)] space-y-2 animate-fadeIn relative">
+                  <button
+                    type="button"
+                    onClick={() => setActionResult(null)}
+                    className="absolute top-3 right-3 text-[var(--text-faint)] hover:text-[var(--text)] p-1 cursor-pointer"
+                    title="Close assistance card"
+                  >
+                    <X size={14} />
+                  </button>
+                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--accent)]">
+                    <Sparkles size={14} />
+                    <span>{actionResult.title || 'Learning Assistance'}</span>
+                  </div>
+                  <p className="text-xs text-[var(--text-soft)] leading-relaxed whitespace-pre-wrap font-medium">
+                    {actionResult.content}
+                  </p>
+                  {actionResult.steps?.length > 0 && (
+                    <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--text)] pt-1">
+                      {actionResult.steps.map((st, stIdx) => (
+                        <li key={stIdx} className="leading-snug">{st}</li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Village & Everyday Application Connection */}
             {(activity.everyday_applications || activity.village_application) && (

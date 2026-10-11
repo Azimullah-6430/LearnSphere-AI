@@ -108,8 +108,8 @@ class TestUniversalTeachingEngine(unittest.TestCase):
         plan = self.planner.create_teaching_plan("Computer Science", "Merge Sort Algorithm", {"level": "COLLEGE"})
         self.assertEqual(plan["topic_nature"], "programming-oriented")
         self.assertEqual(plan["demonstration_type"], "code_and_logic_simulation")
-        self.assertIn("Algorithmic", plan["teaching_approach"])
-        self.assertIn("tracing", plan["practice_method"].lower())
+        self.assertIn("Language Implementation", plan["teaching_approach"])
+        self.assertIn("code snippet", plan["practice_method"].lower())
 
     def test_02_accounting_approach(self):
         """Commerce/Accounting topics must use ledger transactions and financial statement case studies."""
@@ -190,5 +190,22 @@ class TestUniversalTeachingEngine(unittest.TestCase):
             self.assertTrue(len(plan["honest_limitation"]) > 10)
 
 
+    def test_12_asks_available_materials_only_when_useful(self):
+        """
+        Verify that asks_available_materials is True for hands-on practical topics
+        and False for coding, mathematics, accounting, history, or pure theory.
+        """
+        practical_plan = self.planner.create_teaching_plan("Chemistry", "Acid-Base Titration", {"level": "SCHOOL"})
+        coding_plan = self.planner.create_teaching_plan("Computer Science", "Sorting Algorithms", {"level": "COLLEGE"})
+        math_plan = self.planner.create_teaching_plan("Mathematics", "Calculus Derivatives", {"level": "COLLEGE"})
+        history_plan = self.planner.create_teaching_plan("History", "French Revolution", {"level": "SCHOOL"})
+
+        self.assertTrue(practical_plan["asks_available_materials"])
+        self.assertFalse(coding_plan["asks_available_materials"])
+        self.assertFalse(math_plan["asks_available_materials"])
+        self.assertFalse(history_plan["asks_available_materials"])
+
+
 if __name__ == "__main__":
     unittest.main()
+

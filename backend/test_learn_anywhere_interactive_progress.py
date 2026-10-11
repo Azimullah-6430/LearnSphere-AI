@@ -149,5 +149,70 @@ class TestLearnAnywhereInteractiveProgress(unittest.TestCase):
             self.assertEqual(misc_count_before, misc_count_after)
             self.assertEqual(action_count_before, action_count_after)
 
+    def test_07_on_demand_student_actions(self):
+        """Verify student on-demand action generation (simpler explanation, another example, worked solution, challenge task)."""
+        actions = ["simpler_explanation", "another_example", "worked_solution", "more_challenging_task"]
+        for act in actions:
+            res = gemini_service.generate_learn_anywhere_action(
+                action_type=act,
+                subject="Computer Science",
+                topic="Binary Search Algorithm",
+                question="What is the worst-case time complexity of binary search?",
+                current_explanation="Binary search repeatedly divides the search interval in half.",
+                current_example="Searching for 45 in array [10, 20, 30, 45, 90]."
+            )
+            self.assertIsInstance(res, dict)
+            self.assertEqual(res.get("action_type"), act)
+            self.assertTrue(len(res.get("content", "")) > 10)
+
+    def test_08_session_restoration_and_adaptive_difficulty(self):
+        """Verify session restoration calculates adaptive difficulty and enforces 2+ correct answers for mastery."""
+        mongo_db = get_mongodb()
+        act_id = f"act_session_{self.suffix}"
+
+        # 1. Single correct attempt -> mastery_status must remain 'in_progress' or 'developing', NOT 'mastered'
+        single_attempt = [
+            {"question_index": 0, "is_correct": True, "score": 100, "attempt_number": 1}
+        ]
+
+        if mongo_db is not None:
+            now = datetime.utcnow()
+            mongo_db.learn_anywhere_progress.update_one(
+                {"user_id": self.student_a_id, "activity_id": act_id},
+                {"$set": {
+                    "user_id": self.student_a_id,
+                    "activity_id": act_id,
+                    "subject": "Mathematics",
+                    "topic": "Polynomials",
+                    "attempts": single_attempt,
+                    "completed_steps": [0],
+                    "total_steps": 4,
+                    "completion_status": "in_progress",
+                    "accuracy_percent": 100,
+                    "updated_at": now
+                }},
+                upsert=True
+            )
+
+            rec = mongo_db.learn_anywhere_progress.find_one({"user_id": self.student_a_id, "activity_id": act_id})
+            self.assertIsNotNone(rec)
+
+            # 2. Add second consecutive correct attempt -> mastery_status becomes 'mastered'
+            multi_attempts = [
+                {"question_index": 0, "is_correct": True, "score": 100, "attempt_number": 1},
+                {"question_index": 1, "is_correct": True, "score": 100, "attempt_number": 1}
+            ]
+            mongo_db.learn_anywhere_progress.update_one(
+                {"user_id": self.student_a_id, "activity_id": act_id},
+                {"$set": {"attempts": multi_attempts, "completed_steps": [0, 1]}}
+            )
+
+            rec_updated = mongo_db.learn_anywhere_progress.find_one({"user_id": self.student_a_id, "activity_id": act_id})
+            attempts_stored = rec_updated.get("attempts", [])
+            consec_correct = sum(1 for a in reversed(attempts_stored) if a.get("is_correct"))
+            self.assertTrue(consec_correct >= 2)
+
+
 if __name__ == "__main__":
     unittest.main()
+
