@@ -138,7 +138,7 @@ export default function Settings() {
       }
 
       await updateProfile(payload)
-      setSavedMsg('Profile and semester configuration successfully persisted to MongoDB Atlas!')
+      setSavedMsg('Profile and academic configuration successfully saved.')
       setTimeout(() => setSavedMsg(''), 4000)
     } catch (err) {
       setErrorMsg(err?.message || 'Failed to save profile.')
@@ -159,12 +159,12 @@ export default function Settings() {
       formData.append('level', level)
       formData.append('semester', semester)
       formData.append('classLevel', classLevel)
-      formData.append('degree', collegeDegree)
+      formData.append('degree', degree)
       formData.append('department', collegeBranch)
       formData.append('domain', collegeBranch)
       formData.append('stream', isCollege ? collegeStream : schoolStream)
-      formData.append('regulation', collegeRegulation)
-      formData.append('academic_year', collegeAcademicYear)
+      formData.append('regulation', regulation)
+      formData.append('academic_year', academicYear)
 
       const res = await api.analyzeSyllabus(formData)
       if (res && res.success && res.analysis) {
@@ -190,52 +190,55 @@ export default function Settings() {
 
   return (
     <>
-      <PageHead title="Settings" />
+      <PageHead
+        title="Settings & Profile"
+        subtitle="Manage your institutional affiliation, academic level, and curriculum preferences."
+      />
 
-      <div className="grid md:grid-cols-[1.3fr_1fr] gap-6 max-w-[1020px]">
+      <div className="grid md:grid-cols-[1.3fr_1fr] gap-6 max-w-[1040px]">
         {/* Left Card: Academic Profile Details */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--border)]">
-            <h3 className="font-extrabold text-base text-[var(--text)]">Academic Profile & Credentials</h3>
+        <Card className="p-7">
+          <div className="flex items-center justify-between mb-5 pb-3.5 border-b border-[var(--border)]">
+            <h3 className="font-extrabold text-lg text-[var(--text)]">Academic Profile & Credentials</h3>
             <Badge tone="accent">
               {user?.role === 'teacher' ? 'Teacher Account' : isCollege ? `College (Sem ${semester})` : `School (Class ${classLevel})`}
             </Badge>
           </div>
 
           {savedMsg && (
-            <div className="mb-4 p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2">
+            <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-semibold rounded-xl flex items-center gap-2">
               <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
               <span>{savedMsg}</span>
             </div>
           )}
 
           {errorMsg && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-300 text-red-800 text-xs font-semibold rounded-xl flex items-center gap-2">
-              <AlertCircle size={16} className="text-red-600 shrink-0" />
+            <div className="mb-4 p-3.5 bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold rounded-xl flex items-center gap-2">
+              <AlertCircle size={16} className="text-red-500 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Full Name</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Full Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  className="w-full px-3.5 py-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-sm"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-sm text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1">Email Address</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Email Address</label>
                 <input
                   type="email"
                   value={email}
                   disabled
-                  className="w-full px-3.5 py-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-alt)] text-sm text-[var(--text-soft)] cursor-not-allowed"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-sm text-[var(--text-faint)] cursor-not-allowed opacity-80"
                 />
               </div>
             </div>

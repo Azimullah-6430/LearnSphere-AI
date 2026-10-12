@@ -28,6 +28,7 @@ export default [
       'react/no-unescaped-entities': 'off',
       'react-refresh/only-export-components': 'warn',
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-empty': ['warn', { allowEmptyCatch: true }],
     },
     settings: { react: { version: 'detect' } },
   },

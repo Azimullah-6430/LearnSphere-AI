@@ -72,6 +72,18 @@ export default function ActionCenter() {
     fetchBackendItems()
   }, [user, activeClass?.id])
 
+  useEffect(() => {
+    if (!traceModalItem && !interventionModalItem) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (traceModalItem) setTraceModalItem(null)
+        if (interventionModalItem) setInterventionModalItem(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [traceModalItem, interventionModalItem])
+
   const handleStatusChange = (id, newStatus) => {
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, status: newStatus } : item))
@@ -139,90 +151,93 @@ export default function ActionCenter() {
 
   return (
     <>
-      <PageHead title="Teacher Action Center" />
+      <PageHead
+        title="Action Center"
+        subtitle="Prioritized pedagogical interventions based on evaluated student scripts and diagnosed learning deficits."
+      />
 
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="mb-4 p-3 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] text-[var(--success)] text-[13px] font-bold flex items-center justify-between shadow-sm animate-fade-in">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} />
+        <div className="mb-4 p-3.5 rounded-2xl bg-[var(--success-soft)] border border-[var(--success)] text-[var(--success)] text-sm font-bold flex items-center justify-between shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 size={18} />
             <span>{toastMessage}</span>
           </div>
-          <button onClick={() => setToastMessage('')} className="text-xs opacity-75 hover:opacity-100 font-bold">✕</button>
+          <button onClick={() => setToastMessage('')} className="text-xs opacity-75 hover:opacity-100 font-bold p-1 cursor-pointer">✕</button>
         </div>
       )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <Card className="p-4 border-l-4 border-l-[var(--error)]">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-            &gt;20 Marks Lost Deficit
+        <Card className="p-5 border-l-4 border-l-[var(--error)]">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            Significant Deficit
           </div>
-          <div className="text-[26px] font-extrabold text-[var(--error)]">
+          <div className="text-3xl font-extrabold text-[var(--error)]">
             {atRiskCount}
           </div>
-          <div className="text-[11.5px] text-[var(--error)] font-semibold mt-1">
-            Max marks &minus; Obtained &gt; 20
+          <div className="text-xs text-[var(--error)] font-semibold mt-1">
+            Lost &gt; 20 marks on test
           </div>
         </Card>
 
-        <Card className="p-4 border-l-4 border-l-[var(--gold)]">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+        <Card className="p-5 border-l-4 border-l-[var(--gold)]">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
             Conceptual Misconceptions
           </div>
-          <div className="text-[26px] font-extrabold text-[var(--gold)]">
+          <div className="text-3xl font-extrabold text-[var(--gold)]">
             {misconceptionCount}
           </div>
-          <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+          <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
             Linked to Misconception Map
           </div>
         </Card>
 
-        <Card className="p-4 border-l-4 border-l-[var(--accent)]">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+        <Card className="p-5 border-l-4 border-l-[var(--accent)]">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
             Active Interventions
           </div>
-          <div className="text-[26px] font-extrabold text-[var(--accent)]">
+          <div className="text-3xl font-extrabold text-[var(--accent)]">
             {inProgressCount}
           </div>
-          <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+          <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
             In Progress status
           </div>
         </Card>
 
-        <Card className="p-4 border-l-4 border-l-[var(--success)]">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+        <Card className="p-5 border-l-4 border-l-[var(--success)]">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
             Resolved Deficits
           </div>
-          <div className="text-[26px] font-extrabold text-[var(--success)]">
+          <div className="text-3xl font-extrabold text-[var(--success)]">
             {completedCount}
           </div>
-          <div className="text-[11.5px] text-[var(--success)] font-semibold mt-1">
+          <div className="text-xs text-[var(--success)] font-semibold mt-1">
             Completed interventions
           </div>
         </Card>
       </div>
 
       {/* Search & Filter Toolbar */}
-      <div className="space-y-3 mb-6 p-3.5 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+      <div className="space-y-3.5 mb-6 p-4 bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Status Tabs */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mr-1">Status:</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mr-1">Status:</span>
             {[
               { id: 'All', label: 'All Items' },
-              { id: 'New', label: '🆕 New' },
-              { id: 'In Progress', label: '⏳ In Progress' },
-              { id: 'Completed', label: '✅ Completed' },
-              { id: 'Follow-up Required', label: '🔁 Follow-up Required' }
+              { id: 'New', label: 'New' },
+              { id: 'In Progress', label: 'In Progress' },
+              { id: 'Completed', label: 'Completed' },
+              { id: 'Follow-up Required', label: 'Follow-up' }
             ].map(({ id, label }) => (
               <button
                 key={id}
                 onClick={() => setStatusFilter(id)}
-                className={`px-3 py-1 rounded-full text-[12px] font-bold border transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                   statusFilter === id
-                    ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
-                    : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
+                    ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-xs'
+                    : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
                 }`}
               >
                 {label}
@@ -231,20 +246,20 @@ export default function ActionCenter() {
           </div>
 
           {/* Search Box */}
-          <div className="relative min-w-[240px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
+          <div className="relative w-full md:w-auto md:min-w-[260px]">
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search student, evaluation, question, concept..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border-strong)] text-[12.5px] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              placeholder="Search student, question, concept..."
+              className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-[var(--border)] text-xs bg-[var(--surface-alt)] text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
         </div>
 
         {/* Priority, Subject & Category Selectors */}
-        <div className="flex items-center gap-4 pt-2 border-t border-[var(--border)] text-[12px] flex-wrap">
+        <div className="flex items-center gap-4 pt-3 border-t border-[var(--border)] text-xs flex-wrap">
           <div className="flex items-center gap-2">
             <Filter size={13} className="text-[var(--accent)]" />
             <span className="font-bold text-[var(--text-faint)]">Priority:</span>
@@ -504,6 +519,7 @@ export default function ActionCenter() {
                         }}
                         className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
                         title="Delete Action Item"
+                        aria-label={`Delete action item for ${item.student_name}`}
                       >
                         <Trash2 size={15} />
                       </button>
@@ -518,12 +534,20 @@ export default function ActionCenter() {
 
       {/* MODAL 1: FULL TRACEABILITY MODAL (Action Center -> Student -> Evaluation -> Question -> Student Answer -> Feedback -> Misconception) */}
       {traceModalItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setTraceModalItem(null); }}
+        >
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="trace-modal-title"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl"
+          >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div>
-                <h3 className="text-base font-extrabold text-[var(--text)] flex items-center gap-2">
+                <h3 id="trace-modal-title" className="text-base font-extrabold text-[var(--text)] flex items-center gap-2">
                   <span>Audit Trail & Evidence Trace</span>
                   <Badge tone="accent">Action Center Trace</Badge>
                 </h3>
@@ -531,7 +555,11 @@ export default function ActionCenter() {
                   Student: <strong>{traceModalItem.student_name}</strong> (ID: {traceModalItem.student_id || traceModalItem.roll_number}) &bull; {traceModalItem.subject}
                 </p>
               </div>
-              <button onClick={() => setTraceModalItem(null)} className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]">
+              <button 
+                onClick={() => setTraceModalItem(null)} 
+                aria-label="Close trace audit modal"
+                className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -632,20 +660,29 @@ export default function ActionCenter() {
 
       {/* MODAL 2: CREATE INTERVENTION MODAL */}
       {interventionModalItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <Card className="max-w-[540px] w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setInterventionModalItem(null); }}
+        >
+          <Card 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="intervention-modal-title"
+            className="max-w-[540px] w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
               <div>
-                <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
+                <h3 id="intervention-modal-title" className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
                   <Zap size={18} className="text-[var(--accent)]" />
                   <span>Dispatch Remedial Intervention</span>
-                </div>
+                </h3>
                 <div className="text-[12.5px] text-[var(--text-soft)]">
                   Student: <strong>{interventionModalItem.student_name}</strong> &bull; {interventionModalItem.subject}
                 </div>
               </div>
               <button
                 onClick={() => setInterventionModalItem(null)}
+                aria-label="Close intervention dispatch modal"
                 className="w-8 h-8 rounded-lg bg-[var(--surface-alt)] font-bold text-lg flex items-center justify-center hover:bg-[var(--border)] transition-colors"
               >
                 ✕

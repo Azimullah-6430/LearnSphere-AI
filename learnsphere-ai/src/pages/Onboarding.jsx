@@ -473,7 +473,7 @@ export default function Onboarding() {
                 <div>
                   <h2 className="text-xl font-extrabold mb-1">Academic Year & Current Semester</h2>
                   <p className="text-sm text-[var(--text-soft)] mb-5">
-                    The backend uses your stored semester as the authoritative curriculum context.
+                    Your selected semester aligns your learning modules, exams, and practice topics.
                   </p>
                 </div>
 

@@ -34,6 +34,15 @@ export default function History() {
     loadData()
   }, [role, user])
 
+  useEffect(() => {
+    if (!selectedEval) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setSelectedEval(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedEval])
+
   const handleViewDetail = async (id) => {
     if (!id) return
     setDetailLoading(true)
@@ -157,7 +166,8 @@ export default function History() {
   return (
     <>
       <PageHead
-        title={role === 'teacher' ? 'Teacher Evaluation History' : 'My Evaluation History'}
+        title="Evaluation History"
+        subtitle={role === 'teacher' ? "Comprehensive audit archive of evaluated student scripts, grades, and teacher reviews." : "Historical record of your evaluated papers, question breakdowns, and grades."}
       />
 
       {activeClass && role === 'teacher' && (
@@ -175,8 +185,8 @@ export default function History() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
+        <div className="overflow-x-auto scrollbar-thin">
+          <table className="w-full min-w-[760px] border-collapse text-[13px]">
             <thead>
               <tr>
                 {['Student', 'Subject', 'Exam / Assessment', 'Marks (Obtained / Max)', 'Percentage', 'Status', 'Date', 'Actions'].map((h) => (
@@ -277,6 +287,7 @@ export default function History() {
                             onClick={(e) => handleDelete(evalId, e)}
                             className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
                             title="Delete Evaluation Record"
+                            aria-label="Delete evaluation record"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -293,12 +304,20 @@ export default function History() {
 
       {/* EVALUATION DETAIL & TRACEABILITY MODAL */}
       {selectedEval && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <Card className="max-w-3xl w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8 max-h-[92vh] overflow-y-auto p-6">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedEval(null); }}
+        >
+          <Card 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-modal-title"
+            className="max-w-3xl w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8 max-h-[92vh] overflow-y-auto p-6"
+          >
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
               <div>
-                <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2 flex-wrap">
+                <div id="history-modal-title" className="text-base font-bold text-[var(--text)] flex items-center gap-2 flex-wrap">
                   <span>{selectedEval.student_name || 'Student Evaluation'}</span>
                   <Badge tone="accent">{selectedEval.subject}</Badge>
                   <span className="text-xs text-[var(--text-faint)] font-mono">
@@ -314,6 +333,7 @@ export default function History() {
               </div>
               <button
                 onClick={() => setSelectedEval(null)}
+                aria-label="Close evaluation details"
                 className="w-8 h-8 rounded-lg bg-[var(--surface-alt)] font-bold text-lg flex items-center justify-center hover:bg-[var(--border)] transition-colors"
               >
                 ✕

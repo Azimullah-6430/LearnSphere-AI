@@ -169,6 +169,15 @@ export default function Focus() {
     return () => ambientSynth.stop()
   }, [isSessionActive, ambientSound])
 
+  useEffect(() => {
+    if (!sessionCompletedModal) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setSessionCompletedModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [sessionCompletedModal])
+
   // Manual ON: Start Session
   const handleStartSession = () => {
     setIsSessionActive(true)
@@ -220,14 +229,15 @@ export default function Focus() {
   return (
     <div className={`transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-50 bg-[var(--bg)] p-8 flex flex-col justify-between overflow-y-auto' : ''}`}>
       <PageHead
-        title="Focus Session & Deep Work"
+        title="Focus Session"
+        subtitle="Structured study intervals, custom subject targets, and ambient focus acoustics for deep work."
         action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[12.5px] font-semibold text-[var(--text-soft)] hover:text-[var(--text)] transition-colors"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-bold text-[var(--text-soft)] hover:text-[var(--text)] transition-colors shadow-xs cursor-pointer"
             >
-              {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               <span>{isFullscreen ? 'Exit Zen Mode' : 'Zen Fullscreen'}</span>
             </button>
           </div>
@@ -235,28 +245,28 @@ export default function Focus() {
       />
 
       {/* Main Focus Dashboard */}
-      <div className="max-w-[840px] mx-auto space-y-6">
+      <div className="max-w-[880px] mx-auto space-y-6">
         {/* Session Inactive (OFF) Customizer Controls */}
         {!isSessionActive && (
-          <Card className="border-[var(--accent-dim)] bg-gradient-to-br from-[var(--surface)] to-[var(--surface-alt)] shadow-sm">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--border)]">
-              <div className="flex items-center gap-2 font-bold text-[14.5px]">
-                <BookOpen size={18} className="text-[var(--accent)]" />
-                <span>Configure Your Focus Goal</span>
+          <Card className="border-[var(--border)] bg-[var(--surface)] shadow-sm p-6 sm:p-7">
+            <div className="flex items-center justify-between mb-5 pb-3.5 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2.5 font-bold text-base text-[var(--text)]">
+                <BookOpen size={19} className="text-[var(--accent)]" />
+                <span>Configure Focus Session</span>
               </div>
-              <Badge tone="accent">Manual ON / OFF</Badge>
+              <Badge tone="neutral">Study Timer</Badge>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               {/* Subject Selector */}
               <div>
-                <label className="block text-[12px] font-bold text-[var(--text-soft)] mb-1.5 uppercase tracking-wider">
-                  Target Subject:
+                <label className="block text-xs font-bold text-[var(--text-soft)] mb-2 uppercase tracking-wider">
+                  Target Subject
                 </label>
                 <select
                   value={selectedSubject}
                   onChange={(e) => setSelectedSubject(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[13.5px] font-bold text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  className="w-full px-3.5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-sm font-semibold text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
                 >
                   {dynamicSubjects.map((sub) => (
                     <option key={sub} value={sub}>{sub}</option>
@@ -266,37 +276,37 @@ export default function Focus() {
 
               {/* Optional Custom Topic / Goal */}
               <div>
-                <label className="block text-[12px] font-bold text-[var(--text-soft)] mb-1.5 uppercase tracking-wider">
-                  Specific Topic / Goal (Optional):
+                <label className="block text-xs font-bold text-[var(--text-soft)] mb-2 uppercase tracking-wider">
+                  Specific Topic / Goal (Optional)
                 </label>
                 <input
                   type="text"
                   value={customGoal}
                   onChange={(e) => setCustomGoal(e.target.value)}
                   placeholder="e.g., Chapter 3 Derivations & Formulas"
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[13.5px] font-medium text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  className="w-full px-3.5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-sm font-medium text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
             </div>
 
             {/* Duration Presets */}
             <div className="mb-6">
-              <label className="block text-[12px] font-bold text-[var(--text-soft)] mb-2 uppercase tracking-wider">
-                Select Session Duration:
+              <label className="block text-xs font-bold text-[var(--text-soft)] mb-2.5 uppercase tracking-wider">
+                Session Duration
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {DURATION_PRESETS.map(({ label, minutes, sub }) => (
                   <button
                     key={minutes}
                     onClick={() => setSelectedDuration(minutes)}
-                    className={`p-3 rounded-xl border text-left transition-all ${
+                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
                       selectedDuration === minutes
-                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-md scale-[1.02]'
-                        : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
+                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
+                        : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
                     }`}
                   >
-                    <div className="text-[15px] font-extrabold">{label}</div>
-                    <div className={`text-[11px] font-medium ${selectedDuration === minutes ? 'text-white/80' : 'text-[var(--text-faint)]'}`}>
+                    <div className="text-base font-extrabold">{label}</div>
+                    <div className={`text-xs font-medium mt-0.5 ${selectedDuration === minutes ? 'text-white/85' : 'text-[var(--text-faint)]'}`}>
                       {sub}
                     </div>
                   </button>
@@ -305,28 +315,28 @@ export default function Focus() {
             </div>
 
             {/* Ambient Audio Options */}
-            <div className="flex items-center justify-between pt-4 border-t border-[var(--border)] flex-wrap gap-3">
-              <div className="flex items-center gap-2 text-[12.5px] font-semibold text-[var(--text-soft)]">
-                <Volume2 size={16} className="text-[var(--accent)]" />
-                <span>Ambient Focus Audio:</span>
+            <div className="flex items-center justify-between pt-5 border-t border-[var(--border)] flex-wrap gap-4">
+              <div className="flex items-center gap-2.5 text-xs font-semibold text-[var(--text-soft)]">
+                <Volume2 size={17} className="text-[var(--accent)]" />
+                <span>Ambient Soundscape:</span>
                 <select
                   value={ambientSound}
                   onChange={(e) => setAmbientSound(e.target.value)}
-                  className="px-2.5 py-1 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[12px] font-bold text-[var(--text)] focus:outline-none"
+                  className="px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-xs font-bold text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                 >
                   <option value="off">Off (Silent)</option>
                   <option value="pink">Pink Noise (Deep Focus)</option>
-                  <option value="binaural">Binaural Alpha Wave (Concentration)</option>
+                  <option value="binaural">Binaural Alpha Waves (Concentration)</option>
                 </select>
               </div>
 
-              {/* Big Manual ON Button */}
+              {/* Big Start Button */}
               <button
                 onClick={handleStartSession}
-                className="w-full md:w-auto px-8 py-3 rounded-xl text-[14.5px] font-extrabold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+                className="w-full md:w-auto px-8 py-3.5 rounded-xl text-sm font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Play size={18} fill="currentColor" />
-                <span>START FOCUS SESSION (ON)</span>
+                <span>Start Focus Session</span>
               </button>
             </div>
           </Card>
@@ -334,10 +344,10 @@ export default function Focus() {
 
         {/* Session Active (ON) View */}
         {isSessionActive && (
-          <Card className="text-center py-10 px-6 border-2 border-[var(--accent)] bg-gradient-to-b from-[var(--surface)] to-[var(--surface-alt)] shadow-xl relative overflow-hidden">
+          <Card className="text-center py-10 px-6 border-2 border-[var(--accent)] bg-[var(--surface)] shadow-md relative overflow-hidden">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] font-bold text-[12px] mb-4">
-              <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-ping" />
-              <span>FOCUS SESSION IN PROGRESS</span>
+              <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />
+              <span>Session In Progress</span>
             </div>
 
             <div className="text-[18px] font-extrabold text-[var(--text)] mb-1">
@@ -350,7 +360,7 @@ export default function Focus() {
             )}
 
             {/* Circular Timer Display */}
-            <div className="relative w-64 h-64 mx-auto my-6 flex items-center justify-center">
+            <div className="relative w-56 h-56 sm:w-64 sm:h-64 mx-auto my-6 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 160 160">
                 <circle
                   cx="80"
@@ -375,7 +385,7 @@ export default function Focus() {
               </svg>
 
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <div className="text-[54px] font-extrabold tracking-tight tabular-nums text-[var(--text)] leading-none">
+                <div className="text-[44px] sm:text-[54px] font-extrabold tracking-tight tabular-nums text-[var(--text)] leading-none">
                   {minutesStr}:{secondsStr}
                 </div>
                 <div className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] mt-2">
@@ -409,10 +419,10 @@ export default function Focus() {
               {/* Manual OFF Button */}
               <button
                 onClick={handleStopSession}
-                className="px-6 py-2.5 rounded-xl text-[13.5px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl text-[13.5px] font-bold bg-[var(--error-soft)] text-[var(--error)] border border-[var(--error)]/30 hover:bg-[var(--error)] hover:text-white transition-all flex items-center gap-2 cursor-pointer"
               >
                 <Square size={15} fill="currentColor" />
-                <span>END SESSION (OFF)</span>
+                <span>End Session</span>
               </button>
             </div>
           </Card>
@@ -451,12 +461,20 @@ export default function Focus() {
 
       {/* Completion Modal */}
       {sessionCompletedModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <Card className="max-w-[420px] w-full text-center py-6 px-6 bg-[var(--surface)] border-2 border-[var(--success)] shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setSessionCompletedModal(false); }}
+        >
+          <Card 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="focus-modal-title"
+            className="max-w-[420px] w-full text-center py-6 px-6 bg-[var(--surface)] border-2 border-[var(--success)] shadow-2xl"
+          >
             <div className="w-14 h-14 rounded-full bg-[var(--success-soft)] text-[var(--success)] mx-auto mb-3 flex items-center justify-center">
               <CheckCircle2 size={32} />
             </div>
-            <h2 className="text-[20px] font-extrabold mb-1">Great Focus Session!</h2>
+            <h2 id="focus-modal-title" className="text-[20px] font-extrabold mb-1">Great Focus Session!</h2>
             <p className="text-[13px] text-[var(--text-soft)] mb-6">
               You completed a <strong>{selectedDuration} minute</strong> deep work session on <strong>{selectedSubject}</strong>.
             </p>

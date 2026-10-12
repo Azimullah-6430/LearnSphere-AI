@@ -57,6 +57,17 @@ export default function SyllabusModal({ isOpen, onClose }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
+
   if (!isOpen) return null
 
   const handleResetForm = () => {
@@ -227,45 +238,58 @@ export default function SyllabusModal({ isOpen, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-[var(--surface)] border border-[var(--border-strong)] rounded-2xl w-full max-w-[760px] p-6 shadow-2xl overflow-y-auto max-h-[92vh]">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/60 backdrop-blur-sm animate-fadeIn safe-top safe-bottom"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div 
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="syllabus-modal-title"
+        aria-describedby="syllabus-modal-description"
+        className="bg-[var(--surface)] border border-[var(--border-strong)] rounded-2xl w-full max-w-[760px] p-4 sm:p-6 shadow-2xl overflow-y-auto max-h-[92vh]"
+      >
         
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-[var(--border)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0">
               <BookOpen size={20} />
             </div>
             <div>
-              <h3 className="font-bold text-base">Syllabus & Curriculum Analyzer</h3>
-              <p className="text-xs text-[var(--text-soft)]">Authoritative semester extraction, completeness verification & curriculum activation</p>
+              <h2 id="syllabus-modal-title" className="font-bold text-base sm:text-lg text-[var(--text)]">Syllabus & Curriculum Analyzer</h2>
+              <p id="syllabus-modal-description" className="text-xs text-[var(--text-soft)]">Upload your course syllabus to synchronize your subjects, labs, and semester schedule.</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 text-[var(--text-soft)] hover:text-[var(--text)] rounded-lg">
+          <button 
+            onClick={onClose} 
+            className="p-1.5 text-[var(--text-soft)] hover:text-[var(--text)] rounded-lg hover:bg-[var(--surface-alt)] transition-colors"
+            aria-label="Close dialog"
+          >
             <X size={18} />
           </button>
         </div>
 
         {/* Profile Context Banner */}
-        <div className="mt-3.5 p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex items-center justify-between text-xs">
+        <div className="mt-4 p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex items-center justify-between text-xs gap-3">
           <div>
-            <span className="text-[10.5px] uppercase font-bold text-[var(--text-faint)] block">Authoritative Profile Context</span>
-            <span className="font-extrabold text-[var(--text)]">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--text-faint)] block">Current Academic Target</span>
+            <span className="font-bold text-[var(--text)] text-xs sm:text-[13px]">
               {isCollege ? (
                 <>
-                  {activeProfile.degree || 'Degree'} {activeProfile.department ? `· ${activeProfile.department}` : ''} 
+                  {activeProfile.degree || 'Degree Program'} {activeProfile.department ? `· ${activeProfile.department}` : ''} 
                   {activeSemester ? ` · Semester ${activeSemester}` : ' · (Semester Unset)'}
                   {activeProfile.regulation ? ` (${activeProfile.regulation})` : ''}
                 </>
               ) : (
-                <>School Student · {activeProfile.board || 'Board'} · Class {activeProfile.classLevel || activeProfile.grade_level || 'General'}</>
+                <>School Curriculum · {activeProfile.board || 'Board'} · Class {activeProfile.classLevel || activeProfile.grade_level || 'General'}</>
               )}
             </span>
           </div>
           <button 
             type="button"
             onClick={() => { onClose(); navigate('/app/settings'); }}
-            className="text-[11px] font-bold text-[var(--accent)] hover:underline"
+            className="text-xs font-semibold text-[var(--accent)] hover:underline whitespace-nowrap"
           >
             Edit Profile
           </button>
@@ -360,6 +384,8 @@ export default function SyllabusModal({ isOpen, onClose }) {
                 </span>
                 <input 
                   type="file" 
+                  id="syllabus-file-input"
+                  aria-label="Upload syllabus PDF or image file"
                   accept=".pdf,.png,.jpg,.jpeg" 
                   className="hidden" 
                   onChange={(e) => e.target.files[0] && setFile(e.target.files[0])} 
@@ -368,9 +394,11 @@ export default function SyllabusModal({ isOpen, onClose }) {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[var(--text-soft)] mb-1.5">Option B: Paste Syllabus Text & Course Scheme</label>
+              <label htmlFor="syllabus-pasted-text" className="block text-xs font-semibold text-[var(--text-soft)] mb-1.5">Option B: Paste Syllabus Text & Course Scheme</label>
               <textarea
+                id="syllabus-pasted-text"
                 rows={4}
+                aria-label="Paste course codes, subject names, or syllabus scheme"
                 placeholder={isCollege ? `Paste course codes, subject names, labs, and elective lists for Semester ${activeSemester || ''}...` : "Paste course subjects and chapters here..."}
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
@@ -460,13 +488,13 @@ export default function SyllabusModal({ isOpen, onClose }) {
             )}
 
             {/* Summary Highlights Card */}
-            <div className="bg-[var(--surface-alt)] p-4 rounded-xl text-xs space-y-3 border border-[var(--border-strong)] shadow-xs">
-              <div className="flex items-center justify-between border-b border-[var(--border)] pb-2.5">
-                <div className="flex items-center gap-2">
+            <div className="bg-[var(--surface-alt)] p-4 sm:p-5 rounded-xl text-xs space-y-3.5 border border-[var(--border)]">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
                   <ShieldCheck size={18} className="text-[var(--accent)]" />
                   <div>
-                    <span className="font-bold text-[12px] text-[var(--text)]">Curriculum Completeness & Integrity Summary</span>
-                    <span className="text-[10.5px] text-[var(--text-faint)] block">Authoritative extraction derived from uploaded syllabus</span>
+                    <span className="font-bold text-xs sm:text-[13px] text-[var(--text)]">Curriculum Extraction Summary</span>
+                    <span className="text-[11px] text-[var(--text-soft)] block">Validated from uploaded syllabus document</span>
                   </div>
                 </div>
                 <span className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold ${
@@ -474,7 +502,7 @@ export default function SyllabusModal({ isOpen, onClose }) {
                     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                     : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
                 }`}>
-                  Curriculum Status: {overrideSuccess ? 'VALID' : validationStatus}
+                  Status: {overrideSuccess ? 'VERIFIED' : validationStatus}
                 </span>
               </div>
 
@@ -608,10 +636,10 @@ export default function SyllabusModal({ isOpen, onClose }) {
                               <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
                                 <span className="flex items-center gap-1 text-[var(--accent)]">
                                   <ShieldCheck size={13} />
-                                  Authoritative Syllabus Evidence
+                                  Source Document Verification
                                 </span>
                                 <span className="text-emerald-600 dark:text-emerald-400 font-mono">
-                                  Verified Evidence
+                                  Document Match
                                 </span>
                               </div>
 

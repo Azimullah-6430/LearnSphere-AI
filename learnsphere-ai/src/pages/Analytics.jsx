@@ -95,7 +95,10 @@ export default function Analytics() {
 
   return (
     <>
-      <PageHead title="Class Student Analytics" />
+      <PageHead
+        title="Class Student Analytics"
+        subtitle="Cohort performance distributions, subject score averages, and actionable learner groupings."
+      />
 
       {/* Active Class Indicator & Switcher Bar */}
       <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] mb-4 flex items-center justify-between flex-wrap gap-3">
@@ -136,7 +139,7 @@ export default function Analytics() {
         </Card>
 
         <Card className="p-4 border-l-4 border-l-emerald-500 bg-[var(--surface)]">
-          <div className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider mb-1">🥇 Toppers (≥85%)</div>
+          <div className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Toppers (≥85%)</div>
           <div className="text-2xl font-extrabold text-emerald-600 flex items-center justify-between">
             <span>{toppers.length}</span>
             <Award size={22} className="text-emerald-500 opacity-80" />
@@ -147,7 +150,7 @@ export default function Analytics() {
         </Card>
 
         <Card className="p-4 border-l-4 border-l-blue-500 bg-[var(--surface)]">
-          <div className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-1">📈 Average (60-84%)</div>
+          <div className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-1">Average (60-84%)</div>
           <div className="text-2xl font-extrabold text-blue-600 flex items-center justify-between">
             <span>{averageLearners.length}</span>
             <TrendingUp size={22} className="text-blue-500 opacity-80" />
@@ -340,8 +343,8 @@ export default function Analytics() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
+        <div className="overflow-x-auto scrollbar-thin">
+          <table className="w-full min-w-[680px] border-collapse text-[13px]">
             <thead>
               <tr className="bg-[var(--surface-alt)] border-b border-[var(--border)]">
                 <th className="py-3 px-3 text-left font-bold text-[var(--text-faint)] uppercase text-[11px]">#</th>

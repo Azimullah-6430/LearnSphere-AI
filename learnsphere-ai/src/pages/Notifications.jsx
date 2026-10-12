@@ -170,6 +170,7 @@ export default function Notifications() {
     <>
       <PageHead
         title="Notifications"
+        subtitle="Real-time alerts for evaluations, streak milestones, curriculum updates, and academic opportunities."
         action={
           <div className="flex items-center gap-2">
             <Button
@@ -179,8 +180,8 @@ export default function Notifications() {
               disabled={loading}
               title="Refresh Notifications"
             >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline ml-1">Refresh</span>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline ml-1.5">Refresh</span>
             </Button>
             {unreadCount > 0 && (
               <Button
@@ -189,7 +190,7 @@ export default function Notifications() {
                 onClick={handleMarkAllRead}
                 disabled={actionLoading}
               >
-                <CheckCheck size={14} className="mr-1.5 text-emerald-500" />
+                <CheckCheck size={15} className="mr-1.5 text-emerald-500" />
                 Mark All Read
               </Button>
             )}
@@ -201,7 +202,7 @@ export default function Notifications() {
                 disabled={actionLoading}
                 className="text-red-500 hover:text-red-600 hover:bg-red-500/10 border-red-500/30"
               >
-                <Trash2 size={14} className="mr-1.5" />
+                <Trash2 size={15} className="mr-1.5" />
                 Clear All
               </Button>
             )}
@@ -210,45 +211,33 @@ export default function Notifications() {
       />
 
       {toastMessage && (
-        <div className="mb-4 px-4 py-2.5 rounded-lg bg-[var(--accent)] text-white text-xs font-semibold shadow-md flex items-center justify-between animate-fadeIn">
+        <div className="mb-4 px-4 py-3 rounded-xl bg-[var(--accent)] text-white text-xs font-semibold shadow-md flex items-center justify-between animate-fadeIn">
           <span>{toastMessage}</span>
-          <button onClick={() => setToastMessage('')} className="ml-3 opacity-80 hover:opacity-100">✕</button>
+          <button onClick={() => setToastMessage('')} className="ml-3 opacity-80 hover:opacity-100 font-bold">✕</button>
         </div>
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 mb-4">
-        <button
-          onClick={() => setFilter('ALL')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-            filter === 'ALL'
-              ? 'bg-[var(--accent)] text-white'
-              : 'bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] hover:bg-[var(--surface-alt)]'
-          }`}
-        >
-          All ({notifications.length})
-        </button>
-        <button
-          onClick={() => setFilter('UNREAD')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-            filter === 'UNREAD'
-              ? 'bg-[var(--accent)] text-white'
-              : 'bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] hover:bg-[var(--surface-alt)]'
-          }`}
-        >
-          Unread ({unreadCount})
-        </button>
-        <button
-          onClick={() => setFilter('READ')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-            filter === 'READ'
-              ? 'bg-[var(--accent)] text-white'
-              : 'bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] hover:bg-[var(--surface-alt)]'
-          }`}
-        >
-          Read ({notifications.length - unreadCount})
-        </button>
+      <div className="flex items-center gap-2 mb-5">
+        {[
+          { id: 'ALL', label: `All (${notifications.length})` },
+          { id: 'UNREAD', label: `Unread (${unreadCount})` },
+          { id: 'READ', label: `Read (${notifications.length - unreadCount})` }
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setFilter(t.id)}
+            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+              filter === t.id
+                ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-xs'
+                : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
+
 
       {loading ? (
         <Card className="p-12 text-center my-6">
@@ -327,6 +316,7 @@ export default function Notifications() {
                   <button
                     onClick={(e) => handleDeleteNotification(notifId, e)}
                     title="Delete notification"
+                    aria-label="Delete notification"
                     className="p-1.5 rounded-md text-[var(--text-faint)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
                   >
                     <Trash2 size={15} />

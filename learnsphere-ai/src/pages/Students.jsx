@@ -28,33 +28,36 @@ export default function Students() {
 
   return (
     <>
-      <PageHead title="Students Portfolio" />
-      <Card>
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <PageHead
+        title="Students Directory"
+        subtitle="Class roster performance tracking, evaluation counts, and academic standing."
+      />
+      <Card className="p-0 overflow-hidden">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border)] flex-wrap gap-3">
           <SearchBox placeholder="Search students or section..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="text-xs text-[var(--text-faint)] font-medium">
-            Active Students: <strong>{filtered.length}</strong>
+          <div className="text-xs text-[var(--text-faint)] font-bold">
+            Active Enrolled: <strong className="text-[var(--text)]">{filtered.length}</strong>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
+        <div className="overflow-x-auto scrollbar-thin">
+          <table className="w-full min-w-[580px] border-collapse text-xs">
             <thead>
-              <tr>
+              <tr className="bg-[var(--surface-alt)]">
                 {['Student Name', 'Section', 'Average Score', 'Evaluations Count', 'Status'].map((h) => (
-                  <th key={h} className="text-left text-[11.5px] text-[var(--text-faint)] font-bold uppercase tracking-wide pb-2.5 px-3 border-b border-[var(--border)]">
+                  <th key={h} className="text-left text-xs text-[var(--text-faint)] font-bold uppercase tracking-wider py-3.5 px-4 border-b border-[var(--border)]">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[var(--border)]">
               {filtered.map((s, i) => (
                 <tr key={s.id || i} className="hover:bg-[var(--surface-alt)] transition-colors">
-                  <td className="py-3.5 px-3 border-b border-[var(--border)] font-semibold">{s.name}</td>
-                  <td className="py-3.5 px-3 border-b border-[var(--border)]">{s.section}</td>
-                  <td className="py-3.5 px-3 border-b border-[var(--border)] font-bold text-[var(--accent)]">{s.average}%</td>
-                  <td className="py-3.5 px-3 border-b border-[var(--border)]">{s.evaluations ?? 0} completed</td>
-                  <td className="py-3.5 px-3 border-b border-[var(--border)]">
+                  <td className="py-4 px-4 font-bold text-sm text-[var(--text)]">{s.name}</td>
+                  <td className="py-4 px-4 text-xs font-semibold text-[var(--text-soft)]">{s.section}</td>
+                  <td className="py-4 px-4 font-extrabold text-sm text-[var(--accent)]">{s.average}%</td>
+                  <td className="py-4 px-4 text-xs text-[var(--text-soft)]">{s.evaluations ?? 0} completed</td>
+                  <td className="py-4 px-4">
                     <Badge tone={s.status === 'On track' ? 'success' : s.status === 'At risk' ? 'error' : 'warning'}>
                       {s.status}
                     </Badge>

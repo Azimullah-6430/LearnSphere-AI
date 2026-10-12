@@ -37,6 +37,15 @@ export default function Performance() {
     fetchAnalytics().finally(() => setLoading(false))
   }, [user])
 
+  useEffect(() => {
+    if (!selectedEvalDetail) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setSelectedEvalDetail(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedEvalDetail])
+
   const handleViewEvaluation = async (evalId) => {
     if (!evalId) return
     setDetailLoading(true)
@@ -103,7 +112,10 @@ export default function Performance() {
 
   return (
     <>
-      <PageHead title="Student Analytics & Performance Trends" />
+      <PageHead
+        title="Performance Analytics"
+        subtitle="Track evaluation scores, subject performance averages, and longitudinal mastery trends."
+      />
 
       {loading ? (
         <Card className="p-12 text-center my-6">
@@ -111,74 +123,74 @@ export default function Performance() {
           <div className="text-sm font-semibold text-[var(--text-soft)]">Loading evaluation analytics...</div>
         </Card>
       ) : !hasData ? (
-        <Card className="p-8 text-center my-6 border-dashed border-2">
-          <FileText size={44} className="text-[var(--accent)] mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1">No Evaluation Data Recorded Yet</h3>
-          <p className="text-sm text-[var(--text-soft)] max-w-md mx-auto mb-5">
+        <Card className="p-12 text-center my-6 border-dashed border-2">
+          <FileText size={48} className="text-[var(--accent)] mx-auto mb-3" />
+          <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Evaluation Data Recorded Yet</h3>
+          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-5 leading-relaxed">
             You haven't completed any graded evaluations yet. Submit an exam question paper and answer script in Self-Evaluation to generate your performance analytics.
           </p>
           <Button onClick={() => navigate('/app/self-evaluation')} className="mx-auto flex items-center gap-2">
-            Run Your First Self-Evaluation <ArrowRight size={14} />
+            Run Your First Self-Evaluation <ArrowRight size={15} />
           </Button>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Executive Metrics Strip */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            <Card className="p-4 border-l-4 border-l-[var(--accent)] shadow-sm">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            <Card className="p-5 border-l-4 border-l-[var(--accent)] shadow-xs">
+              <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
                 Completed Evaluations
               </div>
-              <div className="text-[28px] font-black text-[var(--text)]">
+              <div className="text-3xl font-extrabold text-[var(--text)]">
                 {analytics.total_evaluations}
               </div>
-              <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+              <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
                 Stored in academic database
               </div>
             </Card>
 
-            <Card className="p-4 border-l-4 border-l-[var(--success)] shadow-sm">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            <Card className="p-5 border-l-4 border-l-[var(--success)] shadow-xs">
+              <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
                 Average Score
               </div>
-              <div className="text-[28px] font-black text-[var(--success)]">
+              <div className="text-3xl font-extrabold text-[var(--success)]">
                 {analytics.average_percentage}%
               </div>
-              <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+              <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
                 Mean marks: {analytics.average_marks} pts
               </div>
             </Card>
 
-            <Card className={`p-4 border-l-4 ${isImproving ? 'border-l-emerald-500' : isDeclining ? 'border-l-[var(--error)]' : 'border-l-[var(--gold)]'} shadow-sm`}>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            <Card className={`p-5 border-l-4 ${isImproving ? 'border-l-emerald-500' : isDeclining ? 'border-l-[var(--error)]' : 'border-l-[var(--gold)]'} shadow-xs`}>
+              <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
                 Improvement Trend
               </div>
-              <div className="text-[28px] font-black flex items-center gap-1">
+              <div className="text-3xl font-extrabold flex items-center gap-1.5">
                 {isImproving ? (
                   <span className="text-emerald-500 flex items-center gap-1">
-                    +{trendDelta}% <TrendingUp size={20} />
+                    +{trendDelta}% <TrendingUp size={22} />
                   </span>
                 ) : isDeclining ? (
                   <span className="text-[var(--error)] flex items-center gap-1">
-                    {trendDelta}% <TrendingDown size={20} />
+                    {trendDelta}% <TrendingDown size={22} />
                   </span>
                 ) : (
                   <span className="text-[var(--text-soft)]">Stable</span>
                 )}
               </div>
-              <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+              <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
                 {isImproving ? 'Performance improving across assessments' : isDeclining ? 'Recent score drop detected' : 'Steady score trajectory'}
               </div>
             </Card>
 
-            <Card className="p-4 border-l-4 border-l-[var(--gold)] shadow-sm">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
+            <Card className="p-5 border-l-4 border-l-[var(--gold)] shadow-xs">
+              <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
                 Flagged Misconceptions
               </div>
-              <div className="text-[28px] font-black text-[var(--gold)]">
+              <div className="text-3xl font-extrabold text-[var(--gold)]">
                 {analytics.recurring_misconceptions?.length || 0}
               </div>
-              <div className="text-[11.5px] text-[var(--text-soft)] font-medium mt-1">
+              <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
                 Requires concept practice
               </div>
             </Card>
@@ -206,8 +218,8 @@ export default function Performance() {
                 <Badge tone="accent">Exam Question Analytics</Badge>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+              <div className="overflow-x-auto scrollbar-thin">
+                <table className="w-full min-w-[560px] text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-[var(--border)] text-[var(--text-faint)] uppercase text-[11px] tracking-wider bg-[var(--surface-alt)]">
                       <th className="py-2.5 px-3">Question No.</th>
@@ -363,6 +375,7 @@ export default function Performance() {
                       onClick={(evt) => handleDeleteEvaluation(e.evaluation_id || e.id || e._id, evt)}
                       className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
                       title="Delete Evaluation Record"
+                      aria-label="Delete evaluation record"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -376,13 +389,21 @@ export default function Performance() {
 
       {/* VIEW EVALUATION MODAL (Pulls original stored evaluation result) */}
       {selectedEvalDetail && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedEvalDetail(null); }}
+        >
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="eval-detail-modal-title"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl"
+          >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-extrabold text-[var(--text)]">
+                  <h3 id="eval-detail-modal-title" className="text-base font-extrabold text-[var(--text)]">
                     Original Evaluation: {selectedEvalDetail.subject}
                   </h3>
                   <Badge tone="accent">{selectedEvalDetail.assessment_title || 'Assessment Record'}</Badge>
@@ -391,7 +412,11 @@ export default function Performance() {
                   ID: <span className="font-mono">{selectedEvalDetail.id || selectedEvalDetail._id || selectedEvalDetail.evaluation_id}</span> &bull; {selectedEvalDetail.student_name}
                 </p>
               </div>
-              <button onClick={() => setSelectedEvalDetail(null)} className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]">
+              <button 
+                onClick={() => setSelectedEvalDetail(null)} 
+                aria-label="Close evaluation details"
+                className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]"
+              >
                 <X size={18} />
               </button>
             </div>

@@ -270,31 +270,36 @@ export default function RealityLab() {
     <>
       <PageHead
         title="Knowledge-to-Reality Lab"
+        subtitle="Bridge syllabus theory with laboratory experiments, hands-on prototypes, and practical applications."
         action={
           <div className="flex items-center gap-2">
-            <Button onClick={handleGenerateAIActivity} disabled={isGenerating} size="sm" variant="outline">
-              {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} className="text-[var(--accent)]" />}
+            <Button onClick={handleGenerateAIActivity} disabled={isGenerating} size="sm" variant="secondary">
+              {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} className="text-[var(--accent)]" />}
               Generate Practical Activity
             </Button>
-            <span className="text-[12px] text-[var(--text-faint)] font-semibold">{scenarioIdx + 1}/{scenarios.length}</span>
-            <button onClick={handleNext} className="px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">Next</button>
-            <button onClick={handleRandom} className="flex items-center gap-1 px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] font-semibold text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors">
-              <Shuffle size={12} /> Random
+            <span className="text-xs text-[var(--text-faint)] font-bold px-2.5 py-1.5 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
+              {scenarioIdx + 1} / {scenarios.length}
+            </span>
+            <button onClick={handleNext} className="px-3 py-1.5 border border-[var(--border)] rounded-xl text-xs font-bold text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer">
+              Next
+            </button>
+            <button onClick={handleRandom} className="flex items-center gap-1.5 px-3 py-1.5 border border-[var(--border)] rounded-xl text-xs font-bold text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer">
+              <Shuffle size={13} /> Random
             </button>
           </div>
         }
       />
 
       {/* Validated Subject Tabs */}
-      <div className="flex gap-1.5 flex-wrap mb-4">
+      <div className="flex gap-2 flex-wrap mb-4">
         {subjects.map((sub) => (
           <button
             key={sub}
             onClick={() => switchSubject(sub)}
-            className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border transition-all ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
               activeSubject === sub
                 ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
-                : 'border-[var(--border-strong)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
+                : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
             }`}
           >
             {sub}
@@ -303,14 +308,14 @@ export default function RealityLab() {
       </div>
 
       {/* Topic/Module & Difficulty Filter Bar */}
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5 p-2 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <Layers size={14} className="text-[var(--accent)] ml-1 shrink-0" />
-          <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] shrink-0">Topic:</span>
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 p-2.5 bg-[var(--surface)] rounded-2xl border border-[var(--border)] shadow-sm">
+        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+          <Layers size={15} className="text-[var(--accent)] ml-1 shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] shrink-0">Topic:</span>
           <select
             value={activeModule}
             onChange={(e) => switchModule(e.target.value)}
-            className="px-3 py-1 rounded-lg border border-[var(--border-strong)] text-[12px] font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[320px] truncate"
+            className="px-3 py-1.5 rounded-xl border border-[var(--border)] text-xs font-semibold bg-[var(--surface-alt)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[340px] truncate"
           >
             <option value="All">All Validated Topics ({scenarios.length} activities)</option>
             {modules.map((m) => (
@@ -322,19 +327,19 @@ export default function RealityLab() {
           </select>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 bg-[var(--surface-alt)] p-1 rounded-xl border border-[var(--border)]">
           {[
             { id: 'All', label: 'All Modes' },
-            { id: 'Easy', label: '🟢 Easy' },
-            { id: 'Medium', label: '🟡 Medium' },
-            { id: 'Hard', label: '🔴 Hard' }
+            { id: 'Easy', label: 'Easy' },
+            { id: 'Medium', label: 'Medium' },
+            { id: 'Hard', label: 'Hard' }
           ].map(({ id, label }) => (
             <button
               key={id}
               onClick={() => switchDifficulty(id)}
-              className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeDifficulty === id
-                  ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                  ? 'bg-[var(--surface)] text-[var(--text)] shadow-xs'
                   : 'text-[var(--text-faint)] hover:text-[var(--text-soft)]'
               }`}
             >
@@ -344,37 +349,34 @@ export default function RealityLab() {
         </div>
       </div>
 
-      <div className="max-w-[800px] space-y-4">
+      <div className="max-w-[880px] space-y-5">
         {/* Scenario Header with Semester & Syllabus grounding */}
-        <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
-          <div className="absolute top-4 right-5 opacity-8">
-            <FlaskConical size={72} strokeWidth={1} />
-          </div>
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <Globe size={13} className="text-[var(--accent)]" />
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">
-              {scenario.real_world_connection || scenario.context || "Industry & Day-to-Day Application"}
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--accent)]">
+              <Globe size={13} />
+              {scenario.real_world_connection || scenario.context || "Industry & Practical Application"}
             </span>
-            <span className="mx-1 text-[var(--border-strong)]">·</span>
+            <span className="text-[var(--border-strong)]">·</span>
             <Badge tone={difficultyTone[scenario.difficulty] || 'accent'}>{scenario.difficulty || 'Medium'}</Badge>
             <Badge tone="accent">{scenario.semester || (activeProfile?.current_semester ? `Semester ${activeProfile.current_semester}` : 'Active Semester')}</Badge>
             <Badge tone="neutral">{scenario.subject || activeSubject}</Badge>
             {(scenario.syllabus_topic || scenario.chapter) && <Badge tone="neutral">{scenario.syllabus_topic || scenario.chapter}</Badge>}
           </div>
-          <h2 className="text-[17px] font-extrabold leading-snug max-w-[620px] mb-2">{scenario.title}</h2>
+          <h2 className="text-base sm:text-lg font-bold leading-snug text-[var(--text)] max-w-[700px] mb-2">{scenario.title}</h2>
           
           {/* Concept Being Demonstrated */}
           {(scenario.concept_being_demonstrated || scenario.practical_concept) && (
-            <p className="text-[13px] text-[var(--text-soft)] font-medium mb-1">
-              <strong className="text-[var(--text)]">Concept Demonstrated:</strong> {scenario.concept_being_demonstrated || scenario.practical_concept}
+            <p className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium mb-1.5 leading-relaxed">
+              <strong className="text-[var(--text)] font-semibold">Concept Demonstrated:</strong> {scenario.concept_being_demonstrated || scenario.practical_concept}
             </p>
           )}
 
           {/* Objective */}
           {(scenario.objective || scenario.learning_outcome) && (
-            <div className="flex items-start gap-2 mt-2 pt-2 border-t border-[var(--border)] text-[12.5px] text-[var(--text-soft)]">
-              <Target size={14} className="text-[var(--accent)] shrink-0 mt-0.5" />
-              <span><strong className="text-[var(--text)]">Objective:</strong> {scenario.objective || scenario.learning_outcome}</span>
+            <div className="flex items-start gap-2.5 mt-3 pt-3 border-t border-[var(--border)] text-sm text-[var(--text-soft)]">
+              <Target size={15} className="text-[var(--accent)] shrink-0 mt-0.5" />
+              <span className="leading-relaxed"><strong className="text-[var(--text)] font-semibold">Objective:</strong> {scenario.objective || scenario.learning_outcome}</span>
             </div>
           )}
         </div>
@@ -382,11 +384,11 @@ export default function RealityLab() {
         {/* Unsupported purely theoretical topic fallback */}
         {scenario.is_supported === false ? (
           <Card>
-            <div className="p-4 bg-[var(--surface-alt)] border border-[var(--warning)] rounded-xl text-center">
-              <p className="text-[13.5px] font-semibold text-[var(--text)] mb-2">
+            <div className="p-6 bg-[var(--surface-alt)] border border-[var(--warning)] rounded-2xl text-center">
+              <p className="text-sm font-bold text-[var(--text)] mb-2">
                 ⚠️ {scenario.unsupported_message || "No suitable practical activity is defined for this specific theoretical topic in the uploaded syllabus."}
               </p>
-              <p className="text-[12px] text-[var(--text-faint)] mb-4">
+              <p className="text-xs text-[var(--text-faint)] mb-4 leading-relaxed">
                 Please select an applied engineering module or a practical/laboratory course from your Semester curriculum.
               </p>
               <Button onClick={handleNext}>Explore Next Module Activity</Button>
@@ -396,33 +398,33 @@ export default function RealityLab() {
           <>
             {/* Practical Activity Blueprint Card with all 11 required pedagogical fields */}
             <Card>
-              <div className="flex items-center gap-2 mb-3">
-                <BookOpen size={16} className="text-[var(--accent)]" />
-                <h3 className="text-[13px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
+              <div className="flex items-center gap-2 mb-4">
+                <BookOpen size={17} className="text-[var(--accent)]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">
                   Practical Activity Blueprint
                 </h3>
               </div>
 
               {/* Materials & Procedure */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mb-4 text-[12.5px]">
-                <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
-                  <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
-                    <Wrench size={13} />
-                    <span>Materials & Tools (Day-to-Day / Local):</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 text-sm">
+                <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)]">
+                  <div className="flex items-center gap-2 font-bold text-[var(--accent)] mb-2 text-xs uppercase tracking-wider">
+                    <Wrench size={14} />
+                    <span>Materials & Tools</span>
                   </div>
-                  <ul className="list-disc list-inside space-y-1 text-[var(--text-soft)]">
+                  <ul className="list-disc list-inside space-y-1.5 text-xs text-[var(--text-soft)] leading-relaxed">
                     {(scenario.materials || ["Standard Engineering Tool / Safe Simulation Sandbox"]).map((m, i) => (
                       <li key={i}>{m}</li>
                     ))}
                   </ul>
                 </div>
 
-                <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)]">
-                  <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
-                    <ListOrdered size={13} />
-                    <span>Step-by-Step Procedure:</span>
+                <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)]">
+                  <div className="flex items-center gap-2 font-bold text-[var(--accent)] mb-2 text-xs uppercase tracking-wider">
+                    <ListOrdered size={14} />
+                    <span>Step-by-Step Procedure</span>
                   </div>
-                  <ul className="list-decimal list-inside space-y-1 text-[var(--text-soft)]">
+                  <ul className="list-decimal list-inside space-y-1.5 text-xs text-[var(--text-soft)] leading-relaxed">
                     {(scenario.steps || scenario.procedure || ["Step 1: Configure testbed", "Step 2: Measure metrics"]).map((p, i) => (
                       <li key={i}>{p}</li>
                     ))}
@@ -431,11 +433,11 @@ export default function RealityLab() {
               </div>
 
               {/* Expected Observation & Explanation */}
-              <div className="space-y-2.5 text-[12.5px]">
+              <div className="space-y-3 text-sm">
                 {(scenario.expected_observation || scenario.observation) && (
-                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                    <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
-                      <Microscope size={13} className="text-[var(--accent)]" />
+                  <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed">
+                    <div className="flex items-center gap-2 font-bold text-[var(--text)] mb-1">
+                      <Microscope size={14} className="text-[var(--accent)]" />
                       <span>Expected Observation:</span>
                     </div>
                     {scenario.expected_observation || scenario.observation}
@@ -443,9 +445,9 @@ export default function RealityLab() {
                 )}
 
                 {(scenario.explanation || scenario.theory_connection) && (
-                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                    <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
-                      <Lightbulb size={13} className="text-[var(--accent)]" />
+                  <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed">
+                    <div className="flex items-center gap-2 font-bold text-[var(--text)] mb-1">
+                      <Lightbulb size={14} className="text-[var(--accent)]" />
                       <span>Scientific & Theoretical Explanation:</span>
                     </div>
                     {scenario.explanation || scenario.theory_connection}
@@ -454,10 +456,10 @@ export default function RealityLab() {
 
                 {/* Safety Considerations Banner */}
                 {(scenario.safety_considerations || scenario.safety_warnings) && (
-                  <div className="p-3 rounded-lg bg-[var(--warning-soft)] border border-[var(--warning)] text-[12px] text-[var(--text)]">
-                    <div className="flex items-center gap-1.5 font-bold text-[var(--warning-strong)] mb-1">
-                      <AlertTriangle size={14} className="text-[var(--warning)]" />
-                      <span>Safety Considerations & Hazard Precautions:</span>
+                  <div className="p-3.5 rounded-xl bg-[var(--warning-soft)] border border-[var(--warning)] text-xs text-[var(--text)]">
+                    <div className="flex items-center gap-2 font-bold text-[var(--warning-strong)] mb-1">
+                      <AlertTriangle size={15} className="text-[var(--warning)]" />
+                      <span>Safety Considerations & Precautions:</span>
                     </div>
                     <p className="leading-relaxed text-[var(--text-soft)]">
                       {scenario.safety_considerations || scenario.safety_warnings}
@@ -467,12 +469,12 @@ export default function RealityLab() {
 
                 {/* Questions to Test Understanding */}
                 {Array.isArray(scenario.questions_to_test_understanding) && scenario.questions_to_test_understanding.length > 0 && (
-                  <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px]">
-                    <div className="flex items-center gap-1.5 font-bold text-[var(--accent)] mb-1.5">
-                      <HelpCircle size={14} />
+                  <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                    <div className="flex items-center gap-2 font-bold text-[var(--accent)] mb-2">
+                      <HelpCircle size={15} />
                       <span>Questions to Test Understanding:</span>
                     </div>
-                    <ul className="list-disc list-inside space-y-1 text-[var(--text-soft)]">
+                    <ul className="list-disc list-inside space-y-1 text-[var(--text-soft)] leading-relaxed">
                       {scenario.questions_to_test_understanding.map((q, i) => (
                         <li key={i}>{q}</li>
                       ))}
@@ -482,9 +484,9 @@ export default function RealityLab() {
 
                 {/* Exam Relevance */}
                 {scenario.exam_relevance && (
-                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] text-[var(--text-soft)]">
+                  <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)]">
                     <div className="flex items-center gap-1.5 font-bold text-[var(--text)] mb-0.5">
-                      <FileText size={13} className="text-[var(--accent)]" />
+                      <FileText size={14} className="text-[var(--accent)]" />
                       <span>Exam Relevance:</span>
                     </div>
                     {scenario.exam_relevance}
@@ -496,7 +498,7 @@ export default function RealityLab() {
             {!result && !showAnswer ? (
               <>
                 <Card>
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">
                     {scenario.task ? `Challenge Task: ${scenario.task}` : 'Your Practical Explanation / Solution'}
                   </div>
                   <textarea
@@ -505,14 +507,14 @@ export default function RealityLab() {
                     placeholder="Explain this practical activity using academic concepts, formulas, and experimental reasoning from your validated semester syllabus…"
                     rows={5}
                     disabled={isEvaluating}
-                    className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
+                    className="w-full border border-[var(--border)] rounded-xl px-4 py-3 text-sm bg-[var(--surface-alt)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
                   />
-                  <div className="flex items-center justify-between mt-3">
+                  <div className="flex items-center justify-between mt-3.5">
                     <button
                       onClick={() => setShowAnswer(true)}
-                      className="flex items-center gap-1.5 text-[12px] text-[var(--text-faint)] hover:text-[var(--text-soft)] transition-colors font-semibold"
+                      className="flex items-center gap-1.5 text-xs text-[var(--text-faint)] hover:text-[var(--text-soft)] transition-colors font-semibold"
                     >
-                      <Eye size={13} /> Show model solution directly
+                      <Eye size={14} /> Show model solution directly
                     </button>
                     <Button onClick={handleAnalyse} disabled={!answer.trim() || isEvaluating}>
                       {isEvaluating ? <><Loader2 size={14} className="animate-spin" /> Evaluating with AI...</> : 'Analyse My Practical Solution'}
@@ -521,10 +523,10 @@ export default function RealityLab() {
                 </Card>
 
                 <Card>
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Key Concepts Tested</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">Key Concepts Tested</div>
                   <div className="flex flex-wrap gap-2">
                     {(scenario.expectedConcepts || []).map((c, i) => (
-                      <span key={i} className={`px-2.5 py-1 rounded-full text-[11.5px] font-semibold border ${
+                      <span key={i} className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
                         c.required
                           ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent-soft-strong)]'
                           : 'bg-[var(--surface-alt)] text-[var(--text-soft)] border-[var(--border)]'
@@ -538,14 +540,14 @@ export default function RealityLab() {
             ) : showAnswer && !result ? (
               <Card>
                 <div className="flex items-center gap-2 mb-4">
-                  <BookOpen size={15} className="text-[var(--accent)]" />
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--accent)]">Model Practical Solution</div>
+                  <BookOpen size={16} className="text-[var(--accent)]" />
+                  <div className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">Model Practical Solution</div>
                 </div>
-                <div className="text-[13.5px] leading-relaxed mb-5">{scenario.model_answer || scenario.modelAnswer}</div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Key concepts covered</div>
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="text-sm leading-relaxed mb-5 text-[var(--text)]">{scenario.model_answer || scenario.modelAnswer}</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2.5">Key concepts covered</div>
+                <div className="flex flex-wrap gap-2 mb-5">
                   {(scenario.expectedConcepts || []).filter(c => c.required).map((c, i) => (
-                    <span key={i} className="px-2.5 py-1 rounded-full text-[11.5px] font-semibold border bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent-soft-strong)]">
+                    <span key={i} className="px-3 py-1.5 rounded-full text-xs font-semibold border bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent-soft-strong)]">
                       {c.concept}
                     </span>
                   ))}
@@ -557,42 +559,42 @@ export default function RealityLab() {
                 <Card>
                   <QualityMeter pct={result.qualityPct} />
                   {result.feedback && (
-                    <div className="p-3 mb-4 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)]">
+                    <div className="p-4 mb-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed">
                       <span className="font-bold text-[var(--accent)] block mb-1">AI Evaluation & Engineering Assessment</span>
                       {result.feedback}
                     </div>
                   )}
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">Concept coverage</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-3">Concept coverage</div>
                   <div className="space-y-2 mb-5">
                     {result.concepts.map((c, i) => (
-                      <div key={i} className={`flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg border ${
+                      <div key={i} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
                         c.covered ? 'border-[var(--border)] bg-[var(--success-soft)]' : 'border-[var(--border)] bg-[var(--surface-alt)]'
                       }`}>
                         {c.covered
-                          ? <CheckCircle2 size={15} className="text-[var(--success)] shrink-0 mt-px" />
-                          : <XCircle size={15} className="text-[var(--error)] shrink-0 mt-px" />
+                          ? <CheckCircle2 size={16} className="text-[var(--success)] shrink-0 mt-0.5" />
+                          : <XCircle size={16} className="text-[var(--error)] shrink-0 mt-0.5" />
                         }
                         <div className="flex-1 min-w-0">
-                          <span className="text-[13px] font-semibold">{c.concept}</span>
-                          {!c.required && <span className="ml-2 text-[10.5px] text-[var(--text-faint)] font-medium">bonus</span>}
+                          <span className="text-xs font-semibold text-[var(--text)]">{c.concept}</span>
+                          {!c.required && <span className="ml-2 text-[10px] text-[var(--text-faint)] font-bold uppercase tracking-wider">bonus</span>}
                         </div>
                       </div>
                     ))}
                   </div>
 
-                  <div className="bg-[var(--surface-alt)] rounded-lg p-3.5 mb-4">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Your submitted solution</div>
-                    <div className="text-[13px] leading-relaxed text-[var(--text-soft)]">{answer}</div>
+                  <div className="bg-[var(--surface-alt)] rounded-xl p-4 mb-4 border border-[var(--border)]">
+                    <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Your submitted solution</div>
+                    <div className="text-xs leading-relaxed text-[var(--text-soft)]">{answer}</div>
                   </div>
 
                   {!showModel ? (
-                    <button onClick={() => setShowModel(true)} className="text-[12.5px] font-semibold text-[var(--accent)] hover:opacity-70 transition-opacity">
+                    <button onClick={() => setShowModel(true)} className="text-xs font-semibold text-[var(--accent)] hover:opacity-75 transition-opacity">
                       Show full engineering model answer →
                     </button>
                   ) : (
-                    <div className="border border-[var(--border)] rounded-lg p-3.5">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Model engineering solution</div>
-                      <div className="text-[13.5px] leading-relaxed">{scenario.model_answer || scenario.modelAnswer}</div>
+                    <div className="border border-[var(--border)] rounded-xl p-4 bg-[var(--surface)]">
+                      <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1.5">Model engineering solution</div>
+                      <div className="text-xs leading-relaxed text-[var(--text)]">{scenario.model_answer || scenario.modelAnswer}</div>
                     </div>
                   )}
                 </Card>

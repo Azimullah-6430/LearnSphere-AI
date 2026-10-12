@@ -1,29 +1,37 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardHeader, Badge, Button } from '../components/ui/Primitives.jsx'
-import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
+import { useApp } from '../context/AppContext.jsx'
+import { Card, CardHeader, Badge, Button, StatCard } from '../components/ui/Primitives.jsx'
 import {
-  Sparkles,
-  FileText,
-  ArrowRight,
-  AlertCircle,
-  RefreshCw,
-  BookOpen,
   Brain,
-  Microscope,
-  Trophy,
-  Flame,
-  Clock,
+  FileText,
   TrendingUp,
-  Award,
+  Clock,
   CheckCircle2,
   ChevronRight,
   ShieldCheck,
   Building2,
   UserCheck,
-  Layers,
-  GraduationCap
+  GraduationCap,
+  Zap,
+  Map,
+  Compass,
+  Microscope,
+  Trophy,
+  Flame,
+  CircleChevronUp,
+  ArrowRight,
+  FileCheck,
+  AlertCircle,
+  RefreshCw,
+  BookOpen,
+  Users,
+  Timer,
+  Globe,
+  PlusCircle,
+  BarChart3,
+  Sparkles
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -45,15 +53,15 @@ export default function Dashboard() {
 function DashboardLoadingSkeleton() {
   return (
     <div className="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading dashboard data">
-      <div className="h-28 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
+      <div className="h-32 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="h-24 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-28 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
         ))}
       </div>
-      <div className="grid md:grid-cols-[1.6fr_1fr] gap-4">
-        <div className="h-72 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
-        <div className="h-72 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]" />
+      <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">
+        <div className="h-80 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
+        <div className="h-80 bg-[var(--surface-alt)] rounded-2xl border border-[var(--border)]" />
       </div>
     </div>
   )
@@ -62,11 +70,11 @@ function DashboardLoadingSkeleton() {
 function UnauthenticatedState() {
   const navigate = useNavigate()
   return (
-    <Card className="p-10 text-center my-10 max-w-md mx-auto shadow-sm">
+    <Card className="p-8 sm:p-10 text-center my-12 max-w-md mx-auto shadow-sm">
       <AlertCircle size={40} className="text-[var(--warning)] mx-auto mb-3" />
-      <h2 className="text-xl font-bold mb-2">Session Required</h2>
+      <h2 className="text-xl font-bold mb-2 text-[var(--text)]">Session Required</h2>
       <p className="text-sm text-[var(--text-soft)] mb-6">
-        Please sign in to access your learning dashboard.
+        Please sign in to access your personalized learning dashboard.
       </p>
       <Button onClick={() => navigate('/')} className="w-full">
         Sign In to LearnSphere
@@ -83,37 +91,25 @@ function StudentDashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  
-  const activeUserIdRef = useRef(user?.id || user?._id || user?.email)
 
   useEffect(() => {
-    const currentUserId = user?.id || user?._id || user?.email
-    activeUserIdRef.current = currentUserId
-    
     async function loadStudentDashboard() {
       setLoading(true)
-      setError(null)
-
       try {
         const res = await api.getDashboardAnalytics('student', user?.name || '')
-        if (activeUserIdRef.current !== currentUserId) return
-
         if (res && res.success) {
           setData(res)
         } else {
-          setError(res?.error || 'Failed to load dashboard data.')
+          setData({ recentEvaluations: [] })
         }
       } catch (err) {
-        if (activeUserIdRef.current === currentUserId) {
-          setError(err?.message || 'Unable to connect to the server.')
-        }
+        console.warn('Student dashboard load notice:', err)
+        setError('Could not connect to cloud records. Operating in local mode.')
+        setData({ recentEvaluations: [] })
       } finally {
-        if (activeUserIdRef.current === currentUserId) {
-          setLoading(false)
-        }
+        setLoading(false)
       }
     }
-
     if (user) {
       loadStudentDashboard()
     }
@@ -149,7 +145,7 @@ function StudentDashboard() {
       <div className="py-8">
         <Card className="p-8 text-center max-w-lg mx-auto border-[var(--error)] shadow-sm">
           <AlertCircle size={36} className="text-[var(--error)] mx-auto mb-3" />
-          <h2 className="text-lg font-bold mb-1">Error Loading Dashboard</h2>
+          <h2 className="text-xl font-bold mb-1 text-[var(--text)]">Error Loading Dashboard</h2>
           <p className="text-sm text-[var(--text-soft)] mb-5">{error}</p>
           <Button onClick={() => window.location.reload()} className="mx-auto flex items-center gap-2">
             <RefreshCw size={14} /> Retry Connection
@@ -160,236 +156,308 @@ function StudentDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Executive Welcome Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--border)] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] flex items-center gap-1.5">
+    <div className="space-y-6 sm:space-y-8">
+      {/* Executive Student Header Banner */}
+      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-7 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
                 <GraduationCap size={13} /> {academicBadge}
               </span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
-                <Flame size={13} className="text-amber-500" /> {streakDays || 1} Day Streak
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
+                <Flame size={13} className="text-amber-500 shrink-0" strokeWidth={1.8} /> 🔥 {streakDays || 1} {streakDays === 1 ? 'Day' : 'Days'}
               </span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                <Clock size={13} /> Session: {formattedSessionTime || '0m'}
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
+                <CircleChevronUp size={13} className="text-emerald-500 shrink-0" strokeWidth={2} /> ⏱️ {formattedSessionTime || '0s'} (Active)
               </span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text)]">
+
+            <h1 className="text-xl sm:text-2xl md:text-[26px] font-bold tracking-tight text-[var(--text)]">
               Welcome back, {user?.name || 'Student'}
             </h1>
-            <p className="text-xs md:text-sm text-[var(--text-soft)] mt-1 font-medium">
-              {user?.institution_name || user?.school || user?.college || 'LearnSphere AI'}
+            <p className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium">
+              {user?.institution_name || user?.school || user?.college || 'LearnSphere Academic Network'}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2 shadow-sm">
-              <BookOpen size={15} /> Self-Evaluation
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2 shadow-xs">
+              <FileCheck size={16} /> Self-Evaluation
             </Button>
             <Button variant="secondary" onClick={() => navigate('/app/trainer')} className="flex items-center gap-2">
-              <Brain size={15} /> AI Tutor
+              <Brain size={16} /> Personal Trainer
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* Recommended Next Action Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[var(--accent-soft)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--accent)]/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5">
+          <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-0.5">
+              Recommended Next Action
+            </div>
+            <div className="text-xs sm:text-sm font-bold text-[var(--text)]">
+              {!hasEvaluations
+                ? 'Upload and grade your handwritten exam script'
+                : 'Master concepts with the Syllabus-Aligned AI Tutor'}
+            </div>
+            <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">
+              {!hasEvaluations
+                ? 'Use computer vision to evaluate your paper against marking schemes and diagnose knowledge gaps.'
+                : 'Get step-by-step Feynman explanations, derivations, and practice questions for your subjects.'}
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate(!hasEvaluations ? '/app/self-evaluation' : '/app/trainer')}
+          className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-all font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0 shadow-xs cursor-pointer"
+        >
+          <span>{!hasEvaluations ? 'Start First Evaluation' : 'Resume AI Tutoring'}</span>
+          <ArrowRight size={15} />
+        </button>
       </div>
 
       {/* College Semester Incomplete Notice */}
       {isCollege && !hasCollegeSemester && (
-        <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-4">
+        <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <AlertCircle size={20} className="text-amber-600 shrink-0" />
-            <div className="text-xs font-bold text-amber-900 dark:text-amber-300">
-              Please set your current semester in Settings to align curriculum subjects and assessments.
+            <div className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+              Please configure your current semester in Settings to synchronize your course syllabus.
             </div>
           </div>
           <Button size="sm" onClick={() => navigate('/app/settings')} className="shrink-0">
-            Configure Semester
+            Set Semester
           </Button>
         </div>
       )}
 
-      {/* Metric Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Evaluations</span>
-            <FileText size={16} className="text-[var(--accent)]" />
-          </div>
-          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-            {loading ? '...' : recentEvals.length}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1 flex items-center gap-1">
-            <CheckCircle2 size={12} className="text-[var(--success)]" /> Completed assessments
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Mastery Average</span>
-            <TrendingUp size={16} className="text-emerald-500" />
-          </div>
-          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-            {loading ? '...' : (avgScore !== null ? `${avgScore}%` : '—')}
-          </div>
-          <div className="text-xs font-semibold mt-1">
-            {avgScore !== null ? (
-              <span className={avgScore >= 75 ? 'text-[var(--success)]' : avgScore >= 50 ? 'text-[var(--warning)]' : 'text-[var(--error)]'}>
-                {avgScore >= 75 ? 'Distinction Tier' : avgScore >= 50 ? 'Passing Tier' : 'Needs Practice'}
-              </span>
-            ) : (
-              <span className="text-[var(--text-faint)]">Awaiting first test</span>
-            )}
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Daily Streak</span>
-            <Flame size={16} className="text-amber-500" />
-          </div>
-          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-            {streakDays || 1} <span className="text-base font-medium text-[var(--text-soft)]">{streakDays === 1 ? 'day' : 'days'}</span>
-          </div>
-          <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-            Active daily study
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Academic Status</span>
-            <ShieldCheck size={16} className="text-[var(--accent)]" />
-          </div>
-          <div className="text-lg lg:text-xl font-extrabold text-[var(--text)] truncate">
-            {isCollege ? (user?.degree || 'Undergraduate') : (user?.board ? `${user.board}` : 'Enrolled')}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1 truncate">
-            {isCollege ? (user?.department || 'Active Semester') : `Class ${user?.grade_level || user?.classLevel || '—'}`}
-          </div>
-        </div>
+      {/* Metric Cards Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
+        <StatCard
+          label="Evaluations"
+          value={loading ? '…' : recentEvals.length}
+          delta="Graded answer scripts"
+          deltaTone="up"
+          icon={FileText}
+        />
+        <StatCard
+          label="Mastery Average"
+          value={loading ? '…' : avgScore !== null ? `${avgScore}%` : '—'}
+          delta={avgScore !== null ? (avgScore >= 75 ? 'Distinction Tier' : avgScore >= 50 ? 'Passing Tier' : 'Needs Revision') : 'Awaiting first test'}
+          deltaTone={avgScore >= 75 ? 'up' : avgScore >= 50 ? 'neutral' : 'down'}
+          icon={TrendingUp}
+        />
+        <StatCard
+          label="Study Streak"
+          value={`${streakDays || 1} d`}
+          delta="Consecutive learning"
+          deltaTone="up"
+          icon={Flame}
+        />
+        <StatCard
+          label="Academic Level"
+          value={isCollege ? (user?.degree || 'Undergrad') : (user?.board || 'School')}
+          delta={isCollege ? (user?.department || 'Degree') : `Class ${user?.grade_level || user?.classLevel || '12'}`}
+          deltaTone="neutral"
+          icon={ShieldCheck}
+        />
       </div>
 
-      {/* Main Grid: Graded Scripts + Quick Launch */}
-      <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">
-        {/* Left Column: Recent Graded Evaluations */}
-        <Card className="shadow-sm">
-          <CardHeader
-            title="Recent Evaluated Papers"
-            action={
-              <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
-                View all <ChevronRight size={13} className="ml-1" />
-              </Button>
-            }
-          />
-
-          {loading ? (
-            <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
-              Loading evaluations...
-            </div>
-          ) : !hasEvaluations ? (
-            <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-xl p-6">
-              <FileText size={36} className="text-[var(--accent)] mx-auto mb-2.5 opacity-70" />
-              <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Papers Found</div>
-              <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4">
-                Submit a Question Paper and Answer Script to view instant detailed grading and feedback.
-              </p>
-              <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto">
-                Start Self-Evaluation
-              </Button>
-            </div>
-          ) : (
-            <div className="divide-y divide-[var(--border)]">
-              {recentEvals.slice(0, 5).map((e, idx) => {
-                const pct = Number(e.percentage) || 0
-                return (
-                  <div
-                    key={e.id || e._id || idx}
-                    onClick={() => navigate('/app/history')}
-                    className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2 rounded-lg cursor-pointer transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs md:text-sm font-bold text-[var(--text)] truncate">
-                        {e.subject || 'Subject'}
-                      </div>
-                      <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
-                        {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
-                      </div>
-                    </div>
-                    <div className="shrink-0 flex items-center gap-2">
-                      <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
-                        {pct}% {e.grade ? `(${e.grade})` : ''}
-                      </Badge>
-                      <ChevronRight size={14} className="text-[var(--text-faint)]" />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </Card>
-
-        {/* Right Column: Learning Hub Modules */}
-        <div className="space-y-4">
-          <Card className="shadow-sm">
-            <CardHeader title="Learning Modules" />
-            <div className="grid grid-cols-2 gap-3">
+      {/* Main Grid: Interactive Learning Studios + Recent Evaluated Papers */}
+      <div className="grid lg:grid-cols-[1.55fr_1fr] gap-6">
+        {/* Left Column: Interactive AI Learning Studios */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Interactive AI Learning Studios"
+              subtitle="Syllabus-aligned adaptive learning and experiential practice engines"
+            />
+            <div className="grid sm:grid-cols-2 gap-4">
               <button
                 onClick={() => navigate('/app/trainer')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <Brain size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">AI Academic Tutor</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Syllabus Coaching</div>
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Brain size={20} className="text-[var(--accent)]" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Personal AI Trainer</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Conversational tutor with step-by-step Feynman derivations and syllabus mastery.
+                </div>
+              </button>
+
+              <button
+                onClick={() => navigate('/app/learn-anywhere')}
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Compass size={20} className="text-teal-600 dark:text-teal-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Learn from Anywhere</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Low-resource experiential learning using everyday local materials and household items.
+                </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/reality-lab')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <Microscope size={20} className="text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Reality Lab</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Practical Scenarios</div>
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Microscope size={20} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Reality Lab</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Virtual science simulations and interactive hypothesis testing environments.
+                </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/knowledge-challenge')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <Trophy size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Knowledge Challenge</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Module Drills</div>
-              </button>
-
-              <button
-                onClick={() => navigate('/app/self-evaluation')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
-              >
-                <BookOpen size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Self-Evaluation</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Grade Script</div>
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Trophy size={20} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Knowledge Challenge</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Adaptive syllabus quizzes and timed speed drills for exam preparation.
+                </div>
               </button>
             </div>
           </Card>
 
-          {/* Account Profile Summary */}
-          <Card className="p-4 shadow-sm">
-            <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
-              Profile Summary
+          {/* Productivity & Review Hub */}
+          <div className="grid sm:grid-cols-3 gap-3.5">
+            <button
+              onClick={() => navigate('/app/focus')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <Timer size={18} className="text-[var(--accent)]" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Timer</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Focus Session</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">Pomodoro & Audio</div>
+            </button>
+
+            <button
+              onClick={() => navigate('/app/memory')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <BookOpen size={18} className="text-teal-600" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Recall</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Academic Memory</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">Spaced Flashcards</div>
+            </button>
+
+            <button
+              onClick={() => navigate('/app/opportunities')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <Globe size={18} className="text-amber-600" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Feeds</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Opportunities</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">Contests & News</div>
+            </button>
+          </div>
+        </div>
+
+        {/* Right Column: Recent Evaluated Papers */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Recent Evaluated Papers"
+              subtitle="Verified scores and diagnostic breakdown"
+              action={
+                <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
+                  View all <ChevronRight size={14} className="ml-1" />
+                </Button>
+              }
+            />
+
+            {loading ? (
+              <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+                Loading recent evaluation records…
+              </div>
+            ) : !hasEvaluations ? (
+              <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-2xl p-6 bg-[var(--surface-alt)]/30">
+                <FileText size={38} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
+                <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Papers Found</div>
+                <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
+                  Upload a Question Paper and your Handwritten Answer Script in Self-Evaluation for instant step-by-step grading.
+                </p>
+                <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto text-xs">
+                  Start First Evaluation
+                </Button>
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border)]">
+                {recentEvals.slice(0, 5).map((e, idx) => {
+                  const pct = Number(e.percentage) || 0
+                  return (
+                    <div
+                      key={e.id || e._id || idx}
+                      onClick={() => navigate('/app/history')}
+                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2.5 rounded-xl cursor-pointer transition-colors"
+                    >
+                      <div className="min-w-0 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
+                          <FileText size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-[var(--text)] truncate">
+                            {e.subject || 'Subject'}
+                          </div>
+                          <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                            {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
+                          {pct}%
+                        </Badge>
+                        <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
+          {/* Academic Profile Tile */}
+          <Card className="p-4 sm:p-5">
+            <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+              Student Profile Verification
             </div>
             <div className="text-xs space-y-2 text-[var(--text-soft)]">
-              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
                 <span>Account Name</span>
                 <span className="font-bold text-[var(--text)]">{user?.name}</span>
               </div>
-              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
                 <span>Email ID</span>
-                <span className="font-bold text-[var(--text)]">{user?.email}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">{user?.email}</span>
               </div>
-              <div className="flex justify-between items-center py-1">
+              <div className="flex justify-between items-center py-1.5">
                 <span>Institution</span>
-                <span className="font-bold text-[var(--text)]">{user?.institution_name || user?.school || user?.college || 'Configured'}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">
+                  {user?.institution_name || user?.school || user?.college || 'Registered'}
+                </span>
               </div>
             </div>
           </Card>
@@ -414,9 +482,12 @@ function TeacherDashboard() {
         const res = await api.getDashboardAnalytics('teacher', user?.name || '')
         if (res && res.success) {
           setData(res)
+        } else {
+          setData({ recentEvaluations: [] })
         }
       } catch (err) {
         console.warn('Teacher analytics load notice:', err)
+        setData({ recentEvaluations: [] })
       } finally {
         setLoading(false)
       }
@@ -430,213 +501,261 @@ function TeacherDashboard() {
   const hasEvaluations = recentEvals.length > 0
   const isCollege = user?.level === 'college' || user?.teacher_level === 'college'
 
-  const activeStudents = Array.from(new Set(recentEvals.map(e => e.student_name).filter(Boolean)))
+  const activeStudents = Array.from(new Set(recentEvals.map((e) => e.student_name).filter(Boolean)))
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 sm:space-y-8">
       {/* Executive Teacher Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--border)] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] flex items-center gap-1.5">
+      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-7 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
                 <Building2 size={13} /> {isCollege ? 'Higher Education Faculty' : 'School Educator'}
               </span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1.5">
                 <UserCheck size={13} /> Faculty Verified
               </span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text)]">
+
+            <h1 className="text-xl sm:text-2xl md:text-[26px] font-bold tracking-tight text-[var(--text)]">
               Welcome, {user?.name || 'Faculty'}
             </h1>
-            <p className="text-xs md:text-sm text-[var(--text-soft)] mt-1 font-medium">
-              {user?.institution_name || 'LearnSphere Academic Portal'} · {isCollege ? (user?.department || 'Department') : (user?.board || 'Board')}
+            <p className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium">
+              {user?.institution_name || 'LearnSphere Academic Network'} · {isCollege ? (user?.department || 'Department') : (user?.board || 'Board')}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <Button onClick={() => navigate('/app/evaluate')} className="flex items-center gap-2 shadow-sm">
-              <FileText size={15} /> Evaluate Script
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <Button onClick={() => navigate('/app/evaluate')} className="flex items-center gap-2 shadow-xs">
+              <FileText size={16} /> Evaluate Script
             </Button>
             <Button variant="secondary" onClick={() => navigate('/app/action-center')} className="flex items-center gap-2">
-              <Layers size={15} /> Action Center
+              <Zap size={16} /> Action Center
             </Button>
           </div>
         </div>
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Evaluations Graded</span>
-            <FileText size={16} className="text-[var(--accent)]" />
-          </div>
-          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-            {loading ? '...' : recentEvals.length}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
-            Stored evaluation records
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Active Students</span>
-            <UserCheck size={16} className="text-emerald-500" />
-          </div>
-          <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-            {loading ? '...' : activeStudents.length}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
-            Graded student roster
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Department / Level</span>
-            <Building2 size={16} className="text-[var(--accent)]" />
-          </div>
-          <div className="text-base lg:text-lg font-extrabold text-[var(--text)] truncate">
-            {isCollege ? (user?.department || 'Higher Ed') : (user?.board || 'School')}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
-            Institutional branch
-          </div>
-        </div>
-
-        <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-sm hover:border-[var(--accent)] transition-all">
-          <div className="flex items-center justify-between text-xs text-[var(--text-faint)] font-bold mb-2">
-            <span>Institution</span>
-            <ShieldCheck size={16} className="text-amber-500" />
-          </div>
-          <div className="text-base lg:text-lg font-extrabold text-[var(--text)] truncate">
-            {user?.institution_name || 'LearnSphere AI'}
-          </div>
-          <div className="text-xs font-semibold text-[var(--text-soft)] mt-1">
-            Authoritative portal
-          </div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
+        <StatCard
+          label="Evaluations Graded"
+          value={loading ? '…' : recentEvals.length}
+          delta="Stored answer scripts"
+          deltaTone="up"
+          icon={FileText}
+        />
+        <StatCard
+          label="Active Students"
+          value={loading ? '…' : activeStudents.length}
+          delta="Graded student roster"
+          deltaTone="up"
+          icon={UserCheck}
+        />
+        <StatCard
+          label="Department / Level"
+          value={isCollege ? (user?.department || 'Higher Ed') : (user?.board || 'School')}
+          delta="Institutional branch"
+          deltaTone="neutral"
+          icon={Building2}
+        />
+        <StatCard
+          label="Institution"
+          value={user?.institution_name ? user.institution_name.slice(0, 16) : 'LearnSphere'}
+          delta="Verified faculty portal"
+          deltaTone="neutral"
+          icon={ShieldCheck}
+        />
       </div>
 
-      {/* Main Grid: Evaluation Roster + Quick Tools */}
-      <div className="grid lg:grid-cols-[1.6fr_1fr] gap-6">
-        <Card className="shadow-sm">
-          <CardHeader
-            title="Recent Student Evaluations"
-            action={
-              <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
-                View all <ChevronRight size={13} className="ml-1" />
-              </Button>
-            }
-          />
-
-          {loading ? (
-            <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
-              Loading student evaluations...
-            </div>
-          ) : !hasEvaluations ? (
-            <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-xl p-6">
-              <FileText size={36} className="text-[var(--accent)] mx-auto mb-2.5 opacity-70" />
-              <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Scripts Yet</div>
-              <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4">
-                Upload Question Papers and Student Answer Scripts in Evaluate to generate question-level marks and misconception analysis.
-              </p>
-              <Button size="sm" onClick={() => navigate('/app/evaluate')} className="mx-auto">
-                Evaluate Answer Script
-              </Button>
-            </div>
-          ) : (
-            <div className="divide-y divide-[var(--border)]">
-              {recentEvals.slice(0, 5).map((e, idx) => {
-                const pct = Number(e.percentage) || 0
-                return (
-                  <div
-                    key={e.id || e._id || idx}
-                    onClick={() => navigate('/app/history')}
-                    className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2 rounded-lg cursor-pointer transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs md:text-sm font-bold text-[var(--text)] truncate">
-                        {e.student_name || 'Student'} — {e.subject || 'Subject'}
-                      </div>
-                      <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
-                        {e.assessment_title || 'Exam'} · {e.created_at || 'Recently'}
-                      </div>
-                    </div>
-                    <div className="shrink-0 flex items-center gap-2">
-                      <Badge tone={pct >= 75 ? 'success' : 'warning'}>
-                        {pct}%
-                      </Badge>
-                      <ChevronRight size={14} className="text-[var(--text-faint)]" />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </Card>
-
-        {/* Right Tools Column */}
-        <div className="space-y-4">
-          <Card className="shadow-sm">
-            <CardHeader title="Faculty Tools" />
-            <div className="grid grid-cols-2 gap-3">
+      {/* Main Grid: Teaching Workflow Tools + Evaluation Roster */}
+      <div className="grid lg:grid-cols-[1.55fr_1fr] gap-6">
+        {/* Left Column: Faculty Intelligence Hub */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Faculty Command Suite"
+              subtitle="Deterministic script grading, diagnostic heatmaps & remediation workflows"
+            />
+            <div className="grid sm:grid-cols-2 gap-4">
               <button
                 onClick={() => navigate('/app/evaluate')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <FileText size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Evaluate Scripts</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Strict Grading</div>
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <FileText size={20} className="text-[var(--accent)]" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Evaluate Answer Scripts</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Upload question papers and student scripts for verified OCR evaluation and rubrics.
+                </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/action-center')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <Layers size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Action Center</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Interventions</div>
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Zap size={20} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Action Center</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Prioritized student interventions, feedback assignments, and remediation workflows.
+                </div>
               </button>
 
               <button
-                onClick={() => navigate('/app/misconceptions')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                onClick={() => navigate('/app/misconception-map')}
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <Brain size={20} className="text-[var(--accent)] mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Misconceptions</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Concept Gaps</div>
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <Map size={20} className="text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Misconception Heatmap</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Identify specific syllabus concept flaws and question-level error patterns across the class.
+                </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/analytics')}
-                className="p-3.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)] text-left transition-all group shadow-2xs hover:shadow-xs"
+                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <TrendingUp size={20} className="text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
-                <div className="text-xs font-bold text-[var(--text)]">Class Analytics</div>
-                <div className="text-[11px] text-[var(--text-soft)] mt-0.5">Performance</div>
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                  <TrendingUp size={20} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Class Analytics</div>
+                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                  Score distributions, question-level accuracy tiers, and longitudinal trends.
+                </div>
               </button>
             </div>
           </Card>
 
-          <Card className="p-4 shadow-sm">
-            <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
-              Faculty Profile
+          {/* Quick Shortcuts */}
+          <div className="grid sm:grid-cols-3 gap-3.5">
+            <button
+              onClick={() => navigate('/app/students')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <Users size={18} className="text-[var(--accent)]" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Roster</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Student Roster</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">Enrolled cohort</div>
+            </button>
+
+            <button
+              onClick={() => navigate('/app/reports')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <FileText size={18} className="text-teal-600" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Reports</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Academic Reports</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">PDF report downloads</div>
+            </button>
+
+            <button
+              onClick={() => navigate('/app/plagiarism')}
+              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <ShieldCheck size={18} className="text-amber-600" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Audit</span>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)]">Plagiarism Audit</div>
+              <div className="text-xs text-[var(--text-soft)] mt-0.5">Similarity checks</div>
+            </button>
+          </div>
+        </div>
+
+        {/* Right Column: Recent Evaluated Scripts */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Recent Evaluated Scripts"
+              subtitle="Graded answer papers with verified marks"
+              action={
+                <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
+                  View all <ChevronRight size={14} className="ml-1" />
+                </Button>
+              }
+            />
+
+            {loading ? (
+              <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+                Loading graded scripts…
+              </div>
+            ) : !hasEvaluations ? (
+              <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-2xl p-6 bg-[var(--surface-alt)]/30">
+                <FileText size={38} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
+                <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Scripts Yet</div>
+                <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
+                  Upload Question Papers and Student Answer Scripts in Evaluate to generate automated grading, rubrics, and diagnostic reports.
+                </p>
+                <Button size="sm" onClick={() => navigate('/app/evaluate')} className="mx-auto text-xs">
+                  Evaluate First Script
+                </Button>
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border)]">
+                {recentEvals.slice(0, 5).map((e, idx) => {
+                  const pct = Number(e.percentage) || 0
+                  return (
+                    <div
+                      key={e.id || e._id || idx}
+                      onClick={() => navigate('/app/history')}
+                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2.5 rounded-xl cursor-pointer transition-colors"
+                    >
+                      <div className="min-w-0 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
+                          <FileText size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-[var(--text)] truncate">
+                            {e.student_name || 'Student'} — {e.subject || 'Subject'}
+                          </div>
+                          <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                            {e.assessment_title || 'Exam'} · {e.created_at || 'Recently'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <Badge tone={pct >= 75 ? 'success' : 'warning'}>
+                          {pct}%
+                        </Badge>
+                        <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
+          {/* Faculty Profile Summary */}
+          <Card className="p-4 sm:p-5">
+            <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+              Faculty Profile Details
             </div>
             <div className="text-xs space-y-2 text-[var(--text-soft)]">
-              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
                 <span>Faculty Name</span>
                 <span className="font-bold text-[var(--text)]">{user?.name}</span>
               </div>
-              <div className="flex justify-between items-center py-1 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
                 <span>Email ID</span>
-                <span className="font-bold text-[var(--text)]">{user?.email}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">{user?.email}</span>
               </div>
-              <div className="flex justify-between items-center py-1">
+              <div className="flex justify-between items-center py-1.5">
                 <span>Institution</span>
-                <span className="font-bold text-[var(--text)]">{user?.institution_name || 'LearnSphere AI'}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">
+                  {user?.institution_name || 'LearnSphere Academic Portal'}
+                </span>
               </div>
             </div>
           </Card>
@@ -645,4 +764,3 @@ function TeacherDashboard() {
     </div>
   )
 }
-

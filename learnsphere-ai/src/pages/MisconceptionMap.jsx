@@ -32,6 +32,15 @@ export default function MisconceptionMap() {
     loadMisconceptions()
   }, [activeClass?.id])
 
+  useEffect(() => {
+    if (!selectedEvidence) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setSelectedEvidence(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedEvidence])
+
   // Delete Misconception
   const handleDelete = (id) => {
     if (window.confirm("Delete this misconception record permanently?")) {
@@ -63,20 +72,23 @@ export default function MisconceptionMap() {
 
   return (
     <>
-      <PageHead title="Evidence-Based Misconception Map" />
+      <PageHead
+        title="Misconception Map"
+        subtitle="Catalog of diagnosed conceptual misunderstandings extracted from evaluated student answer scripts."
+      />
 
       {activeClass && (
-        <div className="mb-4 p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-bold text-[var(--accent)] flex items-center justify-between">
-          <span>🏫 Active Class Filter: <strong>{activeClass.name}</strong></span>
+        <div className="mb-5 p-3.5 rounded-2xl bg-[var(--accent-soft)] border border-[var(--accent)] text-xs font-bold text-[var(--accent)] flex items-center justify-between shadow-xs">
+          <span>🏫 Active Class Filter: <strong className="text-[var(--text)]">{activeClass.name}</strong></span>
           <Badge tone="accent">{activeClass.type}</Badge>
         </div>
       )}
 
       {!hasData ? (
-        <Card className="p-8 text-center my-6 border-dashed border-2">
-          <CheckCircle2 size={42} className="text-emerald-600 mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1">No Conceptual Misconceptions Flagged</h3>
-          <p className="text-sm text-[var(--text-soft)] max-w-md mx-auto">
+        <Card className="p-12 text-center my-6 border-dashed border-2">
+          <CheckCircle2 size={44} className="text-emerald-500 mx-auto mb-3" />
+          <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Conceptual Misconceptions Flagged</h3>
+          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto leading-relaxed">
             When evaluation evidence proves a student has misunderstood an underlying concept, detailed evidence cards will automatically appear here.
           </p>
         </Card>
@@ -90,26 +102,26 @@ export default function MisconceptionMap() {
             const qNum = m.question_number || m.question_num || `Q${i + 1}`
 
             return (
-              <Card key={m.id || i} className={`relative transition-all shadow-md border-l-4 ${isResolved ? 'opacity-75 bg-[var(--surface-alt)] border-l-gray-400' : isHigh ? 'border-l-[var(--error)] hover:border-[var(--accent-dim)]' : 'border-l-[var(--gold)] hover:border-[var(--accent-dim)]'}`}>
+              <Card key={m.id || i} className={`relative transition-all shadow-sm border-l-4 ${isResolved ? 'opacity-75 bg-[var(--surface-alt)] border-l-gray-400' : isHigh ? 'border-l-[var(--error)] hover:border-[var(--accent-dim)]' : 'border-l-[var(--gold)] hover:border-[var(--accent-dim)]'}`}>
                 <div className="space-y-4">
                   
                   {/* Top Header: Student, Subject, Question, Marks, Confidence */}
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="w-8 h-8 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] font-extrabold text-[12px] flex items-center justify-center shrink-0">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[var(--border)] pb-3.5">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] font-extrabold text-xs flex items-center justify-center shrink-0">
                         {studentName.split(' ').map(n => n[0]).join('')}
                       </span>
                       <div>
-                        <div className="text-[15.5px] font-extrabold text-[var(--text)] flex items-center gap-2">
+                        <div className="text-base font-extrabold text-[var(--text)] flex items-center gap-2 flex-wrap">
                           <span>{studentName}</span>
-                          <span className="text-[13px] font-bold text-[var(--accent)]">— {m.subject}</span>
+                          <span className="text-xs font-bold text-[var(--accent)]">— {m.subject}</span>
                           {m.awarded_marks !== undefined && m.maximum_marks !== undefined && (
                             <span className="text-xs font-semibold text-[var(--text-faint)]">
                               ({m.awarded_marks}/{m.maximum_marks} marks)
                             </span>
                           )}
                         </div>
-                        <div className="text-[12px] text-[var(--text-soft)] font-semibold">
+                        <div className="text-xs text-[var(--text-soft)] font-semibold mt-0.5">
                           Concept: <strong>{m.identified_concept || m.concept || m.topic}</strong> &bull; {qNum}
                         </div>
                       </div>
@@ -128,48 +140,48 @@ export default function MisconceptionMap() {
 
                   {/* Exact Question Text */}
                   {m.exact_question && (
-                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
-                      <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-0.5">Evaluated Question ({qNum}):</span>
+                    <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                      <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">Evaluated Question ({qNum}):</span>
                       <p className="text-[var(--text)] font-semibold leading-relaxed">{m.exact_question}</p>
                     </div>
                   )}
 
                   {/* Highlighted Evidence Quote Banner */}
-                  <div className="p-3.5 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-[13px] leading-relaxed">
-                    <div className="font-extrabold text-[var(--error)] mb-1 flex items-center gap-1.5 text-[12.5px] uppercase tracking-wider">
+                  <div className="p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-xs leading-relaxed">
+                    <div className="font-extrabold text-[var(--error)] mb-1 flex items-center gap-1.5 uppercase tracking-wider">
                       <AlertCircle size={15} />
                       <span>Script Evidence Diagnostic:</span>
                     </div>
-                    <div className="italic text-[13.5px] font-semibold text-[var(--text)]">
+                    <div className="italic text-sm font-semibold text-[var(--text)]">
                       &ldquo;{m.evidence || `${studentName}'s written response in ${qNum} demonstrates a conceptual misunderstanding of ${m.identified_concept || m.concept}.`}&rdquo;
                     </div>
                   </div>
 
                   {/* Actual Misconception vs Correct Concept Comparison Table */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1 text-[12.5px]">
-                      <div className="font-extrabold text-[var(--error)] text-[11px] uppercase tracking-wider flex items-center gap-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1.5 text-xs">
+                      <div className="font-extrabold text-[var(--error)] uppercase tracking-wider flex items-center gap-1">
                         <span>❌ Actual Flawed Reasoning:</span>
                       </div>
-                      <div className="font-semibold text-[var(--text)] leading-snug">
+                      <div className="font-semibold text-[var(--text)] leading-relaxed">
                         {m.actual_misconception || m.misconception || m.description}
                       </div>
                       {(m.student_answer || m.student_reasoning) && (
-                        <div className="pt-2 text-[11.5px] text-[var(--text-soft)] font-mono bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)] mt-1">
+                        <div className="pt-2 text-xs text-[var(--text-soft)] font-mono bg-[var(--surface)] p-2.5 rounded-xl border border-[var(--border)] mt-1.5">
                           <strong>Student Wrote:</strong> &ldquo;{m.student_answer || m.student_reasoning}&rdquo;
                         </div>
                       )}
                     </div>
 
-                    <div className="p-3.5 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] space-y-1 text-[12.5px]">
-                      <div className="font-extrabold text-[var(--success)] text-[11px] uppercase tracking-wider flex items-center gap-1">
+                    <div className="p-4 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] space-y-1.5 text-xs">
+                      <div className="font-extrabold text-[var(--success)] uppercase tracking-wider flex items-center gap-1">
                         <span>✅ Correct Academic Model:</span>
                       </div>
-                      <div className="font-semibold text-[var(--text)] leading-snug">
+                      <div className="font-semibold text-[var(--text)] leading-relaxed">
                         {m.correct_understanding || m.correct_concept || `Standard scientific principles of ${m.identified_concept || m.concept || m.subject}.`}
                       </div>
                       {m.assessments && m.assessments.length > 0 && (
-                        <div className="pt-2 text-[11.5px] text-[var(--text-soft)] font-semibold mt-1">
+                        <div className="pt-2 text-xs text-[var(--text-soft)] font-semibold mt-1.5">
                           <strong>Detected in:</strong> {m.assessments.join(', ')}
                         </div>
                       )}
@@ -239,18 +251,30 @@ export default function MisconceptionMap() {
 
       {/* Evidence Modal */}
       {selectedEvidence && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedEvidence(null); }}
+        >
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evidence-modal-title"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl"
+          >
             <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div>
-                <h3 className="text-base font-extrabold text-[var(--text)]">
+                <h3 id="evidence-modal-title" className="text-base font-extrabold text-[var(--text)]">
                   Evaluation Evidence: {selectedEvidence.student_name}
                 </h3>
                 <p className="text-xs text-[var(--text-soft)]">
                   {selectedEvidence.subject} &bull; {selectedEvidence.question_number || selectedEvidence.question_num}
                 </p>
               </div>
-              <button onClick={() => setSelectedEvidence(null)} className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]">
+              <button 
+                onClick={() => setSelectedEvidence(null)} 
+                aria-label="Close evaluation evidence"
+                className="p-1 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)]"
+              >
                 <X size={18} />
               </button>
             </div>

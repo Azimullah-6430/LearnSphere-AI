@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { Button, Card, Badge } from './ui/Primitives.jsx'
 import { School, GraduationCap, Plus, Trash2, CheckCircle2, Layers, BookOpen, Building, Upload, Users, UserCheck, FileSpreadsheet, Award, Edit3 } from 'lucide-react'
@@ -45,6 +45,17 @@ export default function ClassManagerModal({ isOpen, onClose }) {
 
   const [toast, setToast] = useState('')
   const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen) return null
 
@@ -200,22 +211,32 @@ export default function ClassManagerModal({ isOpen, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <Card className="max-w-[760px] w-full bg-[var(--surface)] border-2 border-[var(--accent)] shadow-2xl space-y-4 my-8">
+    <div 
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto safe-top safe-bottom animate-fadeIn"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <Card 
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="class-manager-title"
+        aria-describedby="class-manager-description"
+        className="max-w-[760px] w-full bg-[var(--surface)] border border-[var(--border-strong)] shadow-2xl space-y-4 my-auto p-4 sm:p-6 rounded-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
           <div>
-            <div className="text-[17px] font-extrabold text-[var(--text)] flex items-center gap-2">
+            <h2 id="class-manager-title" className="text-base sm:text-lg font-bold text-[var(--text)] flex items-center gap-2.5">
               <Building size={20} className="text-[var(--accent)]" />
-              <span>Class & Student Roster Manager</span>
-            </div>
-            <div className="text-[12.5px] text-[var(--text-soft)]">
-              Manage classes, upload class student rosters, extract names/RRNs, and track student marks.
+              <span>Class & Roster Manager</span>
+            </h2>
+            <div id="class-manager-description" className="text-xs text-[var(--text-soft)] mt-0.5">
+              Manage classes, upload student rosters, and record continuous evaluation marks.
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-[var(--surface-alt)] font-bold text-lg flex items-center justify-center hover:bg-[var(--border)] transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer"
+            aria-label="Close dialog"
           >
             ✕
           </button>
@@ -391,6 +412,8 @@ export default function ClassManagerModal({ isOpen, onClose }) {
               <div className="flex items-center gap-3">
                 <input
                   type="file"
+                  id="class-manager-roster-file"
+                  aria-label="Upload student roster CSV or TXT file"
                   accept=".csv,.txt,.tsv"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
@@ -495,8 +518,8 @@ export default function ClassManagerModal({ isOpen, onClose }) {
             )}
 
             {/* Roster Table */}
-            <div className="border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--surface)]">
-              <table className="w-full border-collapse text-[12.5px]">
+            <div className="border border-[var(--border)] rounded-xl overflow-x-auto scrollbar-thin bg-[var(--surface)]">
+              <table className="w-full min-w-[560px] border-collapse text-[12.5px]">
                 <thead>
                   <tr className="bg-[var(--surface-alt)] border-b border-[var(--border)]">
                     <th className="py-2.5 px-3 text-left font-bold text-[var(--text-faint)] uppercase text-[11px]">#</th>

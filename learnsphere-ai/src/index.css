@@ -3,90 +3,282 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f6f4ee;
+  /* Canvas & Surfaces - Luminous, crisp modern academic palette */
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --surface-alt: #efede3;
-  --text: #1b1c18;
-  --text-soft: #5d5c54;
-  --text-faint: #9b998e;
-  --border: #e4e0d3;
-  --border-strong: #d6d1bf;
-  --accent: #28503f;
-  --accent-dim: #3b6552;
-  --accent-soft: #e1ebe3;
-  --accent-soft-strong: #cfded2;
-  --gold: #93702f;
-  --gold-soft: #f1e7d3;
-  --success: #3f7d5c;
-  --success-soft: #e4f0e6;
-  --warning: #9a6c22;
-  --warning-soft: #f5ead4;
-  --error: #a24638;
-  --error-soft: #f5e3df;
-  --shadow-sm: 0 1px 2px rgba(27, 28, 24, 0.06);
-  --shadow-md: 0 6px 20px rgba(27, 28, 24, 0.08);
+  --surface-alt: #f1f5f9;
+  --surface-hover: #f8fafc;
+
+  /* Typography Colors - High-contrast accessible slate scale (WCAG AAA/AA compliant) */
+  --text: #0f172a;
+  --text-soft: #334155;
+  --text-faint: #475569;
+
+  /* Borders & Dividers - Architectural crisp hairlines */
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --border-subtle: #f1f5f9;
+
+  /* Primary Brand - Prestigious Academic Heritage Emerald */
+  --accent: #1b4d3e;
+  --accent-dim: #153c30;
+  --accent-hover: #235e4d;
+  --accent-soft: #eaf5f0;
+  --accent-soft-strong: #d2ebe0;
+
+  /* Accent Colors & Status Tones */
+  --gold: #b45309;
+  --gold-soft: #fef3c7;
+  --success: #15803d;
+  --success-soft: #dcfce7;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
+  --error: #b91c1c;
+  --error-soft: #fee2e2;
+
+  /* Elevation & Shadows - Layered diffusion */
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 28px -4px rgba(15, 23, 42, 0.10), 0 4px 10px -2px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 20px 36px -6px rgba(15, 23, 42, 0.14), 0 8px 16px -4px rgba(15, 23, 42, 0.06);
 }
 
 [data-theme='dark'] {
-  --bg: #15171a;
-  --surface: #1c1f22;
-  --surface-alt: #22262a;
-  --text: #ecece2;
-  --text-soft: #a2a096;
-  --text-faint: #706e64;
-  --border: #2b2e31;
-  --border-strong: #383b3e;
-  --accent: #6fa58c;
-  --accent-dim: #5c9179;
-  --accent-soft: #1e2b26;
-  --accent-soft-strong: #26362f;
-  --gold: #cba45e;
-  --gold-soft: #2c2618;
-  --success: #6fa58c;
-  --success-soft: #1d2b24;
-  --warning: #d2a44f;
-  --warning-soft: #2e2618;
-  --error: #d08172;
-  --error-soft: #2e1f1b;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.4);
+  /* Canvas & Surfaces - Deep obsidian slate */
+  --bg: #0b0f17;
+  --surface: #111827;
+  --surface-alt: #1e293b;
+  --surface-hover: #1f293d;
+
+  /* Typography Colors - High-contrast luminous slate */
+  --text: #f8fafc;
+  --text-soft: #cbd5e1;
+  --text-faint: #94a3b8;
+
+  /* Borders & Dividers - Precise structural lines */
+  --border: #1f2937;
+  --border-strong: #374151;
+  --border-subtle: #162032;
+
+  /* Primary Brand - Vibrant Emerald Glow */
+  --accent: #10b981;
+  --accent-dim: #059669;
+  --accent-hover: #34d399;
+  --accent-soft: #064e3b;
+  --accent-soft-strong: #0a5c47;
+
+  /* Accent Colors & Status Tones */
+  --gold: #f59e0b;
+  --gold-soft: #451a03;
+  --success: #34d399;
+  --success-soft: #064e3b;
+  --warning: #fbbf24;
+  --warning-soft: #451a03;
+  --error: #f87171;
+  --error-soft: #450a0a;
+
+  /* Elevation & Shadows - Deep atmospheric shadows */
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 18px -2px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.7), 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 24px 44px -6px rgba(0, 0, 0, 0.8), 0 8px 18px -4px rgba(0, 0, 0, 0.6);
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
-body,
-#root {
+html {
   height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  font-family: 'Manrope', system-ui, sans-serif;
+  min-height: 100%;
+  overflow-x: hidden;
+  font-family: 'Manrope', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  transition: background 0.2s ease, color 0.2s ease;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+#root {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Safe area padding helper utilities for notches and dynamic island */
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.safe-x {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* Touch responsiveness utilities */
+@media (pointer: coarse) {
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+}
+
+/* Fluid responsive typography helpers */
+.heading-page {
+  font-size: clamp(1.35rem, 1.4vw + 0.95rem, 1.75rem);
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.heading-section {
+  font-size: clamp(1.1rem, 1vw + 0.85rem, 1.35rem);
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.heading-card {
+  font-size: clamp(0.95rem, 0.5vw + 0.85rem, 1.15rem);
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.text-content {
+  font-size: 0.925rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* Readable Form Control Defaults */
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input[type='number'],
+input[type='search'],
+select,
+textarea {
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 ::selection {
   background: var(--accent-soft-strong);
+  color: var(--text);
 }
 
 .hairline {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 20px 0;
+  margin: 24px 0;
 }
 
+/* Custom refined scrollbars */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 99px;
+  border-radius: 9999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* Card subtle glow and hover transitions */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(var(--surface), 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Accessible High-Contrast Keyboard Focus Indicators */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Skip link for screen reader and keyboard accessibility */
+.skip-to-content {
+  position: absolute;
+  top: -120px;
+  left: 1rem;
+  z-index: 100;
+  padding: 0.75rem 1.25rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--accent);
+  border-radius: 0.75rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  text-decoration: none;
+  box-shadow: var(--shadow-lg);
+  transition: top 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.skip-to-content:focus {
+  top: 1rem;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

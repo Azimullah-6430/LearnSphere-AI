@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { X } from 'lucide-react'
+import { X, Sun, Moon } from 'lucide-react'
 import Sidebar from './Sidebar.jsx'
 import Topbar from './Topbar.jsx'
 import SyllabusModal from './SyllabusModal.jsx'
@@ -10,53 +10,63 @@ import { useApp } from '../context/AppContext.jsx'
 
 const TITLES = {
   dashboard: ['Dashboard', 'Overview'],
-  evaluate: ['New Evaluation', 'Evaluation'],
-  history: ['Evaluation History', 'Evaluation'],
-  plagiarism: ['Academic Integrity', 'Integrity'],
-  analytics: ['Student Analytics', 'Analytics'],
-  reports: ['Reports', 'Analytics'],
-  students: ['Students', 'Management'],
-  performance: ['Performance', 'My Learning'],
-  trainer: ['Personal Trainer', 'AI Support'],
-  parent: ['Parent Agent', 'AI Support'],
-  focus: ['Focus Session', 'Productivity'],
-  memory: ['Academic Memory', 'My Learning'],
-  'self-evaluation': ['Self Evaluation', 'My Learning'],
-  notifications: ['Notifications', 'System'],
-  settings: ['Settings', 'System'],
-  'action-center': ['Action Center', 'Analytics'],
-  'misconception-map': ['Misconception Map', 'Analytics'],
-  'reality-lab': ['Reality Lab', 'AI Support'],
+  evaluate: ['Evaluate Script', 'Evaluation & Integrity'],
+  history: ['Evaluation History', 'Evaluation & Integrity'],
+  plagiarism: ['Academic Integrity Audit', 'Evaluation & Integrity'],
+  analytics: ['Student Analytics', 'Intelligence & Actions'],
+  reports: ['Academic Reports', 'Intelligence & Actions'],
+  students: ['Roster & Students', 'Intelligence & Actions'],
+  performance: ['My Performance', 'Learning Progress'],
+  trainer: ['Personal Trainer', 'Interactive AI Learning'],
+  parent: ['Parent Agent', 'Productivity & Growth'],
+  focus: ['Focus Session', 'Productivity & Growth'],
+  memory: ['Academic Memory', 'Productivity & Growth'],
+  'self-evaluation': ['Self Evaluation', 'Learning Progress'],
+  notifications: ['Notifications', 'Curriculum & System'],
+  settings: ['Account & Settings', 'Curriculum & System'],
+  'action-center': ['Action Center', 'Intelligence & Actions'],
+  'misconception-map': ['Misconception Map', 'Intelligence & Actions'],
+  'reality-lab': ['Reality Lab', 'Interactive AI Learning'],
   opportunities: ['Current & Opportunities', 'Productivity & Growth'],
+  'learn-anywhere': ['Learn from Anywhere', 'Interactive AI Learning'],
+  'knowledge-challenge': ['Knowledge Challenge', 'Interactive AI Learning'],
 }
 
 function FocusHeader() {
   const { toggleTheme, theme } = useApp()
   const navigate = useNavigate()
   return (
-    <header className="h-16 flex items-center justify-between px-7">
-      <div className="flex items-center gap-2.5">
-        <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="16" r="10.5" stroke="var(--accent)" strokeWidth="2" />
-          <circle cx="24" cy="9" r="4" fill="var(--accent)" />
-        </svg>
-        <div className="text-sm font-extrabold tracking-tight">
-          LearnSphere<small className="font-semibold text-[var(--accent)] text-[11px] ml-0.5">AI</small>
+    <header className="h-16 flex items-center justify-between px-4 sm:px-8 border-b border-[var(--border)] bg-[var(--surface)] gap-2">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="w-8 h-8 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shadow-xs shrink-0">
+          <svg width="20" height="20" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="10.5" stroke="currentColor" strokeWidth="2.5" />
+            <circle cx="23" cy="10" r="4.5" fill="currentColor" />
+          </svg>
         </div>
+        <div className="text-base font-extrabold tracking-tight text-[var(--text)] truncate">
+          LearnSphere<span className="text-[var(--accent)] ml-0.5">AI</span>
+        </div>
+        <span className="hidden sm:inline-flex text-xs px-2.5 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] font-bold ml-1 shrink-0">
+          Focus Mode
+        </span>
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={toggleTheme}
-          className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer"
+          title="Toggle theme"
+          aria-label="Toggle theme"
         >
-          {theme === 'dark' ? '☀' : '☾'}
+          {theme === 'dark' ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
         </button>
         <button
           onClick={() => navigate('/app/dashboard')}
-          className="w-9 h-9 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer"
           title="Exit focus mode"
+          aria-label="Exit focus mode"
         >
-          <X size={16} strokeWidth={1.8} />
+          <X size={17} strokeWidth={1.8} />
         </button>
       </div>
     </header>
@@ -70,10 +80,38 @@ export default function AppLayout() {
   const [syllabusModalOpen, setSyllabusModalOpen] = useState(false)
   const [classModalOpen, setClassModalOpen] = useState(false)
 
-  // While the /api/auth/me call is in flight, show nothing (avoids flash redirect)
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
+  // Lock body scroll and listen for Escape key when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = ''
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [menuOpen])
+
   if (authLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-      <div className="text-[var(--text-soft)] text-sm">Verifying session…</div>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+        <div className="text-[var(--text-soft)] text-sm font-medium">Verifying session…</div>
+      </div>
     </div>
   )
 
@@ -87,7 +125,7 @@ export default function AppLayout() {
     return (
       <div className="min-h-screen flex flex-col bg-[var(--bg)]">
         <FocusHeader />
-        <main className="flex-1 px-[18px]">
+        <main className="flex-1 px-3 sm:px-6 md:px-8 py-5 sm:py-6 w-full max-w-content mx-auto min-w-0">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>
@@ -97,10 +135,26 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      {menuOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden backdrop-blur-sm" onClick={() => setMenuOpen(false)} />}
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} onOpenSyllabusModal={() => setSyllabusModalOpen(true)} />
-      <div className="flex-1 min-w-0 flex flex-col md:ml-[264px]">
+    <div className="flex min-h-screen bg-[var(--bg)] overflow-x-hidden">
+      {/* Skip to Main Content Link for Keyboard and Screen Readers */}
+      <a href="#main-content" className="skip-to-content">
+        Skip to main content
+      </a>
+
+      {/* Mobile Drawer Backdrop */}
+      {menuOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden backdrop-blur-xs transition-opacity duration-200"
+          onClick={() => setMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <Sidebar
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onOpenSyllabusModal={() => setSyllabusModalOpen(true)}
+      />
+      <div className="flex-1 min-w-0 flex flex-col md:ml-[272px] transition-all">
         <Topbar
           title={title}
           crumb={crumb}
@@ -108,7 +162,11 @@ export default function AppLayout() {
           onOpenSyllabusModal={() => setSyllabusModalOpen(true)}
           onOpenClassModal={() => setClassModalOpen(true)}
         />
-        <main className="px-3.5 sm:px-6 md:px-[34px] pt-5 sm:pt-[30px] pb-12 sm:pb-[60px] w-full max-w-content mx-auto">
+        <main
+          id="main-content"
+          tabIndex="-1"
+          className="px-3.5 sm:px-6 md:px-8 lg:px-10 pt-5 sm:pt-8 pb-16 safe-bottom w-full max-w-content mx-auto min-w-0 outline-none"
+        >
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

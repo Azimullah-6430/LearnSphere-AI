@@ -136,20 +136,20 @@ export default function SelectClass() {
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
       {/* Welcome Banner Header */}
-      <div className="p-7 rounded-2xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="p-5 sm:p-7 rounded-2xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 rounded-full bg-white/20 text-white text-[12px] font-bold tracking-wide uppercase">
               Teacher Portal Onboarding
             </span>
-            <Sparkles size={18} className="text-yellow-300 animate-pulse" />
+            <Sparkles size={18} className="text-yellow-300" />
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
             Welcome, {user?.name || 'Educator'}
           </h1>
         </div>
 
-        <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center min-w-[200px]">
+        <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 text-center w-full md:w-auto md:min-w-[200px]">
           <div className="text-3xl font-extrabold text-white mb-0.5">{teacherClasses.length}</div>
           <div className="text-xs font-bold text-white/80 uppercase tracking-wider">Created Classes</div>
         </div>

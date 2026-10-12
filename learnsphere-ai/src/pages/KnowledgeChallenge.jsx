@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { getActiveValidatedCurriculum, getDynamicTransferQuestions, getDynamicChapters } from '../data/syllabusData.js'
 import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
+import { api } from '../services/api.js'
 import SyllabusModal from '../components/SyllabusModal.jsx'
 import CurriculumReviewNotice from '../components/CurriculumReviewNotice.jsx'
 import {
@@ -9,15 +10,15 @@ import {
   RotateCcw, BookOpen, Zap, Layers, UploadCloud
 } from 'lucide-react'
 
-function ScoreRing({ score, size = 80 }) {
-  const r = (size - 8) / 2
+function ScoreRing({ score, size = 88 }) {
+  const r = (size - 10) / 2
   const circ = 2 * Math.PI * r
   const dash = (score / 100) * circ
-  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
+  const color = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444'
   return (
     <svg width={size} height={size} className="-rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth="7" />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="7"
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth="8" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="8"
         strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round"
         style={{ transition: 'stroke-dasharray 0.8s ease' }}
       />
@@ -27,7 +28,7 @@ function ScoreRing({ score, size = 80 }) {
 
 export default function KnowledgeChallenge() {
   const { user, syllabusData, recordActivity } = useApp()
-  const { curriculum, curriculumStatus, isValid: hasValidCurriculum, subjects, subjectObjects, units: allUnits } = useAuthoritativeCurriculum()
+  const { curriculum, isValid: hasValidCurriculum, subjects, subjectObjects } = useAuthoritativeCurriculum()
   const activeProfile = user
   const activeCurriculum = curriculum
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
@@ -113,7 +114,6 @@ export default function KnowledgeChallenge() {
     setScores((prev) => [...prev, roundSubmission])
     setPhase('feedback')
 
-    // Submit tracking data to server
     try {
       await api.submitChallenge({
         subject: activeSubject,
@@ -128,9 +128,7 @@ export default function KnowledgeChallenge() {
         score: score,
         total_questions: 100
       })
-    } catch {
-      // Best-effort tracking persistence
-    }
+    } catch {}
   }
 
   const nextRound = () => {
@@ -153,12 +151,14 @@ export default function KnowledgeChallenge() {
   }
 
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b.score, 0) / scores.length) : 0
-
   const diffTone = { Easy: 'success', Medium: 'warning', Hard: 'error', Difficult: 'error' }
 
   return (
     <>
-      <PageHead title="Knowledge Transfer Challenge" />
+      <PageHead
+        title="Knowledge Transfer Challenge"
+        subtitle="Apply syllabus concepts to novel real-world engineering and scientific scenarios to test practical mastery."
+      />
 
       {!hasValidCurriculum ? (
         <>
@@ -172,341 +172,290 @@ export default function KnowledgeChallenge() {
       ) : (
         <>
           {/* Subject Tabs */}
-      {phase !== 'done' && (
-        <div className="flex gap-1.5 flex-wrap mb-4">
-          {subjects.map((sub) => (
-            <button
-              key={sub}
-              onClick={() => switchSubject(sub)}
-              disabled={phase !== 'intro'}
-              className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold border transition-all disabled:opacity-50 ${
-                activeSubject === sub
-                  ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
-                  : 'border-[var(--border-strong)] text-[var(--text-soft)] hover:border-[var(--accent-dim)]'
-              }`}
-            >
-              {sub}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Module & Difficulty Filter Bar */}
-      {phase === 'intro' && (
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 p-2 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] max-w-[680px]">
-          {/* Module Selector */}
-          <div className="flex items-center gap-2">
-            <Layers size={14} className="text-[var(--accent)] ml-1" />
-            <span className="text-[11.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Module:</span>
-            <select
-              value={activeModule}
-              onChange={(e) => setActiveModule(e.target.value)}
-              className="px-3 py-1 rounded-lg border border-[var(--border-strong)] text-[12px] font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[280px] truncate"
-            >
-              <option value="All">All Modules ({pool.length} total Qs)</option>
-              {modules.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Difficulty Selector */}
-          <div className="flex items-center gap-1">
-            {[
-              { id: 'All', label: 'All Modes' },
-              { id: 'Easy', label: '🟢 Easy' },
-              { id: 'Medium', label: '🟡 Medium' },
-              { id: 'Hard', label: '🔴 Hard' }
-            ].map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => setActiveDifficulty(id)}
-                className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold transition-all ${
-                  activeDifficulty === id
-                    ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
-                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)]'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="max-w-[680px]">
-
-        {/* Intro */}
-        {phase === 'intro' && (
-          <Card>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center">
-                <Brain size={22} className="text-[var(--accent)]" />
-              </div>
-              <div>
-                <div className="font-bold text-[15px]">Ready to test your transfer ability?</div>
-                <div className="text-sm text-[var(--text-soft)]">{pool.length} real-world questions from <strong>{activeSubject}</strong> ({activeDifficulty} mode)</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              {[
-                { label: 'Session Length', value: `${Math.min(5, pool.length)} Questions`, icon: Target },
-                { label: 'Real-world framing', value: '100%', icon: Zap },
-                { label: 'Difficulty Mode', value: activeDifficulty, icon: Star },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className="bg-[var(--surface-alt)] rounded-lg p-3 text-center">
-                  <Icon size={16} className="mx-auto mb-1 text-[var(--accent)]" />
-                  <div className="text-[14px] font-extrabold">{value}</div>
-                  <div className="text-[11px] text-[var(--text-faint)]">{label}</div>
-                </div>
+          {phase !== 'done' && (
+            <div className="flex gap-2 flex-wrap mb-5">
+              {subjects.map((sub) => (
+                <button
+                  key={sub}
+                  onClick={() => switchSubject(sub)}
+                  disabled={phase !== 'intro'}
+                  className={`px-4 py-2 rounded-xl text-xs md:text-sm font-bold border transition-all cursor-pointer disabled:opacity-50 ${
+                    activeSubject === sub
+                      ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-xs'
+                      : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--accent)]'
+                  }`}
+                >
+                  {sub}
+                </button>
               ))}
             </div>
+          )}
 
-            <div className="border border-[var(--border)] rounded-lg p-3.5 mb-5 text-[13px] text-[var(--text-soft)]">
-              <strong className="text-[var(--text)]">How it works:</strong> Each question takes a key concept from your {activeSubject} syllabus and frames it in an unfamiliar real-world scenario.
-              Analyze the scenario, identify the underlying principle, and write your solution.
-            </div>
-
-            <Button onClick={startSession} disabled={!pool.length} className="w-full justify-center">
-              Start {activeSubject} ({activeDifficulty}) Challenge <ChevronRight size={15} />
-            </Button>
-          </Card>
-        )}
-
-        {/* Question Phase */}
-        {phase === 'question' && currentRound && (
-          <div className="space-y-4">
-            {/* Progress Bar */}
-            <div className="flex items-center gap-3">
-              {rounds.map((_, i) => (
-                <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  i < roundIdx ? 'bg-[var(--accent)]' : i === roundIdx ? 'bg-[var(--accent)] opacity-60' : 'bg-[var(--border)]'
-                }`} />
-              ))}
-              <span className="text-[12px] text-[var(--text-faint)] font-semibold shrink-0">{roundIdx + 1}/{rounds.length}</span>
-            </div>
-
-            {/* Header Blueprint */}
-            <div className="relative overflow-hidden rounded-xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--surface-alt)] p-6">
-              <div className="absolute top-3 right-4 opacity-10"><Brain size={64} strokeWidth={1} /></div>
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
-                {currentRound.difficulty && <Badge tone={diffTone[currentRound.difficulty] || 'neutral'}>{currentRound.difficulty}</Badge>}
-                <Badge tone="accent">{currentRound.semester || (activeProfile?.current_semester ? `Semester ${activeProfile.current_semester}` : 'Active Semester')}</Badge>
-                <Badge tone="neutral">{currentRound.exact_subject || activeSubject}</Badge>
-                <Badge tone="neutral">{currentRound.exact_syllabus_topic || currentRound.chapter}</Badge>
-              </div>
-              <h2 className="text-[16.5px] font-extrabold leading-snug mb-2">{currentRound.scenario}</h2>
-              {currentRound.real_world_application && (
-                <p className="text-[12.5px] text-[var(--text-soft)]">
-                  <strong className="text-[var(--text)]">🌍 Real-World Application: </strong> {currentRound.real_world_application}
-                </p>
-              )}
-            </div>
-
-            {/* Academic & Practical Transfer Blueprint (9 Dimensions) */}
-            <Card>
-              <div className="flex items-center gap-2 mb-3">
-                <BookOpen size={16} className="text-[var(--accent)]" />
-                <h3 className="text-[12.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-                  Knowledge Transfer Foundations
-                </h3>
+          {/* Module & Difficulty Filter Bar */}
+          {phase === 'intro' && (
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-7 p-3 bg-[var(--surface)] rounded-2xl border border-[var(--border)] max-w-3xl shadow-xs">
+              {/* Module Selector */}
+              <div className="flex items-center gap-2.5">
+                <Layers size={16} className="text-[var(--accent)] ml-1" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-soft)]">Module:</span>
+                <select
+                  value={activeModule}
+                  onChange={(e) => setActiveModule(e.target.value)}
+                  className="px-3.5 py-1.5 rounded-xl border border-[var(--border-strong)] text-xs md:text-sm font-semibold bg-[var(--surface-alt)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] max-w-[280px] truncate"
+                >
+                  <option value="All">All Modules ({pool.length} Qs)</option>
+                  {modules.map((m) => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
+                </select>
               </div>
 
-              <div className="space-y-3 text-[12.5px]">
-                {currentRound.concept_explanation && (
-                  <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                    <strong className="text-[var(--text)] block mb-1">📖 Academic Concept Explanation:</strong>
-                    {currentRound.concept_explanation}
+              {/* Difficulty Selector */}
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: 'All', label: 'All Modes' },
+                  { id: 'Easy', label: 'Easy' },
+                  { id: 'Medium', label: 'Medium' },
+                  { id: 'Hard', label: 'Hard' }
+                ].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setActiveDifficulty(id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeDifficulty === id
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-xs border border-[var(--accent)]/20'
+                        : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="max-w-3xl">
+            {/* Intro */}
+            {phase === 'intro' && (
+              <Card className="space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-[var(--accent-soft)] flex items-center justify-center shrink-0">
+                    <Brain size={26} className="text-[var(--accent)]" />
                   </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {currentRound.practical_connection && (
-                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                      <strong className="text-[var(--accent)] block mb-1">⚡ Practical Connection:</strong>
-                      {currentRound.practical_connection}
-                    </div>
-                  )}
-                  {currentRound.example && (
-                    <div className="p-3 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text-soft)]">
-                      <strong className="text-[var(--accent)] block mb-1">💡 Engineering Example:</strong>
-                      {currentRound.example}
-                    </div>
-                  )}
+                  <div>
+                    <h3 className="font-bold text-lg md:text-xl text-[var(--text)]">Ready to Test Concept Transfer?</h3>
+                    <p className="text-sm text-[var(--text-soft)] mt-0.5">
+                      {pool.length} curriculum questions available in <strong>{activeSubject}</strong> ({activeDifficulty} mode)
+                    </p>
+                  </div>
                 </div>
 
-                {currentRound.common_misconception && (
-                  <div className="p-3 rounded-lg bg-[var(--warning-soft)] border border-[var(--warning)] text-[var(--text)]">
-                    <strong className="text-[var(--warning)] block mb-1">⚠️ Common Misconception:</strong>
-                    {currentRound.common_misconception}
-                  </div>
-                )}
-
-                {currentRound.exam_relevance && (
-                  <div className="p-2.5 rounded-lg bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] text-[var(--text-soft)]">
-                    <strong className="text-[var(--text)]">📝 University Exam Relevance: </strong>
-                    {currentRound.exam_relevance}
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            {/* Quick Understanding Question Interactive Check */}
-            {currentRound.quick_understanding_question && (
-              <Card>
-                <div className="flex items-center gap-2 mb-2">
-                  <Target size={15} className="text-[var(--accent)]" />
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Quick Understanding Check</div>
-                </div>
-                <p className="text-[13px] font-semibold mb-3 text-[var(--text)]">
-                  {currentRound.quick_understanding_question.question}
-                </p>
-                <div className="space-y-1.5 mb-3">
-                  {(currentRound.quick_understanding_question.options || []).map((opt, idx) => (
-                    <div key={idx} className="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] text-[12.5px] font-medium text-[var(--text-soft)]">
-                      <span className="font-bold text-[var(--accent)] mr-2">{String.fromCharCode(65 + idx)}.</span> {opt}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Session Length', value: `${Math.min(5, pool.length)} Questions`, icon: Target },
+                    { label: 'Practical Context', value: '100%', icon: Zap },
+                    { label: 'Difficulty Mode', value: activeDifficulty, icon: Star },
+                  ].map(({ label, value, icon: Icon }) => (
+                    <div key={label} className="bg-[var(--surface-alt)] rounded-2xl p-4 text-center border border-[var(--border)]">
+                      <Icon size={18} className="mx-auto mb-1.5 text-[var(--accent)]" />
+                      <div className="text-base md:text-lg font-extrabold text-[var(--text)]">{value}</div>
+                      <div className="text-xs text-[var(--text-soft)] mt-0.5">{label}</div>
                     </div>
                   ))}
                 </div>
+
+                <div className="border border-[var(--border)] rounded-2xl p-4 text-sm text-[var(--text-soft)] leading-relaxed bg-[var(--surface-alt)]/40">
+                  <strong className="text-[var(--text)]">Transfer Objective:</strong> Each scenario presents an unfamiliar real-world context. Identify the governing law, theorem, or architecture from your syllabus and explain your solution.
+                </div>
+
+                <Button size="lg" onClick={startSession} disabled={!pool.length} className="w-full justify-center">
+                  Start {activeSubject} ({activeDifficulty}) Challenge <ChevronRight size={18} />
+                </Button>
               </Card>
             )}
 
-            {/* Student Explanation / Solution Input */}
-            <Card>
-              <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Your Transfer Solution</div>
-              <textarea
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Apply your syllabus knowledge to solve this transfer scenario…"
-                rows={4}
-                className="w-full border border-[var(--border-strong)] rounded-lg px-3.5 py-3 text-[13.5px] bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] resize-none leading-relaxed"
-              />
-              <div className="flex items-center justify-between mt-3">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowHint(!showHint)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-[var(--border)] rounded-lg text-[var(--warning)] hover:bg-[var(--warning-soft)] transition-colors"
-                  >
-                    <Lightbulb size={13} /> {showHint ? 'Hide hint' : 'Hint'}
-                  </button>
-                  <button
-                    onClick={() => setShowAnswer(!showAnswer)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-[var(--border)] rounded-lg text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors"
-                  >
-                    <BookOpen size={13} /> Show model solution
-                  </button>
+            {/* Question Phase */}
+            {phase === 'question' && currentRound && (
+              <div className="space-y-5">
+                {/* Progress Bar */}
+                <div className="flex items-center gap-3">
+                  {rounds.map((_, i) => (
+                    <div key={i} className={`h-2 flex-1 rounded-full transition-colors ${
+                      i < roundIdx ? 'bg-[var(--accent)]' : i === roundIdx ? 'bg-[var(--accent)] opacity-60' : 'bg-[var(--border)]'
+                    }`} />
+                  ))}
+                  <span className="text-xs text-[var(--text-soft)] font-bold shrink-0">{roundIdx + 1}/{rounds.length}</span>
                 </div>
-                <Button onClick={submitAnswer} disabled={!answer.trim() && !showAnswer}>
-                  Submit Solution <ChevronRight size={14} />
+
+                {/* Scenario Header */}
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-xs">
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    {currentRound.difficulty && <Badge tone={diffTone[currentRound.difficulty] || 'neutral'}>{currentRound.difficulty}</Badge>}
+                    <Badge tone="accent">{activeSubject}</Badge>
+                    <Badge tone="neutral">{currentRound.exact_syllabus_topic || currentRound.chapter || 'Curriculum Topic'}</Badge>
+                  </div>
+                  <h2 className="text-base md:text-lg font-bold leading-snug mb-2.5 text-[var(--text)]">
+                    {currentRound.scenario}
+                  </h2>
+                  {currentRound.real_world_application && (
+                    <p className="text-xs md:text-[13px] text-[var(--text-soft)] leading-relaxed">
+                      <strong className="text-[var(--text)]">Real-World Application: </strong> {currentRound.real_world_application}
+                    </p>
+                  )}
+                </div>
+
+                {/* Academic Context Card */}
+                <Card className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={18} className="text-[var(--accent)]" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-soft)]">
+                      Syllabus Concept Foundations
+                    </h3>
+                  </div>
+
+                  {currentRound.concept_explanation && (
+                    <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-sm text-[var(--text-soft)] leading-relaxed">
+                      <strong className="text-[var(--text)] block mb-1">📖 Academic Concept:</strong>
+                      {currentRound.concept_explanation}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {currentRound.practical_connection && (
+                      <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs md:text-sm text-[var(--text-soft)]">
+                        <strong className="text-[var(--accent)] block mb-1">⚡ Practical Connection:</strong>
+                        {currentRound.practical_connection}
+                      </div>
+                    )}
+                    {currentRound.example && (
+                      <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs md:text-sm text-[var(--text-soft)]">
+                        <strong className="text-[var(--accent)] block mb-1">💡 Engineering Application:</strong>
+                        {currentRound.example}
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Solution Input */}
+                <Card>
+                  <label htmlFor="solution-input" className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2.5">
+                    Your Transfer Solution
+                  </label>
+                  <textarea
+                    id="solution-input"
+                    aria-label="Your transfer solution"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="Apply your curriculum knowledge to solve this scenario…"
+                    rows={4}
+                    className="w-full border border-[var(--border-strong)] rounded-xl p-4 text-sm md:text-base bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)] resize-none leading-relaxed"
+                  />
+                  <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
+                    <div className="flex gap-2.5">
+                      <button
+                        onClick={() => setShowHint(!showHint)}
+                        className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border border-[var(--border)] rounded-xl text-[var(--warning)] hover:bg-[var(--warning-soft)] transition-colors cursor-pointer"
+                      >
+                        <Lightbulb size={14} /> {showHint ? 'Hide hint' : 'Show hint'}
+                      </button>
+                      <button
+                        onClick={() => setShowAnswer(!showAnswer)}
+                        className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border border-[var(--border)] rounded-xl text-[var(--text-soft)] hover:bg-[var(--surface-alt)] transition-colors cursor-pointer"
+                      >
+                        <BookOpen size={14} /> Show model solution
+                      </button>
+                    </div>
+                    <Button onClick={submitAnswer} disabled={!answer.trim() && !showAnswer} className="shadow-xs">
+                      Submit Solution <ChevronRight size={16} />
+                    </Button>
+                  </div>
+
+                  {showHint && (
+                    <div className="mt-4 p-4 bg-[var(--warning-soft)] border border-[var(--warning)]/30 rounded-xl text-xs md:text-sm text-[var(--warning)] leading-relaxed">
+                      <strong>Hint:</strong> {currentRound.hint}
+                    </div>
+                  )}
+                  {showAnswer && (
+                    <div className="mt-4 p-4 bg-[var(--accent-soft)] border border-[var(--accent)]/30 rounded-xl text-xs md:text-sm text-[var(--accent)] leading-relaxed">
+                      <strong>Model Solution:</strong> {currentRound.modelAnswer}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* Feedback Phase */}
+            {phase === 'feedback' && currentRound && (
+              <div className="space-y-5">
+                <Card className="space-y-5">
+                  <div className="flex items-center gap-5">
+                    <div className="relative shrink-0">
+                      <ScoreRing score={currentRound.transferScore} />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-lg font-extrabold text-[var(--text)]">{currentRound.transferScore}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-lg md:text-xl font-extrabold text-[var(--text)]">Round {roundIdx + 1} Evaluated</h3>
+                      <p className="text-sm text-[var(--text-soft)] mt-0.5">
+                        Subject: <strong>{activeSubject}</strong> · Topic: <strong>{currentRound.exact_syllabus_topic || currentRound.chapter || 'Core Module'}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)]">
+                    <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-1.5">Model Transfer Solution</div>
+                    <div className="text-sm text-[var(--text)] leading-relaxed">{currentRound.modelAnswer}</div>
+                  </div>
+
+                  {answer && (
+                    <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+                      <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-1.5">Your Submitted Solution</div>
+                      <div className="text-sm text-[var(--text-soft)] leading-relaxed">{answer}</div>
+                    </div>
+                  )}
+                </Card>
+
+                <Button size="lg" onClick={nextRound} className="w-full justify-center shadow-xs">
+                  {roundIdx + 1 < rounds.length ? `Next Scenario (${roundIdx + 2}/${rounds.length})` : 'View Final Summary'} <ChevronRight size={18} />
                 </Button>
               </div>
+            )}
 
-              {showHint && (
-                <div className="mt-3 p-3 bg-[var(--warning-soft)] border border-[var(--border)] rounded-lg">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--warning)] mb-1">Hint</div>
-                  <div className="text-[13px] text-[var(--text-soft)]">{currentRound.hint}</div>
-                </div>
-              )}
-              {showAnswer && (
-                <div className="mt-3 p-3 bg-[var(--accent-soft)] border border-[var(--border)] rounded-lg">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">Model Solution</div>
-                  <div className="text-[13px]">{currentRound.modelAnswer}</div>
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
-
-        {/* Feedback Phase */}
-        {phase === 'feedback' && currentRound && (
-          <div className="space-y-4">
-            <Card>
-              <div className="flex items-center gap-4 mb-5">
-                <div className="relative">
-                  <ScoreRing score={currentRound.transferScore} />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-[15px] font-extrabold">{currentRound.transferScore}</span>
-                  </div>
-                </div>
+            {/* Done Phase */}
+            {phase === 'done' && (
+              <Card className="text-center p-8 sm:p-10 space-y-6">
                 <div>
-                  <div className="text-[15px] font-extrabold">Round {roundIdx + 1} Complete</div>
-                  <div className="text-sm text-[var(--text-soft)]">
-                    Validated Subject: <strong>{currentRound.exact_subject || activeSubject}</strong> · Topic: <strong>{currentRound.exact_syllabus_topic || currentRound.chapter}</strong>
+                  <div className="relative inline-block mb-4">
+                    <ScoreRing score={avgScore} size={110} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-2xl font-extrabold text-[var(--text)]">{avgScore}</span>
+                    </div>
                   </div>
+                  <h2 className="text-2xl font-extrabold text-[var(--text)] mb-1.5">
+                    {avgScore >= 80 ? '🏆 Cognitive Transfer Champion!' : avgScore >= 65 ? '⚡ Great Transfer Mastery' : '📚 Continue Practice'}
+                  </h2>
+                  <p className="text-sm text-[var(--text-soft)]">
+                    Average transfer score across {scores.length} scenarios in {activeSubject}
+                  </p>
                 </div>
-              </div>
 
-              {currentRound.quick_understanding_question && (
-                <div className="p-3 mb-4 rounded-lg bg-[var(--success-soft)] border border-[var(--border)] text-[12.5px]">
-                  <strong className="text-[var(--success)] block mb-1">✓ Correct Understanding:</strong>
-                  {currentRound.quick_understanding_question.correct_answer} — {currentRound.quick_understanding_question.explanation}
-                </div>
-              )}
-
-              <div className="mb-4">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-2">Concepts Applied & Mastered</div>
-                <div className="flex flex-wrap gap-2">
-                  {(currentRound.conceptsApplied || []).map((c, i) => (
-                    <span key={i} className="flex items-center gap-1 px-2.5 py-1 bg-[var(--accent-soft)] text-[var(--accent)] rounded-full text-[11.5px] font-semibold">
-                      <CheckCircle2 size={11} /> {c}
-                    </span>
+                <div className="space-y-2.5 max-w-md mx-auto text-left">
+                  {scores.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between p-3.5 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-sm">
+                      <span className="font-semibold text-[var(--text)]">Round {i + 1}</span>
+                      <span className="font-extrabold text-[var(--accent)]">{s.score} / 100</span>
+                    </div>
                   ))}
                 </div>
-              </div>
 
-              <div className="border border-[var(--border)] rounded-lg p-3.5 mb-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Model Transfer Solution</div>
-                <div className="text-[13px] leading-relaxed">{currentRound.modelAnswer}</div>
-              </div>
-
-              {answer && (
-                <div className="bg-[var(--surface-alt)] rounded-lg p-3.5">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">Your Submitted Answer</div>
-                  <div className="text-[13px] text-[var(--text-soft)] leading-relaxed">{answer}</div>
-                </div>
-              )}
-            </Card>
-
-            <Button onClick={nextRound} className="w-full justify-center">
-              {roundIdx + 1 < rounds.length ? `Next Question (${roundIdx + 2}/${rounds.length})` : 'See Final Results'} <ChevronRight size={15} />
-            </Button>
+                <Button size="lg" onClick={() => setPhase('intro')} className="w-full max-w-md mx-auto justify-center">
+                  <RotateCcw size={16} /> Practice Another Challenge
+                </Button>
+              </Card>
+            )}
           </div>
-        )}
-
-        {/* Done */}
-        {phase === 'done' && (
-          <Card>
-            <div className="text-center mb-6">
-              <div className="relative inline-block mb-3">
-                <ScoreRing score={avgScore} size={100} />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-[22px] font-extrabold">{avgScore}</span>
-                </div>
-              </div>
-              <div className="text-[18px] font-extrabold mb-1">
-                {avgScore >= 80 ? '🏆 Transfer Champion!' : avgScore >= 65 ? '⚡ Great Transfer Ability' : '📚 Keep Practising'}
-              </div>
-              <div className="text-sm text-[var(--text-soft)]">Average transfer score across {scores.length} questions from {activeSubject}</div>
-            </div>
-
-            <div className="space-y-2 mb-6">
-              {scores.map((s, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 bg-[var(--surface-alt)] rounded-lg">
-                  <div className={`w-2 h-2 rounded-full ${s.score >= 80 ? 'bg-green-500' : s.score >= 65 ? 'bg-amber-500' : 'bg-red-500'}`} />
-                  <span className="text-[13px] font-semibold flex-1">Round {i + 1}</span>
-                  <span className="text-[13px] font-extrabold">{s.score}/100</span>
-                </div>
-              ))}
-            </div>
-
-            <Button onClick={() => setPhase('intro')} className="w-full justify-center">
-              <RotateCcw size={14} /> Try Again
-            </Button>
-          </Card>
-        )}
-      </div>
-      </>
+        </>
       )}
       <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
     </>

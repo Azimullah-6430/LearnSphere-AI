@@ -221,6 +221,15 @@ export default function LearnAnywhere() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!showHistoryModal) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowHistoryModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showHistoryModal])
+
   // User-scoped cache loader: ensure Student A's cached activity is NEVER presented to Student B
   useEffect(() => {
     // Reset transient state on user change to prevent cross-account stale cache leakage
@@ -724,6 +733,7 @@ export default function LearnAnywhere() {
     <div className="space-y-6">
       <PageHead
         title="Learn from Anywhere"
+        subtitle="Turn everyday surroundings and local materials into hands-on science and engineering experiments aligned with your syllabus."
         action={
           <div className="flex items-center gap-2">
             <button
@@ -732,23 +742,20 @@ export default function LearnAnywhere() {
                 setShowHistoryModal(true)
                 loadHistory(1)
               }}
-              className="px-3 py-1.5 bg-[var(--surface-elevated)] hover:bg-[var(--surface-muted)] text-[var(--text)] border border-[var(--border)] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              className="px-3 py-1.5 bg-[var(--surface-alt)] hover:bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
             >
               <History size={14} className="text-[var(--accent)]" />
               <span>Activity History</span>
             </button>
             {isOnline ? (
               <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <Wifi size={12} className="text-emerald-500" /> Rural Data-Saver Mode
+                <Wifi size={12} className="text-emerald-500" /> Data-Saver Mode
               </span>
             ) : (
               <span className="px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <WifiOff size={12} className="text-amber-500" /> Offline Reading Mode
+                <WifiOff size={12} className="text-amber-500" /> Offline Mode
               </span>
             )}
-            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold hidden md:flex items-center gap-1.5">
-              <Sprout size={13} className="text-emerald-500" /> Rural & Village Learning
-            </span>
           </div>
         }
       />
@@ -759,35 +766,20 @@ export default function LearnAnywhere() {
           <WifiOff size={16} className="text-amber-500 shrink-0" />
           <div className="flex-1 leading-relaxed">
             <strong>Offline Reading Mode: </strong>
-            Your connection is currently unavailable. Your previously loaded activity instructions remain readable below. Reconnect to generate new AI experiments.
+            Your connection is currently unavailable. Your previously loaded activity instructions remain readable below. Reconnect to generate new activities.
           </div>
         </div>
       )}
 
-      {/* Educational Landing Intro Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-5 md:p-6 shadow-md">
-        <div className="relative z-10 max-w-3xl space-y-2">
-          <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-bold uppercase tracking-wider backdrop-blur-xs">
-            <Sparkles size={12} /> Real-World Academic Discovery
-          </div>
-          <h1 className="text-xl md:text-2xl font-black tracking-tight leading-snug">
-            Turn Your Natural Surroundings into a Science & Math Laboratory
-          </h1>
-          <p className="text-xs md:text-sm text-emerald-50 font-normal leading-relaxed">
-            You do not need expensive lab equipment or store-bought kits to master your syllabus. Use soil, sunlight, water, plants, bicycle gears, clay pots, and everyday household objects to perform real academic experiments right in your village or home.
-          </p>
-        </div>
-      </div>
-
       {/* Setup & Resource Filter Card */}
-      <Card className="p-5 md:p-6 shadow-sm space-y-5 border-[var(--border)]">
+      <Card className="p-5 md:p-7 shadow-sm space-y-6 border-[var(--border)]">
         {/* 1. Validated Syllabus Subject Selector */}
         <div>
-          <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <BookOpen size={13} className="text-[var(--accent)]" />
+          <label className="text-sm sm:text-base font-semibold text-[var(--text)] mb-2.5 flex items-center gap-2">
+            <BookOpen size={16} className="text-[var(--accent)]" />
             <span>1. Choose Validated Syllabus Subject</span>
           </label>
-          <div className="flex gap-2 flex-wrap" role="radiogroup" aria-label="Select Subject">
+          <div className="flex gap-2.5 flex-wrap" role="radiogroup" aria-label="Select Subject">
             {subjects.map((sub) => {
               const isSelected = selectedSubject === sub
               return (
@@ -795,7 +787,7 @@ export default function LearnAnywhere() {
                   key={sub}
                   type="button"
                   onClick={() => handleSubjectSelect(sub)}
-                  className={`min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  className={`min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold border transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-sm'
                       : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
@@ -812,11 +804,11 @@ export default function LearnAnywhere() {
         {/* 2. Syllabus Topic Selector (Populated exclusively from active syllabus) */}
         {validatedSubjectTopics.length > 0 && (
           <div>
-            <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <Target size={13} className="text-[var(--accent)]" />
+            <label className="text-sm sm:text-base font-semibold text-[var(--text)] mb-2.5 flex items-center gap-2">
+              <Target size={16} className="text-[var(--accent)]" />
               <span>2. Select Syllabus Topic / Unit</span>
             </label>
-            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
+            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2.5">
               {validatedSubjectTopics.slice(0, 9).map((top) => {
                 const isSelected = selectedTopic === top
                 return (
@@ -824,15 +816,15 @@ export default function LearnAnywhere() {
                     key={top}
                     type="button"
                     onClick={() => handleTopicSelect(top)}
-                    className={`min-h-[42px] px-3.5 py-2 rounded-xl text-left text-xs font-medium border transition-all truncate flex items-center justify-between gap-2 cursor-pointer ${
+                    className={`min-h-[46px] px-4 py-2.5 rounded-xl text-left text-sm font-medium border transition-all truncate flex items-center justify-between gap-2 cursor-pointer ${
                       isSelected
-                        ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-bold shadow-2xs'
+                        ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-semibold shadow-2xs'
                         : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
                     }`}
                     title={top}
                   >
                     <span className="truncate">{top}</span>
-                    {isSelected && <Check size={14} className="text-[var(--accent)] shrink-0" />}
+                    {isSelected && <Check size={16} className="text-[var(--accent)] shrink-0" />}
                   </button>
                 )
               })}
@@ -842,11 +834,11 @@ export default function LearnAnywhere() {
 
         {/* 3. Learning Strategy & Method Selector */}
         <div>
-          <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <BookOpenCheck size={13} className="text-[var(--accent)]" />
+          <label className="text-sm sm:text-base font-semibold text-[var(--text)] mb-2.5 flex items-center gap-2">
+            <BookOpenCheck size={16} className="text-[var(--accent)]" />
             <span>3. Choose Learning Method (Optional)</span>
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
             {LEARNING_METHODS.map(({ id, label, icon: Icon, desc }) => {
               const isSelected = learningMethod === id
               return (
@@ -857,17 +849,17 @@ export default function LearnAnywhere() {
                     setLearningMethod(id)
                     clearActivityState()
                   }}
-                  className={`min-h-[50px] p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
+                  className={`min-h-[58px] p-3 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
                     isSelected
                       ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] shadow-2xs'
                       : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Icon size={13} className={isSelected ? 'text-[var(--accent)]' : 'opacity-70'} />
+                  <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
+                    <Icon size={15} className={isSelected ? 'text-[var(--accent)]' : 'opacity-70'} />
                     <span className="truncate">{label}</span>
                   </div>
-                  <span className="text-[10px] text-[var(--text-faint)] font-normal line-clamp-1 mt-0.5">
+                  <span className="text-xs text-[var(--text-soft)] font-normal line-clamp-1 mt-1">
                     {desc}
                   </span>
                 </button>
@@ -878,11 +870,11 @@ export default function LearnAnywhere() {
 
         {/* 4. Local Surroundings & Material Environment Mode */}
         <div>
-          <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Compass size={13} className="text-[var(--accent)]" />
+          <label className="text-sm sm:text-base font-semibold text-[var(--text)] mb-2.5 flex items-center gap-2">
+            <Compass size={16} className="text-[var(--accent)]" />
             <span>4. Available Natural / Village Environment</span>
           </label>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2.5 flex-wrap">
             {RESOURCE_ENVIRONMENTS.map(({ id, label, icon: Icon }) => {
               const isSelected = selectedEnv === id
               return (
@@ -890,13 +882,13 @@ export default function LearnAnywhere() {
                   key={id}
                   type="button"
                   onClick={() => setSelectedEnv(id)}
-                  className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-2 cursor-pointer ${
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all flex items-center gap-2 cursor-pointer ${
                     isSelected
-                      ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-bold shadow-2xs'
+                      ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-semibold shadow-2xs'
                       : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
                   }`}
                 >
-                  <Icon size={14} className={isSelected ? 'text-[var(--accent)]' : 'opacity-70'} />
+                  <Icon size={16} className={isSelected ? 'text-[var(--accent)]' : 'opacity-70'} />
                   <span>{label}</span>
                 </button>
               )
@@ -905,9 +897,9 @@ export default function LearnAnywhere() {
         </div>
 
         {/* 4. Text Description of Available Objects + Quick Add Tags */}
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
-            <Wrench size={13} className="text-[var(--accent)]" />
+        <div className="space-y-2.5">
+          <label className="text-sm sm:text-base font-semibold text-[var(--text)] flex items-center gap-2">
+            <Wrench size={16} className="text-[var(--accent)]" />
             <span>4. Objects, Plants, Tools & Materials You Have (Optional Description)</span>
           </label>
           <textarea
@@ -915,17 +907,17 @@ export default function LearnAnywhere() {
             onChange={(e) => setCustomMaterials(e.target.value)}
             placeholder="e.g. Red clay, plastic bottle, turmeric, clean water, bicycle gears, sunlight, dry leaves, string..."
             rows={2}
-            className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-faint)] leading-relaxed resize-none"
+            className="w-full px-4 py-3 text-sm sm:text-base rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-faint)] leading-relaxed resize-none"
           />
           {/* Quick-add tags for budget mobile 1-tap entry */}
-          <div className="flex items-center gap-1.5 flex-wrap pt-1">
-            <span className="text-[11px] font-semibold text-[var(--text-faint)]">Quick add:</span>
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <span className="text-xs sm:text-sm font-semibold text-[var(--text-soft)]">Quick add:</span>
             {QUICK_MATERIAL_TAGS.map((tag) => (
               <button
                 key={tag}
                 type="button"
                 onClick={() => handleAddMaterialTag(tag)}
-                className="px-2.5 py-1 text-[11px] rounded-lg bg-[var(--surface-alt)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] border border-[var(--border)] text-[var(--text-soft)] font-medium transition-colors cursor-pointer"
+                className="px-3 py-1.5 text-xs sm:text-[13px] rounded-lg bg-[var(--surface-alt)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] border border-[var(--border)] text-[var(--text-soft)] font-medium transition-colors cursor-pointer"
               >
                 + {tag}
               </button>
@@ -934,11 +926,11 @@ export default function LearnAnywhere() {
         </div>
 
         {/* 5. Image Upload & Constraint Mode Selection */}
-        <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t border-[var(--border)]">
+        <div className="grid sm:grid-cols-2 gap-4 pt-3 border-t border-[var(--border)]">
           {/* Photo / Camera Option */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
-              <Camera size={13} className="text-[var(--accent)]" />
+          <div className="space-y-2.5">
+            <label className="text-sm sm:text-base font-semibold text-[var(--text)] flex items-center gap-2">
+              <Camera size={16} className="text-[var(--accent)]" />
               <span>Photograph Materials (Optional)</span>
             </label>
             {imagePreview ? (
@@ -955,12 +947,12 @@ export default function LearnAnywhere() {
                   title="Remove photo"
                   aria-label="Remove photo"
                 >
-                  <X size={13} />
+                  <X size={14} />
                 </button>
               </div>
             ) : (
-              <label className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)]/50 hover:bg-[var(--surface-alt)] text-[var(--text-soft)] text-xs font-medium cursor-pointer transition-colors w-fit">
-                <ImageIcon size={15} className="text-[var(--text-faint)]" />
+              <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)]/50 hover:bg-[var(--surface-alt)] text-[var(--text-soft)] text-sm font-medium cursor-pointer transition-colors w-fit">
+                <ImageIcon size={17} className="text-[var(--text-faint)]" />
                 <span>Upload or take a photo of materials</span>
                 <input
                   type="file"
@@ -973,26 +965,26 @@ export default function LearnAnywhere() {
           </div>
 
           {/* Material Constraint Mode Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
-              <ShieldCheck size={13} className="text-[var(--accent)]" />
+          <div className="space-y-2.5">
+            <label className="text-sm sm:text-base font-semibold text-[var(--text)] flex items-center gap-2">
+              <ShieldCheck size={16} className="text-[var(--accent)]" />
               <span>Material Requirement Preference</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setConstraintMode('strict_only')}
-                className={`min-h-[42px] p-2 rounded-xl text-left text-[11px] font-semibold border transition-all cursor-pointer ${
+                className={`min-h-[50px] p-2.5 rounded-xl text-left text-xs sm:text-sm font-semibold border transition-all cursor-pointer ${
                   constraintMode === 'strict_only'
                     ? 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400 font-bold'
                     : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
                 }`}
               >
-                <div className="flex items-center gap-1">
-                  <CheckCircle2 size={12} className={constraintMode === 'strict_only' ? 'text-emerald-500' : 'opacity-40'} />
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 size={14} className={constraintMode === 'strict_only' ? 'text-emerald-500' : 'opacity-40'} />
                   <span>Strictly Mine</span>
                 </div>
-                <div className="text-[10px] text-[var(--text-faint)] font-normal mt-0.5 leading-tight">
+                <div className="text-xs text-[var(--text-soft)] font-normal mt-0.5 leading-tight">
                   Only use materials listed
                 </div>
               </button>
@@ -1000,17 +992,17 @@ export default function LearnAnywhere() {
               <button
                 type="button"
                 onClick={() => setConstraintMode('allow_minimal_common')}
-                className={`min-h-[42px] p-2 rounded-xl text-left text-[11px] font-semibold border transition-all cursor-pointer ${
+                className={`min-h-[50px] p-2.5 rounded-xl text-left text-xs sm:text-sm font-semibold border transition-all cursor-pointer ${
                   constraintMode === 'allow_minimal_common'
                     ? 'bg-[var(--surface-alt)] border-[var(--accent)] text-[var(--accent)] font-bold'
                     : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-alt)]'
                 }`}
               >
-                <div className="flex items-center gap-1">
-                  <Sparkles size={12} className={constraintMode === 'allow_minimal_common' ? 'text-[var(--accent)]' : 'opacity-40'} />
+                <div className="flex items-center gap-1.5">
+                  <Sparkles size={14} className={constraintMode === 'allow_minimal_common' ? 'text-[var(--accent)]' : 'opacity-40'} />
                   <span>Allow Common Items</span>
                 </div>
-                <div className="text-[10px] text-[var(--text-faint)] font-normal mt-0.5 leading-tight">
+                <div className="text-xs text-[var(--text-soft)] font-normal mt-0.5 leading-tight">
                   Allow water, thread, spoon
                 </div>
               </button>
@@ -1019,14 +1011,14 @@ export default function LearnAnywhere() {
         </div>
 
         {/* Generate Trigger Footer */}
-        <div className="pt-3 border-t border-[var(--border)] flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div className="pt-4 border-t border-[var(--border)] flex flex-col sm:flex-row gap-3 items-center justify-between">
           <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-[var(--text-faint)]">Difficulty:</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-semibold text-[var(--text-soft)]">Difficulty:</span>
               <select
                 value={difficulty}
                 onChange={(e) => setDifficulty(e.target.value)}
-                className="px-2.5 py-1.5 rounded-lg border border-[var(--border-strong)] text-xs font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                className="px-3 py-2 rounded-xl border border-[var(--border-strong)] text-sm font-medium bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] min-h-[42px]"
               >
                 <option value="Easy">Easy (Everyday Observations)</option>
                 <option value="Medium">Medium (Guided Hands-on)</option>
@@ -1034,12 +1026,12 @@ export default function LearnAnywhere() {
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-[var(--text-faint)]">Language:</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs sm:text-sm font-semibold text-[var(--text-soft)]">Language:</span>
               <select
                 value={preferredLanguage}
                 onChange={(e) => setPreferredLanguage(e.target.value)}
-                className="px-2.5 py-1.5 rounded-lg border border-[var(--border-strong)] text-xs font-semibold bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                className="px-3 py-2 rounded-xl border border-[var(--border-strong)] text-sm font-medium bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] min-h-[42px]"
               >
                 {EXPLANATION_LANGUAGES.map(lang => (
                   <option key={lang.id} value={lang.id}>{lang.label}</option>
@@ -1051,9 +1043,9 @@ export default function LearnAnywhere() {
           <Button
             onClick={handleGenerateActivity}
             disabled={loading}
-            className="w-full sm:w-auto min-h-[44px] px-6 flex items-center justify-center gap-2 cursor-pointer shadow-sm text-xs font-bold"
+            className="w-full sm:w-auto min-h-[46px] px-6 flex items-center justify-center gap-2 cursor-pointer shadow-sm text-sm sm:text-base font-bold"
           >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             <span>{activity ? 'Generate Another Activity' : 'Design Practical Activity'}</span>
           </Button>
         </div>
@@ -1123,42 +1115,42 @@ export default function LearnAnywhere() {
       {/* Generated Activity Presentation */}
       {!loading && activity && (
         <div className="space-y-6 animate-fadeIn">
-          <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 md:p-7 shadow-sm space-y-6">
+          <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 md:p-8 shadow-sm space-y-7">
             {/* Header / Badges */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[var(--border)] pb-5">
-              <div className="space-y-2">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[var(--border)] pb-6">
+              <div className="space-y-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge tone="accent">{activity.subject || selectedSubject}</Badge>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
-                    <Compass size={11} /> {activity.resource_category || selectedEnv}
+                  <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
+                    <Compass size={13} /> {activity.resource_category || selectedEnv}
                   </span>
                   {activity.demonstration_type === 'thought_experiment_and_analog' ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1">
-                      <Lightbulb size={11} /> Thought Experiment & Physical Analog
+                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1.5">
+                      <Lightbulb size={13} /> Thought Experiment & Physical Analog
                     </span>
                   ) : activity.demonstration_type === 'outdoor_observation' ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                      <TreePine size={11} /> Outdoor & Nature Observation
+                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                      <TreePine size={13} /> Outdoor & Nature Observation
                     </span>
                   ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
-                      <Home size={11} /> Household Hands-on Activity
+                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1.5">
+                      <Home size={13} /> Household Hands-on Activity
                     </span>
                   )}
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[var(--surface-alt)] text-[var(--text-soft)] border border-[var(--border)]">
+                  <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-[var(--surface-alt)] text-[var(--text-soft)] border border-[var(--border)]">
                     Topic: {activity.syllabus_topic || selectedTopic || 'Syllabus Grounding'}
                   </span>
                   {(activity.syllabus_id || activeSyllabusId) && (
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                      <ShieldCheck size={11} /> Validated Syllabus Traceable
+                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                      <ShieldCheck size={13} /> Validated Syllabus Traceable
                     </span>
                   )}
                 </div>
-                <h2 className="text-xl md:text-2xl font-black text-[var(--text)] tracking-tight leading-snug">
+                <h2 className="heading-section text-2xl sm:text-3xl font-black text-[var(--text)] tracking-tight leading-snug">
                   {activity.title || activity.activity_title}
                 </h2>
-                <div className="text-xs text-[var(--text-soft)] flex items-start gap-2 pt-0.5">
-                  <Lightbulb size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-sm sm:text-base text-[var(--text-soft)] flex items-start gap-2 pt-1">
+                  <Lightbulb size={18} className="text-amber-500 shrink-0 mt-0.5" />
                   <span className="leading-relaxed">
                     <strong className="text-[var(--text)]">Learning Objective: </strong>
                     {activity.learning_objective || (activity.learning_objectives && activity.learning_objectives[0])}
@@ -1167,20 +1159,20 @@ export default function LearnAnywhere() {
               </div>
 
               {/* Progress Indicator Card */}
-              <div className="shrink-0 bg-[var(--surface-alt)] p-3.5 rounded-2xl border border-[var(--border)] text-center min-w-[150px]">
-                <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1">
+              <div className="shrink-0 bg-[var(--surface-alt)] p-4 rounded-2xl border border-[var(--border)] text-center min-w-[170px]">
+                <div className="text-xs sm:text-sm font-semibold text-[var(--text-soft)] uppercase tracking-wider mb-1">
                   Practical Steps
                 </div>
-                <div className="text-xl font-black text-[var(--accent)]">
+                <div className="text-2xl sm:text-3xl font-black text-[var(--accent)]">
                   {completedCount} / {totalSteps} Done
                 </div>
-                <div className="w-full bg-[var(--border)] h-2 rounded-full overflow-hidden mt-2">
+                <div className="w-full bg-[var(--border)] h-2.5 rounded-full overflow-hidden mt-2.5">
                   <div
                     className="bg-[var(--accent)] h-full transition-all duration-300 rounded-full"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
-                <div className="text-[10px] font-semibold text-[var(--text-faint)] mt-1.5">
+                <div className="text-xs font-semibold text-[var(--text-soft)] mt-2">
                   {progressPercent === 100 ? '🎉 Activity Complete!' : `${progressPercent}% Completed`}
                 </div>
               </div>
@@ -1188,8 +1180,8 @@ export default function LearnAnywhere() {
 
             {/* Non-Physical / Thought Experiment Feasibility Notice */}
             {activity.demonstration_type === 'thought_experiment_and_analog' && (
-              <div className="p-3.5 md:p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-900 dark:text-purple-300 flex items-start gap-3">
-                <Info size={17} className="text-purple-500 shrink-0 mt-0.5" />
+              <div className="p-4 md:p-5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-sm sm:text-base text-purple-900 dark:text-purple-300 flex items-start gap-3">
+                <Info size={20} className="text-purple-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
                   <strong>Concept Feasibility Notice: </strong>
                   This syllabus topic involves microscopic, relativistic, or theoretical concepts that cannot be physically isolated in a household setting without specialized laboratory equipment. This activity uses rigorous thought experiments and macroscopic everyday analogs to build concrete scientific intuition.
@@ -1199,17 +1191,17 @@ export default function LearnAnywhere() {
 
             {/* Multimodal Image Observation & Analysis Block */}
             {activity.image_analysis && (
-              <div className={`p-4 md:p-5 rounded-2xl border space-y-3 ${
+              <div className={`p-5 md:p-6 rounded-2xl border space-y-4 ${
                 activity.image_analysis.image_processed
                   ? 'bg-sky-500/5 border-sky-500/20'
                   : 'bg-[var(--surface-alt)] border-[var(--border)]'
               }`}>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--text)]">
-                    <Camera size={16} className={activity.image_analysis.image_processed ? 'text-sky-500' : 'text-[var(--text-faint)]'} />
+                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
+                    <Camera size={18} className={activity.image_analysis.image_processed ? 'text-sky-500' : 'text-[var(--text-faint)]'} />
                     <span>Image Observation & Visual Identification</span>
                   </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                  <span className={`px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold border ${
                     activity.image_analysis.image_processed
                       ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30'
                       : 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20'
@@ -1221,9 +1213,9 @@ export default function LearnAnywhere() {
                 </div>
 
                 {activity.image_analysis.image_processed ? (
-                  <div className="space-y-2 text-xs text-[var(--text-soft)]">
-                    <div className="font-semibold text-[var(--text)] flex items-center gap-1.5">
-                      <Target size={14} className="text-sky-500" />
+                  <div className="space-y-3 text-sm sm:text-base text-[var(--text-soft)]">
+                    <div className="font-semibold text-[var(--text)] flex items-center gap-2">
+                      <Target size={16} className="text-sky-500" />
                       <span>Identified Object / Structure: </span>
                       <span className="font-bold text-sky-700 dark:text-sky-300">
                         {activity.image_analysis.identified_object_or_structure}
@@ -1231,13 +1223,13 @@ export default function LearnAnywhere() {
                     </div>
 
                     {activity.image_analysis.visible_features?.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase">
+                      <div className="space-y-1.5">
+                        <div className="text-xs sm:text-sm font-semibold text-[var(--text-soft)]">
                           Observed Visual Features:
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2">
                           {activity.image_analysis.visible_features.map((feat, fIdx) => (
-                            <span key={fIdx} className="px-2 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[11px] font-medium text-[var(--text)]">
+                            <span key={fIdx} className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs sm:text-sm font-medium text-[var(--text)]">
                               • {feat}
                             </span>
                           ))}
@@ -1246,15 +1238,15 @@ export default function LearnAnywhere() {
                     )}
 
                     {activity.image_analysis.syllabus_connection && (
-                      <p className="text-[11px] leading-relaxed pt-1 text-[var(--text)]">
+                      <p className="text-sm sm:text-base leading-relaxed pt-1 text-[var(--text)]">
                         <strong>Syllabus Connection: </strong>
                         {activity.image_analysis.syllabus_connection}
                       </p>
                     )}
 
                     {activity.image_analysis.clarification_needed && (
-                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-[11px] flex items-start gap-2 mt-2">
-                        <HelpCircle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-sm flex items-start gap-2.5 mt-2">
+                        <HelpCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
                         <div>
                           <strong>Clarification Needed: </strong>
                           {activity.image_analysis.clarification_needed}
@@ -1263,7 +1255,7 @@ export default function LearnAnywhere() {
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs text-[var(--text-soft)] leading-relaxed">
+                  <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed">
                     {activity.image_analysis.image_note || 'Generated a structured text-based practical activity based on your syllabus topic.'}
                   </p>
                 )}
@@ -1271,17 +1263,17 @@ export default function LearnAnywhere() {
             )}
 
             {/* Required Zero-Cost Materials Checklist */}
-            <div className="p-4 md:p-5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 space-y-3">
+            <div className="p-5 md:p-6 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 space-y-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
-                  <Sprout size={16} />
+                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-emerald-800 dark:text-emerald-300">
+                  <Sprout size={18} />
                   <span>Required Zero-Cost & Locally Sourced Materials</span>
                 </div>
-                <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
+                <span className="text-xs sm:text-sm text-emerald-700 dark:text-emerald-400 font-medium">
                   Tap item to check off
                 </span>
               </div>
-              <div className="grid sm:grid-cols-2 gap-2.5">
+              <div className="grid sm:grid-cols-2 gap-3">
                 {(activity.local_materials || activity.materials_student_has || []).map((mat, idx) => {
                   const isChecked = Boolean(checkedMaterials[idx])
                   return (
@@ -1289,13 +1281,13 @@ export default function LearnAnywhere() {
                       key={idx}
                       type="button"
                       onClick={() => toggleMaterial(idx)}
-                      className={`p-2.5 rounded-xl border text-left text-xs flex items-start gap-2.5 transition-all cursor-pointer ${
+                      className={`min-h-[46px] p-3 rounded-xl border text-left text-sm sm:text-base flex items-start gap-3 transition-all cursor-pointer ${
                         isChecked
                           ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-100 line-through opacity-80'
                           : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text)] hover:border-emerald-500/40'
                       }`}
                     >
-                      <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-[10px] font-bold ${
+                      <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold ${
                         isChecked ? 'bg-emerald-500 text-white border-emerald-500' : 'border-[var(--border-strong)] bg-[var(--surface)]'
                       }`}>
                         {isChecked ? '✓' : ''}
@@ -1308,12 +1300,12 @@ export default function LearnAnywhere() {
 
               {/* No Purchase Alternative & Safe Substitutions */}
               {(activity.no_purchase_alternative || (activity.safe_substitutions && activity.safe_substitutions.length > 0)) && (
-                <div className="pt-2 border-t border-emerald-500/20 text-xs text-emerald-900 dark:text-emerald-300 space-y-1">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <ShieldCheck size={13} className="text-emerald-600 dark:text-emerald-400" />
+                <div className="pt-2.5 border-t border-emerald-500/20 text-sm sm:text-base text-emerald-900 dark:text-emerald-300 space-y-1">
+                  <div className="font-bold flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-emerald-600 dark:text-emerald-400" />
                     <span>No-Purchase Zero-Cost Substitutions:</span>
                   </div>
-                  <p className="text-[11px] opacity-90 leading-relaxed">
+                  <p className="opacity-95 leading-relaxed text-sm">
                     {activity.no_purchase_alternative || activity.safe_substitutions?.join(' • ')}
                   </p>
                 </div>
@@ -1321,24 +1313,24 @@ export default function LearnAnywhere() {
             </div>
 
             {/* Step-by-Step Practical Instructions */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
-                  <Layers size={14} className="text-[var(--accent)]" />
+                <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-center gap-2">
+                  <Layers size={17} className="text-[var(--accent)]" />
                   <span>Step-by-Step Procedure</span>
                 </div>
-                <span className="text-[11px] text-[var(--text-faint)]">
+                <span className="text-xs sm:text-sm text-[var(--text-soft)]">
                   Tap step to mark complete
                 </span>
               </div>
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {(activity.steps || []).map((step, idx) => {
                   const isDone = Boolean(completedSteps[idx])
                   return (
                     <div
                       key={idx}
                       onClick={() => toggleStep(idx)}
-                      className={`min-h-[48px] p-3.5 md:p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${
+                      className={`min-h-[54px] p-4 md:p-5 rounded-xl border transition-all cursor-pointer flex items-start gap-4 ${
                         isDone
                           ? 'bg-[var(--accent-soft)]/50 border-[var(--accent)] text-[var(--text)] shadow-2xs'
                           : 'bg-[var(--surface-alt)]/60 border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-soft)]'
@@ -1353,12 +1345,12 @@ export default function LearnAnywhere() {
                         }
                       }}
                     >
-                      <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold transition-colors ${
-                        isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-faint)]'
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 border text-sm font-bold transition-colors ${
+                        isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)]'
                       }`}>
                         {isDone ? '✓' : idx + 1}
                       </div>
-                      <div className="text-xs md:text-sm font-medium leading-relaxed flex-1">
+                      <div className="text-sm sm:text-base font-medium leading-relaxed flex-1">
                         {step}
                       </div>
                     </div>
@@ -1368,23 +1360,23 @@ export default function LearnAnywhere() {
             </div>
 
             {/* Observation & Simple Explanation Grid */}
-            <div className="grid md:grid-cols-2 gap-4 pt-2 border-t border-[var(--border)]">
-              <div className="p-4 md:p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
-                  <Eye size={16} className="text-blue-500" />
+            <div className="grid md:grid-cols-2 gap-5 pt-3 border-t border-[var(--border)]">
+              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5">
+                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
+                  <Eye size={18} className="text-blue-500" />
                   <span>What You Will Observe</span>
                 </div>
-                <p className="text-xs text-[var(--text-soft)] leading-relaxed">
+                <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed">
                   {activity.expected_observation || activity.expected_observations}
                 </p>
               </div>
 
-              <div className="p-4 md:p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
-                  <Lightbulb size={16} className="text-amber-500" />
+              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5">
+                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
+                  <Lightbulb size={18} className="text-amber-500" />
                   <span>Simple Explanation (Why It Works)</span>
                 </div>
-                <p className="text-xs text-[var(--text-soft)] leading-relaxed font-normal">
+                <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed font-normal">
                   {activity.simple_explanation || activity.scientific_principle}
                 </p>
               </div>
@@ -1394,66 +1386,66 @@ export default function LearnAnywhere() {
             {(activity.coding_task || activity.code_snippet) && (() => {
               const codeObj = activity.coding_task || { code: activity.code_snippet, language: 'python', task_objective: 'Algorithm Implementation' }
               return (
-                <div className="rounded-2xl bg-gray-900 border border-gray-800 text-gray-100 overflow-hidden shadow-md space-y-0 my-4">
-                  <div className="px-4 py-3 bg-gray-950 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-2 text-xs font-mono font-bold text-emerald-400">
-                      <Code size={15} />
+                <div className="rounded-2xl bg-gray-900 border border-gray-800 text-gray-100 overflow-hidden shadow-md space-y-0 my-5">
+                  <div className="px-5 py-3.5 bg-gray-950 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2.5">
+                    <div className="flex items-center gap-2.5 text-sm font-mono font-bold text-emerald-400">
+                      <Code size={17} />
                       <span className="uppercase">{codeObj.language || 'Python / Pseudocode'}</span>
-                      <span className="text-[10px] text-gray-400 font-normal border border-gray-700 rounded-md px-2 py-0.5">
+                      <span className="text-xs text-gray-300 font-normal border border-gray-700 rounded-md px-2.5 py-0.5">
                         {codeObj.task_objective || 'Executable Code Task'}
                       </span>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleCopyCode(codeObj.code)}
-                      className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs sm:text-sm font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      {copyCodeSuccess ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                      {copyCodeSuccess ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
                       <span>{copyCodeSuccess ? 'Copied!' : 'Copy Code'}</span>
                     </button>
                   </div>
 
                   {/* Code Editor Body */}
-                  <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre font-normal bg-gray-900/90 selection:bg-emerald-900 selection:text-white">
+                  <pre className="p-5 md:p-6 text-sm sm:text-base font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre font-normal bg-gray-900/90 selection:bg-emerald-900 selection:text-white">
                     <code>{codeObj.code}</code>
                   </pre>
 
                   {/* Logic Breakdown & Execution Box */}
-                  <div className="p-4 bg-gray-950/80 border-t border-gray-800 text-xs text-gray-300 space-y-3">
+                  <div className="p-5 bg-gray-950/80 border-t border-gray-800 text-sm text-gray-300 space-y-3.5">
                     {codeObj.logic_breakdown && codeObj.logic_breakdown.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="text-[11px] font-mono font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
-                          <Terminal size={13} /> Logic Breakdown:
+                      <div className="space-y-2">
+                        <div className="text-xs sm:text-sm font-mono font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+                          <Terminal size={15} /> Logic Breakdown:
                         </div>
-                        <ul className="space-y-1 pl-1">
+                        <ul className="space-y-1.5 pl-1">
                           {codeObj.logic_breakdown.map((lb, lbIdx) => (
-                            <li key={lbIdx} className="text-[11px] text-gray-300 flex items-start gap-1.5">
+                            <li key={lbIdx} className="text-xs sm:text-sm text-gray-300 flex items-start gap-2">
                               <span className="text-emerald-500 font-mono shrink-0">•</span>
-                              <span className="leading-snug">{lb}</span>
+                              <span className="leading-relaxed">{lb}</span>
                             </li>
                           ))}
                         </ul>
                       </div>
                     )}
 
-                    <div className="grid sm:grid-cols-2 gap-3 pt-1">
+                    <div className="grid sm:grid-cols-2 gap-3.5 pt-1">
                       {codeObj.run_command && (
-                        <div className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
-                          <div className="text-[10px] font-mono font-bold text-gray-400 uppercase flex items-center gap-1">
-                            <Play size={11} className="text-emerald-400" /> How to Run:
+                        <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
+                          <div className="text-xs font-mono font-bold text-gray-400 uppercase flex items-center gap-1.5">
+                            <Play size={13} className="text-emerald-400" /> How to Run:
                           </div>
-                          <div className="text-[11px] font-mono text-emerald-300 font-bold">
+                          <div className="text-xs sm:text-sm font-mono text-emerald-300 font-bold">
                             {codeObj.run_command}
                           </div>
                         </div>
                       )}
 
                       {codeObj.expected_output && (
-                        <div className="p-2.5 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
-                          <div className="text-[10px] font-mono font-bold text-gray-400 uppercase flex items-center gap-1">
-                            <CheckCircle2 size={11} className="text-sky-400" /> Expected Output:
+                        <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
+                          <div className="text-xs font-mono font-bold text-gray-400 uppercase flex items-center gap-1.5">
+                            <CheckCircle2 size={13} className="text-sky-400" /> Expected Output:
                           </div>
-                          <div className="text-[11px] font-mono text-sky-300">
+                          <div className="text-xs sm:text-sm font-mono text-sky-300">
                             {codeObj.expected_output}
                           </div>
                         </div>
@@ -1461,9 +1453,9 @@ export default function LearnAnywhere() {
                     </div>
 
                     {codeObj.debugging_tips && (
-                      <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/40 text-amber-300 text-[11px] flex items-start gap-2">
-                        <Bug size={14} className="text-amber-400 shrink-0 mt-0.5" />
-                        <div>
+                      <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/40 text-amber-300 text-xs sm:text-sm flex items-start gap-2.5">
+                        <Bug size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                        <div className="leading-relaxed">
                           <strong>Debugging Guidance: </strong>
                           {codeObj.debugging_tips}
                         </div>
@@ -1480,21 +1472,21 @@ export default function LearnAnywhere() {
                 <button
                   type="button"
                   onClick={() => setShowAcademicTheory(!showAcademicTheory)}
-                  className="w-full p-4 flex items-center justify-between text-left cursor-pointer hover:bg-[var(--surface)] transition-colors"
+                  className="w-full p-4 md:p-5 flex items-center justify-between text-left cursor-pointer hover:bg-[var(--surface)] transition-colors"
                 >
-                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
-                    <Sparkles size={16} className="text-[var(--accent)]" />
+                  <div className="flex items-center gap-2.5 text-sm sm:text-base font-bold text-[var(--text)]">
+                    <Sparkles size={18} className="text-[var(--accent)]" />
                     <span>Academic Theory & Textbook Formulation</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-dim)] text-[var(--accent)] font-semibold">
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-[var(--accent-dim)] text-[var(--accent)] font-semibold">
                       {showAcademicTheory ? 'Click to collapse' : 'Click to expand'}
                     </span>
                   </div>
-                  {showAcademicTheory ? <ChevronUp size={16} className="text-[var(--text-soft)]" /> : <ChevronDown size={16} className="text-[var(--text-soft)]" />}
+                  {showAcademicTheory ? <ChevronUp size={18} className="text-[var(--text-soft)]" /> : <ChevronDown size={18} className="text-[var(--text-soft)]" />}
                 </button>
 
                 {showAcademicTheory && (
-                  <div className="p-4 pt-0 border-t border-[var(--border)] animate-fadeIn space-y-2 mt-2">
-                    <p className="text-xs text-[var(--text-soft)] leading-relaxed font-mono text-[11px] bg-[var(--surface)] p-3 rounded-xl border border-[var(--border)]">
+                  <div className="p-5 pt-0 border-t border-[var(--border)] animate-fadeIn space-y-2 mt-2">
+                    <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed bg-[var(--surface)] p-4 rounded-xl border border-[var(--border)]">
                       {activity.academic_theory || activity.scientific_principle}
                     </p>
                   </div>
@@ -1503,25 +1495,25 @@ export default function LearnAnywhere() {
             )}
 
             {/* Interactive Student On-Demand Assistance Actions */}
-            <div className="p-4 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3">
+            <div className="p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-4">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-[var(--accent)]" />
+                <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-center gap-2">
+                  <Sparkles size={16} className="text-[var(--accent)]" />
                   <span>On-Demand Learning Assistance</span>
                 </div>
-                <span className="text-[10px] text-[var(--text-faint)] font-medium">
+                <span className="text-xs sm:text-sm text-[var(--text-soft)] font-medium">
                   Tap button for instant AI support
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <button
                   type="button"
                   onClick={() => handleStudentAction('simpler_explanation')}
                   disabled={actionLoading}
-                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  <Lightbulb size={14} className="text-amber-500" />
+                  <Lightbulb size={16} className="text-amber-500" />
                   <span>Simpler Explanation</span>
                 </button>
 
@@ -1529,9 +1521,9 @@ export default function LearnAnywhere() {
                   type="button"
                   onClick={() => handleStudentAction('another_example')}
                   disabled={actionLoading}
-                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  <FileText size={14} className="text-blue-500" />
+                  <FileText size={16} className="text-blue-500" />
                   <span>Another Example</span>
                 </button>
 
@@ -1539,9 +1531,9 @@ export default function LearnAnywhere() {
                   type="button"
                   onClick={() => handleStudentAction('worked_solution')}
                   disabled={actionLoading}
-                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  <Target size={14} className="text-emerald-500" />
+                  <Target size={16} className="text-emerald-500" />
                   <span>Worked Solution</span>
                 </button>
 
@@ -1549,41 +1541,41 @@ export default function LearnAnywhere() {
                   type="button"
                   onClick={() => handleStudentAction('more_challenging_task')}
                   disabled={actionLoading}
-                  className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  <Sparkles size={14} className="text-purple-500" />
+                  <Sparkles size={16} className="text-purple-500" />
                   <span>Challenge Task</span>
                 </button>
               </div>
 
               {actionLoading && (
-                <div className="py-4 text-center text-xs text-[var(--text-soft)] font-medium flex items-center justify-center gap-2">
-                  <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
+                <div className="py-4 text-center text-sm text-[var(--text-soft)] font-medium flex items-center justify-center gap-2">
+                  <Loader2 size={18} className="animate-spin text-[var(--accent)]" />
                   <span>Generating tailored learning response...</span>
                 </div>
               )}
 
               {actionResult && (
-                <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--accent-dim)] space-y-2 animate-fadeIn relative">
+                <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--accent-dim)] space-y-3 animate-fadeIn relative">
                   <button
                     type="button"
                     onClick={() => setActionResult(null)}
-                    className="absolute top-3 right-3 text-[var(--text-faint)] hover:text-[var(--text)] p-1 cursor-pointer"
+                    className="absolute top-3 right-3 text-[var(--text-faint)] hover:text-[var(--text)] p-1.5 cursor-pointer"
                     title="Close assistance card"
                   >
-                    <X size={14} />
+                    <X size={16} />
                   </button>
-                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--accent)]">
-                    <Sparkles size={14} />
+                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--accent)]">
+                    <Sparkles size={16} />
                     <span>{actionResult.title || 'Learning Assistance'}</span>
                   </div>
-                  <p className="text-xs text-[var(--text-soft)] leading-relaxed whitespace-pre-wrap font-medium">
+                  <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed whitespace-pre-wrap font-medium">
                     {actionResult.content}
                   </p>
                   {actionResult.steps?.length > 0 && (
-                    <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--text)] pt-1">
+                    <ol className="list-decimal list-inside space-y-1.5 text-sm sm:text-base text-[var(--text)] pt-1">
                       {actionResult.steps.map((st, stIdx) => (
-                        <li key={stIdx} className="leading-snug">{st}</li>
+                        <li key={stIdx} className="leading-relaxed">{st}</li>
                       ))}
                     </ol>
                   )}
@@ -1593,12 +1585,12 @@ export default function LearnAnywhere() {
 
             {/* Village & Everyday Application Connection */}
             {(activity.everyday_applications || activity.village_application) && (
-              <div className="p-4 md:p-5 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
-                  <Home size={15} />
+              <div className="p-5 md:p-6 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-2.5">
+                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-amber-800 dark:text-amber-300">
+                  <Home size={17} />
                   <span>Everyday, Farming & Sustainability Applications</span>
                 </div>
-                <p className="text-xs text-[var(--text)] leading-relaxed">
+                <p className="text-sm sm:text-base text-[var(--text)] leading-relaxed">
                   {activity.everyday_applications || activity.village_application}
                 </p>
               </div>
@@ -1606,25 +1598,25 @@ export default function LearnAnywhere() {
 
             {/* Interactive Syllabus Understanding & Concept Checks */}
             {activity.understanding_questions && activity.understanding_questions.length > 0 && (
-              <div className="space-y-4 pt-2 border-t border-[var(--border)]">
+              <div className="space-y-5 pt-3 border-t border-[var(--border)]">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                    <HelpCircle size={14} className="text-[var(--accent)]" />
+                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
+                    <HelpCircle size={16} className="text-[var(--accent)]" />
                     <span>Interactive Syllabus Concept Checks & Submissions</span>
                   </div>
                   {saveStatus === 'saving' && (
-                    <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                      <Loader2 size={11} className="animate-spin" /> Syncing progress...
+                    <span className="text-xs sm:text-sm font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <Loader2 size={13} className="animate-spin" /> Syncing progress...
                     </span>
                   )}
                   {saveStatus === 'saved' && (
-                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <Check size={11} /> Saved to Database
+                    <span className="text-xs sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                      <Check size={13} /> Saved to Database
                     </span>
                   )}
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {activity.understanding_questions.map((qObj, qIdx) => {
                     const isRevealed = Boolean(revealedQuestions[qIdx])
                     const evalResult = evaluations[qIdx]
@@ -1634,7 +1626,7 @@ export default function LearnAnywhere() {
                     return (
                       <div
                         key={qIdx}
-                        className={`p-4 rounded-xl border transition-all space-y-3 ${
+                        className={`p-5 rounded-xl border transition-all space-y-3.5 ${
                           evalResult
                             ? evalResult.is_correct
                               ? 'bg-emerald-500/5 border-emerald-500/30'
@@ -1643,14 +1635,14 @@ export default function LearnAnywhere() {
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="text-xs font-bold text-[var(--text)] flex items-start gap-2">
-                            <span className="w-5 h-5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-[10px] shrink-0 mt-0.5 font-bold">
+                          <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-start gap-2.5">
+                            <span className="w-6 h-6 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-xs shrink-0 mt-0.5 font-bold">
                               {qIdx + 1}
                             </span>
                             <span className="leading-snug">{qObj.question}</span>
                           </div>
                           {attemptNum > 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[var(--surface)] text-[var(--text-faint)] border border-[var(--border)] shrink-0">
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] shrink-0">
                               Attempt #{attemptNum}
                             </span>
                           )}
@@ -1658,7 +1650,7 @@ export default function LearnAnywhere() {
 
                         {/* Interactive Answer Input & Submit */}
                         <div className="space-y-2 pt-1">
-                          <div className="flex gap-2">
+                          <div className="flex gap-2.5">
                             <input
                               type="text"
                               value={userAnswers[qIdx] || ''}
@@ -1670,15 +1662,15 @@ export default function LearnAnywhere() {
                                   handleSubmitAnswer(qIdx, qObj)
                                 }
                               }}
-                              className="flex-1 px-3 py-2 text-xs rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-faint)]"
+                              className="flex-1 px-4 py-2.5 text-sm sm:text-base rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-faint)] min-h-[44px]"
                             />
                             <Button
                               onClick={() => handleSubmitAnswer(qIdx, qObj)}
                               disabled={isEvaluating || !(userAnswers[qIdx] || '').trim()}
-                              size="sm"
-                              className="px-4 text-xs font-bold shrink-0 flex items-center gap-1.5 cursor-pointer"
+                              size="md"
+                              className="px-5 text-sm font-bold shrink-0 flex items-center gap-2 cursor-pointer min-h-[44px]"
                             >
-                              {isEvaluating ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
+                              {isEvaluating ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
                               <span>{evalResult ? 'Retry Answer' : 'Submit'}</span>
                             </Button>
                           </div>
@@ -1686,21 +1678,21 @@ export default function LearnAnywhere() {
 
                         {/* AI Evaluation Feedback Card */}
                         {evalResult && (
-                          <div className={`p-3.5 rounded-xl border text-xs space-y-2 animate-fadeIn ${
+                          <div className={`p-4 rounded-xl border text-sm space-y-2.5 animate-fadeIn ${
                             evalResult.is_correct
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
                               : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
                           }`}>
                             <div className="flex items-center justify-between gap-2 flex-wrap font-bold">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-2">
                                 {evalResult.is_correct ? (
-                                  <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />
+                                  <CheckCircle2 size={17} className="text-emerald-500 shrink-0" />
                                 ) : (
-                                  <AlertTriangle size={15} className="text-amber-500 shrink-0" />
+                                  <AlertTriangle size={17} className="text-amber-500 shrink-0" />
                                 )}
                                 <span>{evalResult.is_correct ? 'Conceptually Correct!' : 'Review Concept'}</span>
                               </div>
-                              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--border)] uppercase">
+                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--border)] uppercase">
                                 {evalResult.error_type === 'spelling_grammar_only'
                                   ? 'Minor Typo (Accepted)'
                                   : evalResult.error_type === 'conceptual_misunderstanding'
@@ -1709,13 +1701,13 @@ export default function LearnAnywhere() {
                               </span>
                             </div>
 
-                            <p className="text-[11px] leading-relaxed opacity-95">
+                            <p className="text-sm sm:text-base leading-relaxed opacity-95">
                               {evalResult.feedback}
                             </p>
 
                             {evalResult.additional_hint && (
-                              <div className="p-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text)] flex items-start gap-1.5">
-                                <Lightbulb size={13} className="text-amber-500 shrink-0 mt-0.5" />
+                              <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)] flex items-start gap-2">
+                                <Lightbulb size={15} className="text-amber-500 shrink-0 mt-0.5" />
                                 <div>
                                   <strong>Hint for Next Attempt: </strong>
                                   {evalResult.additional_hint}
@@ -1726,24 +1718,24 @@ export default function LearnAnywhere() {
                         )}
 
                         {/* Reference Explanation Toggle */}
-                        <div className="pt-1 flex items-center justify-between text-[11px]">
+                        <div className="pt-1 flex items-center justify-between text-xs sm:text-sm">
                           <button
                             type="button"
                             onClick={() => setRevealedQuestions(prev => ({ ...prev, [qIdx]: !prev[qIdx] }))}
-                            className="font-semibold text-[var(--accent)] hover:underline flex items-center gap-1 cursor-pointer"
+                            className="font-semibold text-[var(--accent)] hover:underline flex items-center gap-1.5 cursor-pointer"
                           >
-                            <Info size={12} />
+                            <Info size={14} />
                             <span>{isRevealed ? 'Hide Explanation' : 'Review Explanation'}</span>
                           </button>
                         </div>
 
                         {isRevealed && (
-                          <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs space-y-1.5 animate-fadeIn">
+                          <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm sm:text-base space-y-2 animate-fadeIn">
                             <div className="font-bold text-emerald-600 dark:text-emerald-400">
                               Reference Answer: {qObj.answer}
                             </div>
                             {qObj.explanation && (
-                              <div className="text-[11px] text-[var(--text-soft)] leading-relaxed">
+                              <div className="text-sm text-[var(--text-soft)] leading-relaxed">
                                 <em>Academic Explanation:</em> {qObj.explanation}
                               </div>
                             )}
@@ -1755,26 +1747,26 @@ export default function LearnAnywhere() {
                 </div>
 
                 {/* Additional Practice Generator Card for Difficulties */}
-                <div className="pt-3 border-t border-[var(--border)]">
+                <div className="pt-4 border-t border-[var(--border)]">
                   {additionalPractice.length > 0 ? (
-                    <div className="p-4 rounded-2xl bg-purple-500/5 border border-purple-500/20 space-y-3 animate-fadeIn">
-                      <div className="flex items-center gap-2 text-xs font-bold text-purple-900 dark:text-purple-300 uppercase tracking-wider">
-                        <Sparkles size={15} className="text-purple-500" />
+                    <div className="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20 space-y-3.5 animate-fadeIn">
+                      <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-purple-900 dark:text-purple-300">
+                        <Sparkles size={16} className="text-purple-500" />
                         <span>Additional Targeted Practice Questions</span>
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         {additionalPractice.map((apObj, apIdx) => (
-                          <div key={apIdx} className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs space-y-1">
+                          <div key={apIdx} className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm space-y-1.5">
                             <div className="font-bold text-[var(--text)]">P{apIdx + 1}. {apObj.question}</div>
-                            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">Answer: {apObj.answer}</div>
-                            <div className="text-[10px] text-[var(--text-soft)]">{apObj.explanation}</div>
+                            <div className="text-sm text-emerald-600 dark:text-emerald-400 font-semibold">Answer: {apObj.answer}</div>
+                            <div className="text-xs sm:text-sm text-[var(--text-soft)] leading-relaxed">{apObj.explanation}</div>
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-3">
-                      <div className="text-xs text-[var(--text-soft)] leading-snug">
+                    <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="text-sm text-[var(--text-soft)] leading-relaxed">
                         <strong className="text-[var(--text)]">Need Extra Practice on {selectedTopic || 'this topic'}? </strong>
                         Generate additional practice questions tailored to your performance.
                       </div>
@@ -1782,10 +1774,10 @@ export default function LearnAnywhere() {
                         onClick={handleLoadAdditionalPractice}
                         disabled={loadingPractice}
                         variant="outline"
-                        size="sm"
-                        className="shrink-0 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        size="md"
+                        className="shrink-0 text-sm font-bold flex items-center gap-2 cursor-pointer min-h-[42px]"
                       >
-                        {loadingPractice ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                        {loadingPractice ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                         <span>Load Additional Practice</span>
                       </Button>
                     </div>
@@ -1796,8 +1788,8 @@ export default function LearnAnywhere() {
 
             {/* Limitations, Boundary Conditions & Misconceptions */}
             {activity.limitations_and_misconceptions && (
-              <div className="p-3.5 md:p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex items-start gap-3 text-xs text-[var(--text-soft)]">
-                <AlertTriangle size={17} className="text-amber-500 shrink-0 mt-0.5" />
+              <div className="p-4 md:p-5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex items-start gap-3.5 text-sm sm:text-base text-[var(--text-soft)]">
+                <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
                   <strong className="text-[var(--text)]">Limitations & Common Misconceptions: </strong>
                   {activity.limitations_and_misconceptions}
@@ -1807,8 +1799,8 @@ export default function LearnAnywhere() {
 
             {/* Safety Guidance */}
             {(activity.safety_precautions || activity.safety_notes) && (
-              <div className="p-3.5 md:p-4 rounded-xl bg-red-500/5 border border-red-500/20 flex items-start gap-3 text-xs text-red-900 dark:text-red-300">
-                <ShieldAlert size={17} className="text-red-500 shrink-0 mt-0.5" />
+              <div className="p-4 md:p-5 rounded-xl bg-red-500/5 border border-red-500/20 flex items-start gap-3.5 text-sm sm:text-base text-red-900 dark:text-red-300">
+                <ShieldAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
                   <strong className="text-red-700 dark:text-red-400">Safety Precautions: </strong>
                   {activity.safety_precautions || activity.safety_notes}
@@ -1818,12 +1810,12 @@ export default function LearnAnywhere() {
 
             {/* Follow-up Syllabus Practice */}
             {activity.follow_up_practice && (
-              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20 text-xs text-blue-900 dark:text-blue-300 space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-blue-700 dark:text-blue-400">
-                  <Target size={13} />
+              <div className="p-4 md:p-5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-sm sm:text-base text-blue-900 dark:text-blue-300 space-y-1.5">
+                <div className="font-bold flex items-center gap-2 text-blue-700 dark:text-blue-400">
+                  <Target size={16} />
                   <span>Suggested Follow-up Syllabus Practice:</span>
                 </div>
-                <p className="leading-relaxed text-[11px]">
+                <p className="leading-relaxed text-sm">
                   {activity.follow_up_practice}
                 </p>
               </div>
@@ -1831,27 +1823,27 @@ export default function LearnAnywhere() {
 
             {/* Understanding Reflection Challenge */}
             {(activity.reflection_task || activity.reflection_question) && (
-              <div className="p-4 md:p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--text)]">
-                    <HelpCircle size={16} className="text-[var(--accent)]" />
+              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
+                    <HelpCircle size={18} className="text-[var(--accent)]" />
                     <span>Reflection & Village Observation Challenge</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowReflectionAnswer(!showReflectionAnswer)}
-                    className="text-xs font-bold text-[var(--accent)] hover:underline cursor-pointer"
+                    className="text-sm font-bold text-[var(--accent)] hover:underline cursor-pointer"
                   >
                     {showReflectionAnswer ? 'Hide Conceptual Answer' : 'Think & Reveal Concept'}
                   </button>
                 </div>
-                <p className="text-xs md:text-sm font-medium text-[var(--text)] leading-relaxed">
+                <p className="text-sm sm:text-base font-medium text-[var(--text)] leading-relaxed">
                   {activity.reflection_task || activity.reflection_question}
                 </p>
                 {showReflectionAnswer && (
-                  <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-soft)] leading-relaxed animate-fadeIn space-y-1">
-                    <div className="text-xs font-bold text-[var(--text)] flex items-center gap-1.5">
-                      <CheckCircle2 size={13} className="text-emerald-500" />
+                  <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm sm:text-base text-[var(--text-soft)] leading-relaxed animate-fadeIn space-y-1.5">
+                    <div className="font-bold text-[var(--text)] flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-emerald-500" />
                       <span>Academic Concept Breakdown</span>
                     </div>
                     <p>
@@ -1867,8 +1859,17 @@ export default function LearnAnywhere() {
 
       {/* Activity History Modal */}
       {showHistoryModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowHistoryModal(false); }}
+        >
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="activity-history-title"
+            aria-describedby="activity-history-desc"
+            className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+          >
             {/* Header */}
             <div className="p-5 border-b border-[var(--border)] flex items-center justify-between bg-[var(--surface-muted)]">
               <div className="flex items-center gap-2.5">
@@ -1876,8 +1877,8 @@ export default function LearnAnywhere() {
                   <History size={18} />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-[var(--text)]">Activity History</h2>
-                  <p className="text-xs text-[var(--text-soft)]">
+                  <h2 id="activity-history-title" className="text-base font-bold text-[var(--text)]">Activity History</h2>
+                  <p id="activity-history-desc" className="text-xs text-[var(--text-soft)]">
                     Revisit your past Learn from Anywhere activities, check understanding scores, and add reflections.
                   </p>
                 </div>
@@ -1885,6 +1886,7 @@ export default function LearnAnywhere() {
               <button
                 type="button"
                 onClick={() => setShowHistoryModal(false)}
+                aria-label="Close activity history dialog"
                 className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition-all cursor-pointer"
               >
                 <X size={18} />
@@ -1930,25 +1932,25 @@ export default function LearnAnywhere() {
                   const isEditing = editingReflectionId === item.activity_id
 
                   return (
-                    <Card key={item.activity_id || item._id} className="p-4 space-y-3.5 border-[var(--border)] hover:border-[var(--accent-dim)] transition-all">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-                        <div className="space-y-1">
+                    <Card key={item.activity_id || item._id} className="p-5 space-y-4 border-[var(--border)] hover:border-[var(--accent-dim)] transition-all">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="space-y-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="px-2 py-0.5 rounded-md bg-[var(--accent-dim)] text-[var(--accent)] text-[11px] font-bold">
+                            <span className="px-2.5 py-1 rounded-md bg-[var(--accent-dim)] text-[var(--accent)] text-xs font-bold">
                               {item.subject} • {item.topic}
                             </span>
                             {/* Curriculum Versioning Flag */}
                             {item.is_current_curriculum ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold flex items-center gap-1">
-                                <ShieldCheck size={11} /> Current Curriculum
+                              <span className="px-3 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1.5">
+                                <ShieldCheck size={12} /> Current Curriculum
                               </span>
                             ) : (
-                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-bold flex items-center gap-1">
-                                <AlertTriangle size={11} /> Previous Curriculum
+                              <span className="px-3 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-semibold flex items-center gap-1.5">
+                                <AlertTriangle size={12} /> Previous Curriculum
                               </span>
                             )}
                             {/* Completion Status */}
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                               item.completion_status === 'completed'
                                 ? 'bg-emerald-500/10 text-emerald-600'
                                 : item.completion_status === 'in_progress'
@@ -1958,8 +1960,8 @@ export default function LearnAnywhere() {
                               {item.completion_status === 'completed' ? 'Completed' : item.completion_status === 'in_progress' ? 'In Progress' : 'Not Started'}
                             </span>
                           </div>
-                          <h3 className="text-sm font-black text-[var(--text)]">{item.title}</h3>
-                          <div className="text-[11px] text-[var(--text-soft)] flex items-center gap-3 flex-wrap">
+                          <h3 className="text-base font-bold text-[var(--text)]">{item.title}</h3>
+                          <div className="text-xs sm:text-sm text-[var(--text-soft)] flex items-center gap-3 flex-wrap">
                             <span>Syllabus: <strong>{item.curriculum_reference || 'Validated Syllabus'}</strong></span>
                             <span>Date: {createdDate}</span>
                           </div>
@@ -1968,26 +1970,27 @@ export default function LearnAnywhere() {
                           <button
                             type="button"
                             onClick={() => handleRevisitActivity(item)}
-                            className="px-3 py-1.5 rounded-xl bg-[var(--accent)] text-white text-xs font-bold flex items-center gap-1.5 hover:opacity-90 transition-all cursor-pointer shadow-xs"
+                            className="px-3.5 py-2 rounded-xl bg-[var(--accent)] text-white text-xs sm:text-sm font-bold flex items-center gap-2 hover:opacity-90 transition-all cursor-pointer shadow-xs min-h-[40px]"
                           >
-                            <Eye size={13} /> Revisit Activity
+                            <Eye size={15} /> Revisit Activity
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteHistoryItem(item.activity_id)}
-                            className="p-1.5 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-200 dark:border-red-900/40 transition-all cursor-pointer"
+                            className="p-2 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-200 dark:border-red-900/40 transition-all cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
                             title="Delete Activity Record"
+                            aria-label="Delete activity record"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </div>
 
                       {/* Concept Checks / Attempts summary */}
                       {Array.isArray(item.attempts) && item.attempts.length > 0 && (
-                        <div className="p-2.5 rounded-xl bg-[var(--surface-muted)] text-[11px] text-[var(--text-soft)] space-y-1">
-                          <div className="font-bold text-[var(--text)] flex items-center gap-1">
-                            <Target size={12} className="text-[var(--accent)]" />
+                        <div className="p-3 rounded-xl bg-[var(--surface-muted)] text-xs sm:text-sm text-[var(--text-soft)] space-y-1">
+                          <div className="font-bold text-[var(--text)] flex items-center gap-1.5">
+                            <Target size={14} className="text-[var(--accent)]" />
                             <span>Understanding Checks:</span>
                             <span className="ml-1 text-[var(--accent)]">{item.attempts.filter(a => a.is_correct).length} / {item.attempts.length} Passed</span>
                           </div>
@@ -1995,10 +1998,10 @@ export default function LearnAnywhere() {
                       )}
 
                       {/* Reflections section */}
-                      <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs space-y-2">
+                      <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-[var(--text)] flex items-center gap-1 text-[11px]">
-                            <FileText size={12} className="text-[var(--accent)]" /> Student Reflections & Notes
+                          <span className="font-bold text-[var(--text)] flex items-center gap-1.5 text-xs sm:text-sm">
+                            <FileText size={14} className="text-[var(--accent)]" /> Student Reflections & Notes
                           </span>
                           {!isEditing && (
                             <button
@@ -2007,27 +2010,27 @@ export default function LearnAnywhere() {
                                 setEditingReflectionId(item.activity_id)
                                 setReflectionText(item.reflections || '')
                               }}
-                              className="text-[11px] font-bold text-[var(--accent)] hover:underline flex items-center gap-1 cursor-pointer"
+                              className="text-xs sm:text-sm font-bold text-[var(--accent)] hover:underline flex items-center gap-1 cursor-pointer"
                             >
-                              <Edit3 size={11} /> {item.reflections ? 'Edit Notes' : 'Add Note'}
+                              <Edit3 size={13} /> {item.reflections ? 'Edit Notes' : 'Add Note'}
                             </button>
                           )}
                         </div>
 
                         {isEditing ? (
-                          <div className="space-y-2">
+                          <div className="space-y-2.5">
                             <textarea
                               value={reflectionText}
                               onChange={(e) => setReflectionText(e.target.value)}
                               placeholder="Write your reflections, observations, or key takeaways for this activity..."
-                              className="w-full p-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-elevated)] text-[var(--text)] text-xs focus:ring-2 focus:ring-[var(--accent)]"
+                              className="w-full p-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-elevated)] text-[var(--text)] text-sm focus:ring-2 focus:ring-[var(--accent)]"
                               rows={3}
                             />
-                            <div className="flex justify-end gap-2">
+                            <div className="flex justify-end gap-2.5">
                               <button
                                 type="button"
                                 onClick={() => setEditingReflectionId(null)}
-                                className="px-2.5 py-1 text-[11px] font-bold text-[var(--text-soft)] hover:underline cursor-pointer"
+                                className="px-3 py-1.5 text-xs sm:text-sm font-semibold text-[var(--text-soft)] hover:underline cursor-pointer"
                               >
                                 Cancel
                               </button>
@@ -2035,19 +2038,19 @@ export default function LearnAnywhere() {
                                 type="button"
                                 onClick={() => handleSaveReflection(item.activity_id, reflectionText)}
                                 disabled={savingReflection}
-                                className="px-3 py-1 rounded-lg bg-[var(--accent)] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                className="px-3.5 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer min-h-[38px]"
                               >
-                                {savingReflection ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                                {savingReflection ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                                 <span>Save Reflection</span>
                               </button>
                             </div>
                           </div>
                         ) : item.reflections ? (
-                          <p className="text-[11px] text-[var(--text-soft)] leading-relaxed italic">
+                          <p className="text-xs sm:text-sm text-[var(--text-soft)] leading-relaxed italic">
                             "{item.reflections}"
                           </p>
                         ) : (
-                          <p className="text-[11px] text-[var(--text-faint)] italic">
+                          <p className="text-xs sm:text-sm text-[var(--text-faint)] italic">
                             No reflections saved yet. Click "Add Note" to write your personal observations.
                           </p>
                         )}

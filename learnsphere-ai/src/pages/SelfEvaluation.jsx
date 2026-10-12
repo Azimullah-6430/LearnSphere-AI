@@ -161,132 +161,153 @@ export default function SelfEvaluation() {
 
   return (
     <>
-      <PageHead title="Student Self-Evaluation" />
+      <PageHead
+        title="Student Self-Evaluation"
+        subtitle="Upload your exam papers and written scripts for rubric-aligned evaluation and actionable diagnostics."
+      />
 
-      <div className="max-w-[880px] space-y-6">
+      <div className="max-w-[900px] space-y-6">
         {errorMsg && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center gap-2">
+          <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center gap-2.5">
             <AlertTriangle size={18} className="shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
-          {/* Form / Upload Section */}
-          {!evalResult && !processing && (
-            <Card className="space-y-6">
-              <div className="border-b border-[var(--border)] pb-4">
-                <h3 className="text-base font-extrabold text-[var(--text)]">Upload Exam Files for Strict Teacher Grading</h3>
-                <p className="text-xs text-[var(--text-soft)]">
-                  Provide your official question paper and written answer script (PDF or images). The central engine extracts all questions, analyzes your handwritten or typed answers, and allocates verified marks.
-                </p>
-              </div>
+        {/* Form / Upload Section */}
+        {!evalResult && !processing && (
+          <Card className="space-y-6 p-4 sm:p-7">
+            <div className="border-b border-[var(--border)] pb-3">
+              <h3 className="text-base font-bold text-[var(--text)]">Upload Exam Documents for Evaluation</h3>
+              <p className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                Provide your question paper and written answer script (PDF or images). The evaluation engine analyzes your responses and provides question-by-question marks and feedback.
+              </p>
+            </div>
 
-              {/* Upload Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Question Paper Upload */}
-                <div className="p-4 rounded-xl border-2 border-dashed border-[var(--border-strong)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mb-2">
-                    <FileText size={20} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-[var(--text)] block mb-1">1. Question Paper *</span>
-                    <span className="text-[11px] text-[var(--text-faint)] block mb-3">PDF or Image of Question Paper</span>
-                  </div>
-                  {qpFileName ? (
-                    <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1">
-                      <CheckCircle2 size={14} /> {qpFileName}
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer px-3 py-1.5 bg-[var(--surface)] text-[var(--text)] border border-[var(--border-strong)] text-xs font-bold rounded-lg hover:bg-[var(--accent-soft)] transition-colors">
-                      Browse File
-                      <input type="file" accept=".pdf,image/*" onChange={handleQpUpload} className="hidden" />
-                    </label>
-                  )}
+            {/* Upload Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              {/* Question Paper Upload */}
+              <div className="p-4 rounded-2xl border-2 border-dashed border-[var(--border-strong)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between min-h-[165px]">
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mb-1.5">
+                  <FileText size={20} />
                 </div>
-
-                {/* Answer Script Upload */}
-                <div className="p-4 rounded-xl border-2 border-dashed border-[var(--border-strong)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center mb-2">
-                    <UploadCloud size={20} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-[var(--text)] block mb-1">2. Answer Script *</span>
-                    <span className="text-[11px] text-[var(--text-faint)] block mb-3">PDF, JPG, PNG of your answers</span>
-                  </div>
-                  {ansFileName ? (
-                    <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1">
-                      <CheckCircle2 size={14} /> {ansFileName}
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer px-3 py-1.5 bg-[var(--surface)] text-[var(--text)] border border-[var(--border-strong)] text-xs font-bold rounded-lg hover:bg-[var(--accent-soft)] transition-colors">
-                      Browse File
-                      <input type="file" accept=".pdf,image/*" onChange={handleAnsUpload} className="hidden" />
-                    </label>
-                  )}
+                <div>
+                  <span className="text-xs font-bold text-[var(--text)] block mb-0.5">1. Question Paper *</span>
+                  <span className="text-[11px] text-[var(--text-faint)] block mb-2.5">PDF or Image of Question Paper</span>
                 </div>
-
-                {/* Optional Rubric */}
-                <div className="p-4 rounded-xl border-2 border-dashed border-[var(--border)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2">
-                    <Award size={20} />
+                {qpFileName ? (
+                  <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1.5 bg-[var(--surface)] px-3 py-1.5 rounded-xl border border-[var(--border)] max-w-full truncate">
+                    <CheckCircle2 size={15} className="shrink-0" /> <span className="truncate">{qpFileName}</span>
                   </div>
-                  <div>
-                    <span className="text-xs font-bold text-[var(--text)] block mb-1">3. Rubric (Optional)</span>
-                    <span className="text-[11px] text-[var(--text-faint)] block mb-3">Answer key or Marking Scheme</span>
-                  </div>
-                  {rubricFileName ? (
-                    <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1">
-                      <CheckCircle2 size={14} /> {rubricFileName}
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer px-3 py-1.5 bg-[var(--surface)] text-[var(--text)] border border-[var(--border-strong)] text-xs font-bold rounded-lg hover:bg-[var(--accent-soft)] transition-colors">
-                      Browse File
-                      <input type="file" accept=".pdf,image/*" onChange={handleRubricUpload} className="hidden" />
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              {/* Subject Confirmation */}
-              <div className="space-y-2 pt-2 border-t border-[var(--border)]">
-                <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] block">
-                  Select or Confirm Subject
-                </label>
-                <div className="flex gap-2 flex-wrap items-center">
-                  {subjects.map((sub) => (
-                    <button
-                      key={sub}
-                      onClick={() => { setSelectedSubject(sub); setCustomSubject(''); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                        selectedSubject === sub
-                          ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
-                          : 'border-[var(--border-strong)] text-[var(--text-soft)] hover:border-[var(--accent)]'
-                      }`}
-                    >
-                      {sub}
-                    </button>
-                  ))}
-                </div>
-                {!subjects.includes(selectedSubject) && (
-                  <input
-                    type="text"
-                    placeholder="Subject title extracted from paper (or type custom subject)..."
-                    value={customSubject}
-                    onChange={(e) => setCustomSubject(e.target.value)}
-                    className="w-full mt-2 px-3 py-2 border border-[var(--border-strong)] rounded-xl text-xs bg-[var(--surface)] text-[var(--text)]"
-                  />
+                ) : (
+                  <label className="cursor-pointer px-3.5 py-1.5 bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] text-xs font-bold rounded-xl hover:border-[var(--accent)] transition-colors shadow-xs">
+                    Browse File
+                    <input 
+                      type="file" 
+                      aria-label="Upload question paper PDF or image"
+                      accept=".pdf,image/*" 
+                      onChange={handleQpUpload} 
+                      className="hidden" 
+                    />
+                  </label>
                 )}
               </div>
 
-              <Button
-                onClick={handleStartSelfEval}
-                disabled={!qpRawFile || !ansRawFile}
-                className="w-full justify-center py-3 text-sm font-extrabold"
-              >
-                <Brain size={18} /> Launch Central AI Evaluation
-              </Button>
-            </Card>
-          )}
+              {/* Answer Script Upload */}
+              <div className="p-4 rounded-2xl border-2 border-dashed border-[var(--border-strong)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between min-h-[165px]">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center mb-1.5">
+                  <UploadCloud size={20} />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-[var(--text)] block mb-1">2. Answer Script *</span>
+                  <span className="text-[11px] text-[var(--text-faint)] block mb-3">PDF, JPG, PNG of your answers</span>
+                </div>
+                {ansFileName ? (
+                  <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1.5 bg-[var(--surface)] px-3 py-1.5 rounded-xl border border-[var(--border)] max-w-full truncate">
+                    <CheckCircle2 size={15} className="shrink-0" /> <span className="truncate">{ansFileName}</span>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer px-4 py-2 bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] text-xs font-bold rounded-xl hover:border-[var(--accent)] transition-colors shadow-xs">
+                    Browse File
+                    <input 
+                      type="file" 
+                      aria-label="Upload answer script PDF or image"
+                      accept=".pdf,image/*" 
+                      onChange={handleAnsUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Optional Rubric */}
+              <div className="p-5 rounded-2xl border-2 border-dashed border-[var(--border)] hover:border-[var(--accent)] transition-all bg-[var(--surface-alt)] flex flex-col items-center text-center justify-between min-h-[190px]">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2">
+                  <Award size={22} />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-[var(--text)] block mb-1">3. Rubric (Optional)</span>
+                  <span className="text-[11px] text-[var(--text-faint)] block mb-3">Answer key or Marking Scheme</span>
+                </div>
+                {rubricFileName ? (
+                  <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1.5 bg-[var(--surface)] px-3 py-1.5 rounded-xl border border-[var(--border)] max-w-full truncate">
+                    <CheckCircle2 size={15} className="shrink-0" /> <span className="truncate">{rubricFileName}</span>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer px-4 py-2 bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] text-xs font-bold rounded-xl hover:border-[var(--accent)] transition-colors shadow-xs">
+                    Browse File
+                    <input 
+                      type="file" 
+                      aria-label="Upload optional rubric or answer key PDF or image"
+                      accept=".pdf,image/*" 
+                      onChange={handleRubricUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* Subject Confirmation */}
+            <div className="space-y-3 pt-3 border-t border-[var(--border)]">
+              <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] block">
+                Select or Confirm Subject
+              </label>
+              <div className="flex gap-2 flex-wrap items-center">
+                {subjects.map((sub) => (
+                  <button
+                    key={sub}
+                    onClick={() => { setSelectedSubject(sub); setCustomSubject(''); }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                      selectedSubject === sub
+                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-xs'
+                        : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    {sub}
+                  </button>
+                ))}
+              </div>
+              {!subjects.includes(selectedSubject) && (
+                <input
+                  type="text"
+                  placeholder="Subject title extracted from paper (or type custom subject)..."
+                  value={customSubject}
+                  onChange={(e) => setCustomSubject(e.target.value)}
+                  className="w-full mt-2 px-3.5 py-2.5 border border-[var(--border)] rounded-xl text-xs bg-[var(--surface-alt)] text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              )}
+            </div>
+
+            <Button
+              onClick={handleStartSelfEval}
+              disabled={!qpRawFile || !ansRawFile}
+              className="w-full justify-center py-3.5 text-sm font-extrabold"
+            >
+              <Brain size={18} /> Launch Central AI Evaluation
+            </Button>
+          </Card>
+        )}
 
           {/* Processing State */}
           {processing && (

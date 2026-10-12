@@ -41,6 +41,15 @@ export default function Memory() {
     loadMemory()
   }, [user])
 
+  useEffect(() => {
+    if (!showAddModal) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowAddModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showAddModal])
+
   const handleDeleteCard = async (cardId, e) => {
     e.stopPropagation()
     if (!cardId) return
@@ -143,7 +152,8 @@ export default function Memory() {
   return (
     <>
       <PageHead
-        title="Academic Memory"
+        title="Academic Memory & Retention"
+        subtitle="Track concept mastery over time, spaced-repetition schedules, and active recall progress."
         action={
           <div className="flex items-center gap-2">
             {cards.length > 0 && (
@@ -274,6 +284,7 @@ export default function Memory() {
                       <button
                         onClick={(e) => handleDeleteCard(cardId, e)}
                         title="Delete this memory card"
+                        aria-label="Delete this memory card"
                         className="p-1.5 rounded text-[var(--text-faint)] hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-70 group-hover:opacity-100"
                       >
                         <Trash2 size={15} />
@@ -335,17 +346,27 @@ export default function Memory() {
 
       {/* Add Memory Card Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl w-full max-w-md p-6 shadow-2xl">
-            <h3 className="text-base font-bold mb-1">Add Academic Memory Card</h3>
-            <p className="text-xs text-[var(--text-faint)] mb-4">
+        <div 
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAddModal(false); }}
+        >
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="memory-card-modal-title"
+            aria-describedby="memory-card-modal-desc"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl w-full max-w-md p-6 shadow-2xl"
+          >
+            <h3 id="memory-card-modal-title" className="text-base font-bold mb-1">Add Academic Memory Card</h3>
+            <p id="memory-card-modal-desc" className="text-xs text-[var(--text-faint)] mb-4">
               Track retention rate and spaced repetition for important concepts, formulas, and topics.
             </p>
 
             <form onSubmit={handleCreateCard} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold mb-1">Subject</label>
+                <label htmlFor="memory-new-subject" className="block text-xs font-bold mb-1">Subject</label>
                 <input
+                  id="memory-new-subject"
                   type="text"
                   required
                   placeholder="e.g. Physics, Data Structures, Mathematics"
@@ -356,8 +377,9 @@ export default function Memory() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold mb-1">Topic / Key Concept</label>
+                <label htmlFor="memory-new-topic" className="block text-xs font-bold mb-1">Topic / Key Concept</label>
                 <input
+                  id="memory-new-topic"
                   type="text"
                   required
                   placeholder="e.g. Newton's 3rd Law, Dynamic Programming, Integration"

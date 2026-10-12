@@ -105,34 +105,35 @@ export default function Parent() {
   return (
     <>
       <PageHead
-        title="Parent Agent & Study Time Audit"
+        title="Parent Overview & Study Activity"
+        subtitle="Track study streaks, session durations, graded evaluation records, and academic milestones."
         action={
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--success-soft)] border border-[var(--border)] rounded-full">
-              <div className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse" />
-              <span className="text-[11.5px] font-bold text-[var(--success)]">Live Parent Audit Active</span>
+            <div className="flex items-center gap-2 px-3.5 py-1.5 bg-[var(--success-soft)] border border-[var(--border)] rounded-full">
+              <div className="w-2 h-2 rounded-full bg-[var(--success)]" />
+              <span className="text-xs font-bold text-[var(--success)]">Live Tracking Active</span>
             </div>
           </div>
         }
       />
 
       {/* Live stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mb-4">
-        <StatCard label="Live Session Time" value={formattedSessionTime || '0s'} deltaTone="up" />
-        <StatCard label="Total Login Sessions" value={studySessions ? studySessions.length : 0} />
-        <StatCard label="Evaluations Graded" value={evaluations.length} />
-        <StatCard label="Active Streak" value={`🔥 ${streakDays} days`} deltaTone="up" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+        <StatCard label="Current Session" value={formattedSessionTime || '0s'} deltaTone="up" />
+        <StatCard label="Total Sessions" value={studySessions ? studySessions.length : 0} />
+        <StatCard label="Graded Evaluations" value={evaluations.length} />
+        <StatCard label="Study Streak" value={`${streakDays} days`} deltaTone="up" />
       </div>
 
       {/* Real-time Study Session Duration Audit Card */}
-      <Card className="mb-4 border-l-4 border-l-blue-500">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Clock size={18} className="text-blue-500 animate-spin" />
-            <h3 className="font-extrabold text-sm uppercase tracking-wider">Live Student Session Time Audit (Parent Report)</h3>
+      <Card className="mb-5 border-l-4 border-l-[var(--accent)]">
+        <div className="flex items-center justify-between mb-3.5">
+          <div className="flex items-center gap-2.5">
+            <Clock size={18} className="text-[var(--accent)]" />
+            <h3 className="font-bold text-sm text-[var(--text)]">Current Study Session Audit</h3>
           </div>
-          <span className="px-2.5 py-0.5 bg-blue-500/10 text-blue-600 rounded-full text-xs font-bold border border-blue-500/20">
-            Real-Time Tracking
+          <span className="px-3 py-1 bg-[var(--accent-soft)] text-[var(--accent)] rounded-full text-xs font-bold border border-[var(--accent)]/20">
+            Real-Time
           </span>
         </div>
 

@@ -47,54 +47,58 @@ export default function Reports() {
 
   return (
     <>
-      <PageHead title="Academic Reports" />
+      <PageHead
+        title="Academic Reports"
+        subtitle="Export verified assessment reports, grade summaries, and detailed evaluation transcripts."
+      />
       
       {loading ? (
-        <Card className="p-8 text-center text-[var(--text-soft)]">
-          <Loader2 className="animate-spin mx-auto mb-2 text-[var(--accent)]" size={28} />
-          Fetching real evaluation reports from database...
+        <Card className="p-12 text-center text-[var(--text-soft)]">
+          <Loader2 className="animate-spin mx-auto mb-2.5 text-[var(--accent)]" size={30} />
+          <span className="text-xs font-semibold">Fetching real evaluation reports from database...</span>
         </Card>
       ) : reports.length === 0 ? (
-        <Card className="p-8 text-center my-4 border-dashed border-2">
-          <FileText size={40} className="text-[var(--text-faint)] mx-auto mb-3" />
-          <h3 className="text-base font-bold mb-1">No evaluation reports generated yet</h3>
-          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-4">
+        <Card className="p-12 text-center my-4 border-dashed border-2">
+          <FileText size={44} className="text-[var(--text-faint)] mx-auto mb-3" />
+          <h3 className="text-base font-bold mb-1 text-[var(--text)]">No evaluation reports generated yet</h3>
+          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-4 leading-relaxed">
             Upload and evaluate student question papers & answer scripts in the <strong>Evaluate Answer Script</strong> page. Real reports will automatically generate here upon evaluation.
           </p>
         </Card>
       ) : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[13px]">
+        <Card className="p-0 overflow-hidden">
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[580px] border-collapse text-xs">
               <thead>
-                <tr>
+                <tr className="bg-[var(--surface-alt)]">
                   {['Student Name', 'Subject & Exam', 'Score & Grade', 'Date Generated', 'Actions'].map((h) => (
-                    <th key={h} className="text-left text-[11.5px] text-[var(--text-faint)] font-bold uppercase tracking-wide pb-2.5 px-3 border-b border-[var(--border)]">
+                    <th key={h} className="text-left text-xs text-[var(--text-faint)] font-bold uppercase tracking-wider py-3.5 px-4 border-b border-[var(--border)]">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-[var(--border)]">
                 {reports.map((r) => {
                   const evalId = r.id || r._id
                   return (
-                    <tr key={evalId} className="hover:bg-[var(--surface-alt)]">
-                      <td className="py-3.5 px-3 border-b border-[var(--border)] font-semibold">{r.student_name} ({r.roll_number || 'N/A'})</td>
-                      <td className="py-3.5 px-3 border-b border-[var(--border)]">{r.subject} — {r.assessment_title || 'Examination'}</td>
-                      <td className="py-3.5 px-3 border-b border-[var(--border)]">
+                    <tr key={evalId} className="hover:bg-[var(--surface-alt)] transition-colors">
+                      <td className="py-4 px-4 font-bold text-sm text-[var(--text)]">{r.student_name} <span className="text-xs font-normal text-[var(--text-faint)]">({r.roll_number || 'N/A'})</span></td>
+                      <td className="py-4 px-4 text-xs font-semibold text-[var(--text-soft)]">{r.subject} — {r.assessment_title || 'Examination'}</td>
+                      <td className="py-4 px-4">
                         <Badge tone={r.status || 'success'}>{r.obtained_marks}/{r.total_marks} ({r.percentage}%) · Grade {r.grade}</Badge>
                       </td>
-                      <td className="py-3.5 px-3 border-b border-[var(--border)] text-[var(--text-faint)]">{r.created_at || 'Recently'}</td>
-                      <td className="py-3.5 px-3 border-b border-[var(--border)]">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-4 px-4 text-xs text-[var(--text-faint)]">{r.created_at || 'Recently'}</td>
+                      <td className="py-4 px-4">
+                        <div className="flex items-center gap-2">
                           <Button variant="secondary" size="sm" onClick={() => handleDownload(evalId)}>
-                            <Download size={14} className="mr-1" /> PDF Report
+                            <Download size={14} className="mr-1.5" /> PDF Report
                           </Button>
                           <button
                             onClick={(e) => handleDelete(evalId, e)}
-                            className="p-1.5 rounded-lg border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                            className="p-2 rounded-xl border border-[var(--error-soft)] text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
                             title="Delete Evaluation Report"
+                            aria-label="Delete evaluation report"
                           >
                             <Trash2 size={14} />
                           </button>
