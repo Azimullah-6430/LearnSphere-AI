@@ -139,7 +139,7 @@ export default function Reports() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12 print:p-0 print:space-y-4">
+    <div className="space-y-6 w-full min-w-0 pb-12 print:p-0 print:space-y-4">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
         <PageHead

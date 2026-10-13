@@ -243,22 +243,22 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen lg:h-screen lg:max-h-screen bg-[#f8fafc] dark:bg-slate-950 flex flex-col justify-between selection:bg-emerald-600 selection:text-white relative overflow-x-hidden lg:overflow-y-auto">
+    <div className="h-screen bg-[#f8fafc] dark:bg-slate-950 flex flex-col selection:bg-emerald-600 selection:text-white relative overflow-hidden">
       {/* Background Soft Glow Accents */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-gradient-to-b from-emerald-100/30 to-transparent dark:from-emerald-950/20 rounded-full blur-3xl pointer-events-none -z-10" />
-      <div className="absolute bottom-0 left-0 w-[450px] h-[450px] bg-gradient-to-t from-teal-100/30 to-transparent dark:from-teal-950/20 rounded-full blur-3xl pointer-events-none -z-10" />
+      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-gradient-to-b from-emerald-100/40 to-transparent dark:from-emerald-950/20 rounded-full blur-3xl pointer-events-none -z-10" />
+      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-gradient-to-t from-teal-100/40 to-transparent dark:from-teal-950/20 rounded-full blur-3xl pointer-events-none -z-10" />
 
       {/* Top Header Tagline */}
-      <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 flex justify-end items-center shrink-0">
+      <div className="w-full px-5 sm:px-8 lg:px-12 pt-3 sm:pt-4 flex justify-end items-center shrink-0">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-400 bg-white/60 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 shadow-2xs">
           <Sprout size={15} className="text-emerald-500" />
           <span>A smarter way to learn</span>
         </div>
       </div>
 
-      {/* Main Container - Frames perfectly without overflow on desktop */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-10 py-3 sm:py-5 flex items-center">
-        <div className="grid lg:grid-cols-12 gap-6 lg:gap-10 items-center w-full">
+      {/* Main Container — fills remaining height, content vertically centered */}
+      <main className="flex-1 w-full px-5 sm:px-8 lg:px-12 py-3 flex items-center overflow-y-auto">
+        <div className="grid lg:grid-cols-12 gap-6 lg:gap-10 items-center w-full h-full max-w-[1440px] mx-auto">
           {/* Left Side: Official Logo, Tagline, Feature Highlights & Clean 3D Illustration */}
           <div className="lg:col-span-7 space-y-4 lg:space-y-5">
             {/* Logo & Platform Tagline with Official Uploaded Logo */}
@@ -314,11 +314,11 @@ export default function Login() {
 
             {/* 3D Visual Illustration with ZERO text on books and official logo on laptop */}
             <div className="pt-1">
-              <div className="relative rounded-2xl overflow-hidden max-w-[420px] mx-auto lg:mx-0 shadow-md border border-slate-200/60 dark:border-slate-800 bg-white/40">
+              <div className="relative rounded-2xl overflow-hidden max-w-[480px] mx-auto lg:mx-0 shadow-md border border-slate-200/60 dark:border-slate-800 bg-white/40">
                 <img
                   src="/login-illustration.jpg"
                   alt="LearnSphere AI 3D Education"
-                  className="w-full h-auto object-cover max-h-[220px] sm:max-h-[240px]"
+                  className="w-full h-auto object-cover max-h-[250px] sm:max-h-[270px]"
                 />
               </div>
 
@@ -337,7 +337,7 @@ export default function Login() {
           </div>
 
           {/* Right Side: Clean Elevated White Login Card (Framed to fit viewport) */}
-          <div className="lg:col-span-5 w-full max-w-[460px] mx-auto lg:ml-auto">
+          <div className="lg:col-span-5 w-full max-w-[480px] mx-auto lg:ml-auto">
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-7 lg:p-8 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.08)] border border-slate-200/80 dark:border-slate-800">
               {/* Card Header */}
               <div className="mb-4">
@@ -828,7 +828,7 @@ export default function Login() {
       )}
 
       {/* Subtle Bottom Footer */}
-      <footer className="py-2.5 text-center text-[11px] text-slate-400 dark:text-slate-600 border-t border-slate-200/50 dark:border-slate-900 shrink-0">
+      <footer className="py-2 text-center text-[11px] text-slate-400 dark:text-slate-600 border-t border-slate-200/50 dark:border-slate-900 shrink-0">
         LearnSphere AI &bull; Universal Academic Intelligence Platform
       </footer>
     </div>

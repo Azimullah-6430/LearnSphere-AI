@@ -125,7 +125,7 @@ export default function AppLayout() {
     return (
       <div className="min-h-screen flex flex-col bg-[var(--bg)]">
         <FocusHeader />
-        <main className="flex-1 px-3 sm:px-6 md:px-8 py-5 sm:py-6 w-full max-w-content mx-auto min-w-0">
+        <main className="flex-1 px-4 sm:px-6 md:px-8 py-5 sm:py-6 w-full min-w-0">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>
@@ -165,7 +165,7 @@ export default function AppLayout() {
         <main
           id="main-content"
           tabIndex="-1"
-          className="px-3.5 sm:px-6 md:px-8 lg:px-10 pt-5 sm:pt-8 pb-16 safe-bottom w-full max-w-content mx-auto min-w-0 outline-none"
+          className="px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 pb-16 safe-bottom w-full min-w-0 outline-none"
         >
           <ErrorBoundary>
             <Outlet />

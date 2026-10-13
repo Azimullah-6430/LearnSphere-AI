@@ -143,7 +143,7 @@ export default function SelectClass() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+    <div className="w-full min-w-0 space-y-6 pb-12">
       {/* Welcome Banner Header */}
       <div className="p-5 sm:p-7 rounded-2xl bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">

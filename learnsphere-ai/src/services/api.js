@@ -17,9 +17,7 @@ const isLocalhost = typeof window !== 'undefined' &&
 // so relative paths work automatically with cookies and zero CORS issues.
 // In local development, the backend runs on :5000 while Vite dev server runs on :5173.
 const rawBase = import.meta.env.VITE_API_BASE_URL || ''
-const API_BASE_URL = !isLocalhost
-  ? ''
-  : (rawBase || (typeof window !== 'undefined' && window.location.port !== '5000' ? 'http://localhost:5000' : ''))
+const API_BASE_URL = rawBase || ''
 
 async function request(endpoint, options = {}) {
   try {

@@ -349,6 +349,20 @@ export default function LearnAnywhere() {
     })
   }
 
+  // Clear incompatible previous activity content when selection changes
+  const clearActivityState = useCallback(() => {
+    setActivity(null)
+    setCompletedSteps({})
+    setCheckedMaterials({})
+    setRevealedQuestions({})
+    setUserAnswers({})
+    setEvaluations({})
+    setAttemptsCount({})
+    setAdditionalPractice([])
+    setActionResult(null)
+    setErrorMsg('')
+  }, [])
+
   // Sync selectedSubject with authoritative subjects
   useEffect(() => {
     if (subjects.length > 0 && (!selectedSubject || !subjects.includes(selectedSubject))) {
@@ -426,19 +440,6 @@ export default function LearnAnywhere() {
     setErrorMsg('')
   }, [activeSyllabusId])
 
-  // Clear incompatible previous activity content when selection changes
-  const clearActivityState = useCallback(() => {
-    setActivity(null)
-    setCompletedSteps({})
-    setCheckedMaterials({})
-    setRevealedQuestions({})
-    setUserAnswers({})
-    setEvaluations({})
-    setAttemptsCount({})
-    setAdditionalPractice([])
-    setActionResult(null)
-    setErrorMsg('')
-  }, [])
 
   // Handle Subject selection and synchronously reset topic and transient activity state
   const handleSubjectSelect = useCallback((newSub) => {
@@ -733,41 +734,6 @@ export default function LearnAnywhere() {
     }))
   }
 
-  // Teacher Guard: Learn from Anywhere is reserved exclusively for Student Portal
-  if (user?.role === 'teacher') {
-    return (
-      <div className="p-8 max-w-lg mx-auto text-center space-y-4 my-12 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-sm">
-        <ShieldAlert size={48} className="mx-auto text-red-500" />
-        <h2 className="text-lg font-black text-[var(--text)]">Access Denied</h2>
-        <p className="text-xs text-[var(--text-soft)] leading-relaxed">
-          Learn from Anywhere is an offline-capable student practical discovery tool reserved exclusively for Student Portal accounts. Teacher accounts cannot access student learning activities.
-        </p>
-      </div>
-    )
-  }
-
-  // Curriculum Gate: If no valid syllabus, show CurriculumReviewNotice
-  if (!hasValidCurriculum || subjects.length === 0) {
-    return (
-      <div className="space-y-6">
-        <PageHead
-          title="Learn from Anywhere"
-          action={
-            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
-              <Sprout size={13} className="text-emerald-500" /> Rural & Village Learning
-            </span>
-          }
-        />
-        <CurriculumReviewNotice
-          curriculum={curriculum}
-          featureName="Learn from Anywhere"
-          onOpenSyllabusModal={() => setIsSyllabusModalOpen(true)}
-        />
-        <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
-      </div>
-    )
-  }
-
   const totalSteps = activity?.steps?.length || 0
   const completedCount = Object.values(completedSteps).filter(Boolean).length
   const progressPercent = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0
@@ -863,6 +829,44 @@ export default function LearnAnywhere() {
     if (!raw || /^(none|n\/a|not applicable|no limitations)$/i.test(raw)) return ''
     return raw
   }, [activity])
+
+  const hasRealSafety = Boolean(safetyText)
+  const hasRealLimitation = Boolean(limitationText)
+
+  // Teacher Guard: Learn from Anywhere is reserved exclusively for Student Portal
+  if (user?.role === 'teacher') {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center space-y-4 my-12 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-sm">
+        <ShieldAlert size={48} className="mx-auto text-red-500" />
+        <h2 className="text-lg font-black text-[var(--text)]">Access Denied</h2>
+        <p className="text-xs text-[var(--text-soft)] leading-relaxed">
+          Learn from Anywhere is an offline-capable student practical discovery tool reserved exclusively for Student Portal accounts. Teacher accounts cannot access student learning activities.
+        </p>
+      </div>
+    )
+  }
+
+  // Curriculum Gate: If no valid syllabus, show CurriculumReviewNotice
+  if (!hasValidCurriculum || subjects.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PageHead
+          title="Learn from Anywhere"
+          action={
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold flex items-center gap-1.5">
+              <Sprout size={13} className="text-emerald-500" /> Rural & Village Learning
+            </span>
+          }
+        />
+        <CurriculumReviewNotice
+          curriculum={curriculum}
+          featureName="Learn from Anywhere"
+          onOpenSyllabusModal={() => setIsSyllabusModalOpen(true)}
+        />
+        <SyllabusModal isOpen={isSyllabusModalOpen} onClose={() => setIsSyllabusModalOpen(false)} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

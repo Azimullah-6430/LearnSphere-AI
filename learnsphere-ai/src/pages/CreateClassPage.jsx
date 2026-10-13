@@ -323,7 +323,7 @@ export default function CreateClassPage() {
       </header>
 
       {/* Main Content Body */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-6 md:p-10 space-y-8">
+      <main className="flex-1 w-full min-w-0 p-6 md:p-10 space-y-8">
         {/* Welcome Banner */}
         <div className="p-8 rounded-3xl bg-gradient-to-r from-[var(--accent)] via-[#153c30] to-[var(--accent-dim)] text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2.5">
