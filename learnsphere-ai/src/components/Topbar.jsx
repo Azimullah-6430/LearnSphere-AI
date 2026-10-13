@@ -22,10 +22,10 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base md:text-lg font-bold text-[var(--text)] tracking-tight truncate leading-tight">
+              <h1 className="text-base sm:text-lg md:text-xl font-bold text-[var(--text)] tracking-tight truncate leading-tight">
                 {title}
               </h1>
-              <span className={`hidden sm:inline-flex text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+              <span className={`hidden sm:inline-flex text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border ${
                 isTeacher
                   ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-800 dark:text-emerald-300'
                   : 'bg-teal-500/10 border-teal-500/25 text-teal-800 dark:text-teal-300'
@@ -34,7 +34,7 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
               </span>
             </div>
             {crumb && (
-              <div className="text-[11px] sm:text-xs text-[var(--text-soft)] font-medium mt-0.5 truncate hidden xs:block">
+              <div className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium mt-0.5 truncate hidden xs:block">
                 {crumb}
               </div>
             )}
@@ -45,8 +45,8 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
         <div className="flex items-center gap-1.5 sm:gap-2.5 ml-auto shrink-0">
           {isTeacher && (
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-[var(--text)] text-xs sm:text-sm font-semibold shadow-xs max-w-[130px] sm:max-w-[220px]">
-                <Building2 size={14} className="text-[var(--accent)] shrink-0" />
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] text-[var(--text)] text-xs sm:text-sm font-semibold shadow-xs max-w-[130px] sm:max-w-[220px]">
+                <Building2 size={15} className="text-[var(--accent)] shrink-0" />
                 <span className="text-[var(--text-soft)] hidden lg:inline">{institutionMode === 'school' ? 'Class:' : 'Dept:'}</span>
                 {teacherClasses.length > 0 ? (
                   <select
@@ -69,29 +69,29 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
               <button
                 onClick={() => navigate('/create-class')}
                 title="Manage Classes & Departments"
-                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-semibold text-xs sm:text-sm hover:bg-[var(--surface-alt)] hover:border-[var(--border-strong)] transition-all shadow-xs cursor-pointer"
+                className="hidden lg:flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-semibold text-xs sm:text-sm hover:bg-[var(--surface-alt)] hover:border-[var(--border-strong)] transition-all shadow-xs cursor-pointer"
               >
-                <Building size={14} className="text-[var(--accent)]" />
+                <Building size={15} className="text-[var(--accent)]" />
                 <span>{institutionMode === 'school' ? 'Classes' : 'Departments'}</span>
               </button>
             </div>
           )}
 
           {!isTeacher && (
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2.5">
               <div
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-bold text-xs sm:text-[13px] shadow-xs transition-all whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-bold text-xs sm:text-sm shadow-xs transition-all whitespace-nowrap"
                 title="Active session study timer"
               >
-                <CircleChevronUp size={14} className="text-emerald-500 shrink-0" strokeWidth={2} />
+                <CircleChevronUp size={15} className="text-emerald-500 shrink-0" strokeWidth={2} />
                 <span>⏱️ {formattedSessionTime || '0s'} (Active)</span>
               </div>
 
               <div
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold text-xs sm:text-[13px] shadow-xs transition-all whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold text-xs sm:text-sm shadow-xs transition-all whitespace-nowrap"
                 title="Consecutive daily study streak"
               >
-                <Flame size={14} className="text-amber-500 shrink-0" strokeWidth={1.8} />
+                <Flame size={15} className="text-amber-500 shrink-0" strokeWidth={1.8} />
                 <span>🔥 {streakDays || 1} {streakDays === 1 ? 'Day' : 'Days'}</span>
               </div>
             </div>
@@ -100,9 +100,9 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
           <button
             onClick={onOpenSyllabusModal}
             title="Upload or review syllabus"
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)] font-semibold text-xs sm:text-sm hover:bg-[var(--accent)] hover:text-white transition-all shadow-xs cursor-pointer"
+            className="hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] text-[var(--accent)] font-semibold text-xs sm:text-sm hover:bg-[var(--accent)] hover:text-white transition-all shadow-xs cursor-pointer"
           >
-            <UploadCloud size={15} />
+            <UploadCloud size={16} />
             <span>Syllabus</span>
           </button>
 
@@ -112,7 +112,7 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
             aria-label="Toggle light/dark theme"
             className="w-9 h-9 flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-all shadow-xs cursor-pointer"
           >
-            {theme === 'dark' ? <Sun size={16} strokeWidth={1.8} /> : <Moon size={16} strokeWidth={1.8} />}
+            {theme === 'dark' ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
           </button>
 
           <button
@@ -121,7 +121,7 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
             aria-label="View notifications"
             className="relative w-9 h-9 flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-all shadow-xs cursor-pointer"
           >
-            <Bell size={16} strokeWidth={1.8} />
+            <Bell size={17} strokeWidth={1.8} />
             <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
           </button>
 
@@ -130,7 +130,7 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
               logout()
               navigate('/')
             }}
-            className="hidden sm:inline-flex px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] hover:bg-[var(--surface-alt)] transition-all shadow-xs cursor-pointer"
+            className="hidden sm:inline-flex px-3.5 py-1.5 text-xs sm:text-sm font-semibold rounded-xl bg-[var(--surface)] border border-[var(--border-strong)] text-[var(--text)] hover:bg-[var(--surface-alt)] transition-all shadow-xs cursor-pointer"
           >
             Sign out
           </button>

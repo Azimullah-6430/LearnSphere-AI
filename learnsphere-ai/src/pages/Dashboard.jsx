@@ -158,56 +158,56 @@ function StudentDashboard() {
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Executive Student Header Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-7 shadow-xs">
+      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
-                <GraduationCap size={13} /> {academicBadge}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
+                <GraduationCap size={15} /> {academicBadge}
               </span>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
-                <Flame size={13} className="text-amber-500 shrink-0" strokeWidth={1.8} /> 🔥 {streakDays || 1} {streakDays === 1 ? 'Day' : 'Days'}
+              <span className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
+                <Flame size={15} className="text-amber-500 shrink-0" strokeWidth={1.8} /> 🔥 {streakDays || 1} {streakDays === 1 ? 'Day' : 'Days'}
               </span>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
-                <CircleChevronUp size={13} className="text-emerald-500 shrink-0" strokeWidth={2} /> ⏱️ {formattedSessionTime || '0s'} (Active)
+              <span className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 whitespace-nowrap shadow-xs">
+                <CircleChevronUp size={15} className="text-emerald-500 shrink-0" strokeWidth={2} /> ⏱️ {formattedSessionTime || '0s'} (Active)
               </span>
             </div>
 
-            <h1 className="text-xl sm:text-2xl md:text-[26px] font-bold tracking-tight text-[var(--text)]">
+            <h1 className="text-2xl sm:text-3xl md:text-[32px] font-extrabold tracking-tight text-[var(--text)]">
               Welcome back, {user?.name || 'Student'}
             </h1>
-            <p className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium">
+            <p className="text-sm sm:text-base text-[var(--text-soft)] font-medium">
               {user?.institution_name || user?.school || user?.college || 'LearnSphere Academic Network'}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2 shadow-xs">
-              <FileCheck size={16} /> Self-Evaluation
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <Button onClick={() => navigate('/app/self-evaluation')} className="flex items-center gap-2 shadow-xs px-4 sm:px-5 py-2.5 text-sm sm:text-base font-bold">
+              <FileCheck size={18} /> Self-Evaluation
             </Button>
-            <Button variant="secondary" onClick={() => navigate('/app/trainer')} className="flex items-center gap-2">
-              <Brain size={16} /> Personal Trainer
+            <Button variant="secondary" onClick={() => navigate('/app/trainer')} className="flex items-center gap-2 px-4 sm:px-5 py-2.5 text-sm sm:text-base font-bold">
+              <Brain size={18} /> Personal Trainer
             </Button>
           </div>
         </div>
       </div>
 
       {/* Recommended Next Action Banner */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[var(--accent-soft)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--accent)]/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3.5">
-          <div className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
-            <Sparkles size={18} />
+      <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-[var(--accent-soft)] via-[var(--surface)] to-[var(--surface-alt)] border border-[var(--accent)]/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start gap-4">
+          <div className="w-11 h-11 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+            <Sparkles size={22} />
           </div>
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--accent)] mb-0.5">
+            <div className="text-xs sm:text-[13px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">
               Recommended Next Action
             </div>
-            <div className="text-xs sm:text-sm font-bold text-[var(--text)]">
+            <div className="text-base sm:text-lg md:text-xl font-bold text-[var(--text)] leading-snug">
               {!hasEvaluations
                 ? 'Upload and grade your handwritten exam script'
                 : 'Master concepts with the Syllabus-Aligned AI Tutor'}
             </div>
-            <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">
+            <div className="text-xs sm:text-sm md:text-[15px] text-[var(--text-soft)] mt-1 leading-relaxed max-w-2xl">
               {!hasEvaluations
                 ? 'Use computer vision to evaluate your paper against marking schemes and diagnose knowledge gaps.'
                 : 'Get step-by-step Feynman explanations, derivations, and practice questions for your subjects.'}
@@ -217,10 +217,10 @@ function StudentDashboard() {
 
         <button
           onClick={() => navigate(!hasEvaluations ? '/app/self-evaluation' : '/app/trainer')}
-          className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-all font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0 shadow-xs cursor-pointer"
+          className="px-6 py-3 rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-all font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 shrink-0 shadow-sm cursor-pointer"
         >
           <span>{!hasEvaluations ? 'Start First Evaluation' : 'Resume AI Tutoring'}</span>
-          <ArrowRight size={15} />
+          <ArrowRight size={17} />
         </button>
       </div>
 
@@ -240,7 +240,7 @@ function StudentDashboard() {
       )}
 
       {/* Metric Cards Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <StatCard
           label="Evaluations"
           value={loading ? '…' : recentEvals.length}
@@ -283,52 +283,52 @@ function StudentDashboard() {
             <div className="grid sm:grid-cols-2 gap-4">
               <button
                 onClick={() => navigate('/app/trainer')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Brain size={20} className="text-[var(--accent)]" />
+                <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Brain size={24} className="text-[var(--accent)]" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Personal AI Trainer</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Personal AI Trainer</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Conversational tutor with step-by-step Feynman derivations and syllabus mastery.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/learn-anywhere')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Compass size={20} className="text-teal-600 dark:text-teal-400" />
+                <div className="w-12 h-12 rounded-xl bg-teal-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Compass size={24} className="text-teal-600 dark:text-teal-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Learn from Anywhere</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Learn from Anywhere</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Low-resource experiential learning using everyday local materials and household items.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/reality-lab')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Microscope size={20} className="text-emerald-600 dark:text-emerald-400" />
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Microscope size={24} className="text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Reality Lab</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Reality Lab</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Virtual science simulations and interactive hypothesis testing environments.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/knowledge-challenge')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Trophy size={20} className="text-amber-600 dark:text-amber-400" />
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Trophy size={24} className="text-amber-600 dark:text-amber-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Knowledge Challenge</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Knowledge Challenge</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Adaptive syllabus quizzes and timed speed drills for exam preparation.
                 </div>
               </button>
@@ -339,38 +339,38 @@ function StudentDashboard() {
           <div className="grid sm:grid-cols-3 gap-3.5">
             <button
               onClick={() => navigate('/app/focus')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <Timer size={18} className="text-[var(--accent)]" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Timer</span>
+                <Timer size={20} className="text-[var(--accent)]" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Timer</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Focus Session</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">Pomodoro & Audio</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Focus Session</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">Pomodoro & Audio</div>
             </button>
 
             <button
               onClick={() => navigate('/app/memory')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <BookOpen size={18} className="text-teal-600" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Recall</span>
+                <BookOpen size={20} className="text-teal-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Recall</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Academic Memory</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">Spaced Flashcards</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Academic Memory</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">Spaced Flashcards</div>
             </button>
 
             <button
               onClick={() => navigate('/app/opportunities')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <Globe size={18} className="text-amber-600" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Feeds</span>
+                <Globe size={20} className="text-amber-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Feeds</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Opportunities</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">Contests & News</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Opportunities</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">Contests & News</div>
             </button>
           </div>
         </div>
@@ -383,23 +383,23 @@ function StudentDashboard() {
               subtitle="Verified scores and diagnostic breakdown"
               action={
                 <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
-                  View all <ChevronRight size={14} className="ml-1" />
+                  View all <ChevronRight size={15} className="ml-1" />
                 </Button>
               }
             />
 
             {loading ? (
-              <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+              <div className="py-12 text-center text-xs sm:text-sm text-[var(--text-soft)] animate-pulse">
                 Loading recent evaluation records…
               </div>
             ) : !hasEvaluations ? (
               <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-2xl p-6 bg-[var(--surface-alt)]/30">
-                <FileText size={38} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
-                <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Papers Found</div>
-                <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
+                <FileText size={40} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
+                <div className="text-sm sm:text-base font-bold text-[var(--text)] mb-1">No Evaluated Papers Found</div>
+                <p className="text-xs sm:text-sm text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
                   Upload a Question Paper and your Handwritten Answer Script in Self-Evaluation for instant step-by-step grading.
                 </p>
-                <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto text-xs">
+                <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto text-xs sm:text-sm font-semibold">
                   Start First Evaluation
                 </Button>
               </div>
@@ -411,17 +411,17 @@ function StudentDashboard() {
                     <div
                       key={e.id || e._id || idx}
                       onClick={() => navigate('/app/history')}
-                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2.5 rounded-xl cursor-pointer transition-colors"
+                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-3 rounded-xl cursor-pointer transition-colors"
                     >
                       <div className="min-w-0 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
-                          <FileText size={16} />
+                        <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
+                          <FileText size={18} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs sm:text-sm font-bold text-[var(--text)] truncate">
+                          <div className="text-sm sm:text-base font-bold text-[var(--text)] truncate">
                             {e.subject || 'Subject'}
                           </div>
-                          <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                          <div className="text-xs sm:text-[13px] text-[var(--text-soft)] mt-0.5 truncate">
                             {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
                           </div>
                         </div>
@@ -430,7 +430,7 @@ function StudentDashboard() {
                         <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
                           {pct}%
                         </Badge>
-                        <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                        <ChevronRight size={15} className="text-[var(--text-faint)]" />
                       </div>
                     </div>
                   )
@@ -440,22 +440,22 @@ function StudentDashboard() {
           </Card>
 
           {/* Academic Profile Tile */}
-          <Card className="p-4 sm:p-5">
-            <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+          <Card className="p-5 sm:p-6">
+            <div className="text-xs sm:text-sm font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3.5">
               Student Profile Verification
             </div>
-            <div className="text-xs space-y-2 text-[var(--text-soft)]">
-              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
+            <div className="text-xs sm:text-sm space-y-2.5 text-[var(--text-soft)]">
+              <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
                 <span>Account Name</span>
                 <span className="font-bold text-[var(--text)]">{user?.name}</span>
               </div>
-              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
                 <span>Email ID</span>
-                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">{user?.email}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[200px]">{user?.email}</span>
               </div>
-              <div className="flex justify-between items-center py-1.5">
+              <div className="flex justify-between items-center py-2">
                 <span>Institution</span>
-                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">
+                <span className="font-bold text-[var(--text)] truncate max-w-[200px]">
                   {user?.institution_name || user?.school || user?.college || 'Registered'}
                 </span>
               </div>
@@ -506,39 +506,39 @@ function TeacherDashboard() {
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Executive Teacher Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-7 shadow-xs">
+      <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
-                <Building2 size={13} /> {isCollege ? 'Higher Education Faculty' : 'School Educator'}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/20 flex items-center gap-1.5">
+                <Building2 size={15} /> {isCollege ? 'Higher Education Faculty' : 'School Educator'}
               </span>
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1.5">
-                <UserCheck size={13} /> Faculty Verified
+              <span className="px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1.5">
+                <UserCheck size={15} /> Faculty Verified
               </span>
             </div>
 
-            <h1 className="text-xl sm:text-2xl md:text-[26px] font-bold tracking-tight text-[var(--text)]">
+            <h1 className="text-2xl sm:text-3xl md:text-[32px] font-extrabold tracking-tight text-[var(--text)]">
               Welcome, {user?.name || 'Faculty'}
             </h1>
-            <p className="text-xs sm:text-[13px] text-[var(--text-soft)] font-medium">
+            <p className="text-sm sm:text-base text-[var(--text-soft)] font-medium">
               {user?.institution_name || 'LearnSphere Academic Network'} · {isCollege ? (user?.department || 'Department') : (user?.board || 'Board')}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            <Button onClick={() => navigate('/app/evaluate')} className="flex items-center gap-2 shadow-xs">
-              <FileText size={16} /> Evaluate Script
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <Button onClick={() => navigate('/app/evaluate')} className="flex items-center gap-2 shadow-xs px-4 sm:px-5 py-2.5 text-sm sm:text-base font-bold">
+              <FileText size={18} /> Evaluate Script
             </Button>
-            <Button variant="secondary" onClick={() => navigate('/app/action-center')} className="flex items-center gap-2">
-              <Zap size={16} /> Action Center
+            <Button variant="secondary" onClick={() => navigate('/app/action-center')} className="flex items-center gap-2 px-4 sm:px-5 py-2.5 text-sm sm:text-base font-bold">
+              <Zap size={18} /> Action Center
             </Button>
           </div>
         </div>
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <StatCard
           label="Evaluations Graded"
           value={loading ? '…' : recentEvals.length}
@@ -581,52 +581,52 @@ function TeacherDashboard() {
             <div className="grid sm:grid-cols-2 gap-4">
               <button
                 onClick={() => navigate('/app/evaluate')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <FileText size={20} className="text-[var(--accent)]" />
+                <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <FileText size={24} className="text-[var(--accent)]" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Evaluate Answer Scripts</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Evaluate Answer Scripts</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Upload question papers and student scripts for verified OCR evaluation and rubrics.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/action-center')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Zap size={20} className="text-amber-600 dark:text-amber-400" />
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Zap size={24} className="text-amber-600 dark:text-amber-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Action Center</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Action Center</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Prioritized student interventions, feedback assignments, and remediation workflows.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/misconception-map')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <Map size={20} className="text-indigo-600 dark:text-indigo-400" />
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <Map size={24} className="text-indigo-600 dark:text-indigo-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Misconception Heatmap</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Misconception Heatmap</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Identify specific syllabus concept flaws and question-level error patterns across the class.
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/app/analytics')}
-                className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
+                className="p-5 sm:p-6 rounded-2xl border border-[var(--border)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/60 text-left transition-all group hover:shadow-xs cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
-                  <TrendingUp size={20} className="text-emerald-600 dark:text-emerald-400" />
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform">
+                  <TrendingUp size={24} className="text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <div className="text-sm sm:text-base font-bold text-[var(--text)]">Class Analytics</div>
-                <div className="text-xs text-[var(--text-soft)] mt-1 leading-relaxed">
+                <div className="text-base sm:text-lg font-bold text-[var(--text)]">Class Analytics</div>
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-1.5 leading-relaxed">
                   Score distributions, question-level accuracy tiers, and longitudinal trends.
                 </div>
               </button>
@@ -637,38 +637,38 @@ function TeacherDashboard() {
           <div className="grid sm:grid-cols-3 gap-3.5">
             <button
               onClick={() => navigate('/app/students')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <Users size={18} className="text-[var(--accent)]" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Roster</span>
+                <Users size={20} className="text-[var(--accent)]" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Roster</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Student Roster</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">Enrolled cohort</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Student Roster</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">Enrolled cohort</div>
             </button>
 
             <button
               onClick={() => navigate('/app/reports')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <FileText size={18} className="text-teal-600" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Reports</span>
+                <FileText size={20} className="text-teal-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Reports</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Academic Reports</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">PDF report downloads</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Academic Reports</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">PDF report downloads</div>
             </button>
 
             <button
               onClick={() => navigate('/app/plagiarism')}
-              className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
+              className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] text-left transition-all group cursor-pointer"
             >
               <div className="flex items-center justify-between mb-2">
-                <ShieldCheck size={18} className="text-amber-600" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">Audit</span>
+                <ShieldCheck size={20} className="text-amber-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Audit</span>
               </div>
-              <div className="text-sm font-bold text-[var(--text)]">Plagiarism Audit</div>
-              <div className="text-xs text-[var(--text-soft)] mt-0.5">Similarity checks</div>
+              <div className="text-sm sm:text-base font-bold text-[var(--text)]">Plagiarism Audit</div>
+              <div className="text-xs sm:text-sm text-[var(--text-soft)] mt-0.5">Similarity checks</div>
             </button>
           </div>
         </div>
@@ -681,23 +681,23 @@ function TeacherDashboard() {
               subtitle="Graded answer papers with verified marks"
               action={
                 <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')}>
-                  View all <ChevronRight size={14} className="ml-1" />
+                  View all <ChevronRight size={15} className="ml-1" />
                 </Button>
               }
             />
 
             {loading ? (
-              <div className="py-12 text-center text-xs text-[var(--text-soft)] animate-pulse">
+              <div className="py-12 text-center text-xs sm:text-sm text-[var(--text-soft)] animate-pulse">
                 Loading graded scripts…
               </div>
             ) : !hasEvaluations ? (
               <div className="py-10 text-center border border-dashed border-[var(--border)] rounded-2xl p-6 bg-[var(--surface-alt)]/30">
-                <FileText size={38} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
-                <div className="text-sm font-bold text-[var(--text)] mb-1">No Evaluated Scripts Yet</div>
-                <p className="text-xs text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
+                <FileText size={40} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
+                <div className="text-sm sm:text-base font-bold text-[var(--text)] mb-1">No Evaluated Scripts Yet</div>
+                <p className="text-xs sm:text-sm text-[var(--text-soft)] max-w-xs mx-auto mb-4 leading-relaxed">
                   Upload Question Papers and Student Answer Scripts in Evaluate to generate automated grading, rubrics, and diagnostic reports.
                 </p>
-                <Button size="sm" onClick={() => navigate('/app/evaluate')} className="mx-auto text-xs">
+                <Button size="sm" onClick={() => navigate('/app/evaluate')} className="mx-auto text-xs sm:text-sm font-semibold">
                   Evaluate First Script
                 </Button>
               </div>
@@ -709,17 +709,17 @@ function TeacherDashboard() {
                     <div
                       key={e.id || e._id || idx}
                       onClick={() => navigate('/app/history')}
-                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-2.5 rounded-xl cursor-pointer transition-colors"
+                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-3 rounded-xl cursor-pointer transition-colors"
                     >
                       <div className="min-w-0 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
-                          <FileText size={16} />
+                        <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-bold text-xs">
+                          <FileText size={18} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs sm:text-sm font-bold text-[var(--text)] truncate">
+                          <div className="text-sm sm:text-base font-bold text-[var(--text)] truncate">
                             {e.student_name || 'Student'} — {e.subject || 'Subject'}
                           </div>
-                          <div className="text-[11px] text-[var(--text-soft)] mt-0.5 truncate">
+                          <div className="text-xs sm:text-[13px] text-[var(--text-soft)] mt-0.5 truncate">
                             {e.assessment_title || 'Exam'} · {e.created_at || 'Recently'}
                           </div>
                         </div>
@@ -728,7 +728,7 @@ function TeacherDashboard() {
                         <Badge tone={pct >= 75 ? 'success' : 'warning'}>
                           {pct}%
                         </Badge>
-                        <ChevronRight size={14} className="text-[var(--text-faint)]" />
+                        <ChevronRight size={15} className="text-[var(--text-faint)]" />
                       </div>
                     </div>
                   )
@@ -738,22 +738,22 @@ function TeacherDashboard() {
           </Card>
 
           {/* Faculty Profile Summary */}
-          <Card className="p-4 sm:p-5">
-            <div className="text-[11px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3">
+          <Card className="p-5 sm:p-6">
+            <div className="text-xs sm:text-sm font-bold text-[var(--text-faint)] uppercase tracking-wider mb-3.5">
               Faculty Profile Details
             </div>
-            <div className="text-xs space-y-2 text-[var(--text-soft)]">
-              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
+            <div className="text-xs sm:text-sm space-y-2.5 text-[var(--text-soft)]">
+              <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
                 <span>Faculty Name</span>
                 <span className="font-bold text-[var(--text)]">{user?.name}</span>
               </div>
-              <div className="flex justify-between items-center py-1.5 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
                 <span>Email ID</span>
-                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">{user?.email}</span>
+                <span className="font-bold text-[var(--text)] truncate max-w-[200px]">{user?.email}</span>
               </div>
-              <div className="flex justify-between items-center py-1.5">
+              <div className="flex justify-between items-center py-2">
                 <span>Institution</span>
-                <span className="font-bold text-[var(--text)] truncate max-w-[180px]">
+                <span className="font-bold text-[var(--text)] truncate max-w-[200px]">
                   {user?.institution_name || 'LearnSphere Academic Portal'}
                 </span>
               </div>

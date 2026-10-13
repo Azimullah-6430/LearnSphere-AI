@@ -12,10 +12,10 @@ export function Card({ children, className = '', style, onClick }) {
 
 export function CardHeader({ title, subtitle, action }) {
   return (
-    <div className="flex items-start justify-between mb-4 gap-3">
+    <div className="flex items-start justify-between mb-4 sm:mb-5 gap-3">
       <div className="min-w-0 flex-1">
-        <h3 className="text-base sm:text-lg font-bold text-[var(--text)] tracking-tight leading-snug">{title}</h3>
-        {subtitle && <p className="text-xs sm:text-sm text-[var(--text-soft)] mt-1 font-normal leading-relaxed">{subtitle}</p>}
+        <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--text)] tracking-tight leading-snug">{title}</h3>
+        {subtitle && <p className="text-xs sm:text-sm md:text-base text-[var(--text-soft)] mt-1 font-normal leading-relaxed">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -33,7 +33,7 @@ const badgeStyles = {
 
 export function Badge({ children, tone = 'neutral', className = '' }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold leading-normal ${badgeStyles[tone] || badgeStyles.neutral} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold leading-normal ${badgeStyles[tone] || badgeStyles.neutral} ${className}`}>
       {children}
     </span>
   )
@@ -49,10 +49,10 @@ const btnStyles = {
 export function Button({ children, variant = 'primary', size = 'md', className = '', ...props }) {
   const pad =
     size === 'sm'
-      ? 'px-3 py-1 text-xs rounded-lg min-h-[32px]'
+      ? 'px-3.5 py-1.5 text-xs sm:text-sm rounded-lg min-h-[34px]'
       : size === 'lg'
-      ? 'px-5 py-2.5 text-sm sm:text-[15px] rounded-xl font-bold min-h-[42px]'
-      : 'px-3.5 py-2 text-xs sm:text-[13px] rounded-xl font-semibold min-h-[36px]'
+      ? 'px-6 py-3 text-sm sm:text-base rounded-xl font-bold min-h-[46px]'
+      : 'px-4 py-2 text-xs sm:text-sm rounded-xl font-semibold min-h-[38px]'
 
   return (
     <button
@@ -67,23 +67,23 @@ export function Button({ children, variant = 'primary', size = 'md', className =
 export function StatCard({ label, value, delta, deltaTone, icon: Icon }) {
   const toneClass = deltaTone === 'up' ? 'text-[var(--success)]' : deltaTone === 'down' ? 'text-[var(--error)]' : 'text-[var(--text-faint)]'
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 md:p-6 shadow-[var(--shadow-xs)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-sm)] transition-all duration-200 min-w-0">
-      <div className="flex items-center justify-between mb-2 gap-1">
-        <span className="text-[11px] sm:text-xs font-semibold tracking-wider uppercase text-[var(--text-soft)] truncate">{label}</span>
-        {Icon && <Icon size={15} className="text-[var(--text-faint)] shrink-0" />}
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-[var(--shadow-xs)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-sm)] transition-all duration-200 min-w-0">
+      <div className="flex items-center justify-between mb-2.5 gap-1.5">
+        <span className="text-xs sm:text-[13px] font-bold tracking-wider uppercase text-[var(--text-soft)] truncate">{label}</span>
+        {Icon && <Icon size={18} className="text-[var(--text-faint)] shrink-0" />}
       </div>
-      <div className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-[var(--text)] leading-none truncate">{value}</div>
-      {delta && <div className={`text-[11px] sm:text-xs font-semibold mt-2 flex items-center gap-1 ${toneClass}`}>{delta}</div>}
+      <div className="text-2xl sm:text-3xl md:text-[34px] font-extrabold tracking-tight text-[var(--text)] leading-none truncate">{value}</div>
+      {delta && <div className={`text-xs sm:text-[13px] font-semibold mt-2.5 flex items-center gap-1.5 ${toneClass}`}>{delta}</div>}
     </div>
   )
 }
 
 export function PageHead({ title, subtitle, action }) {
   return (
-    <div className="flex items-start md:items-end justify-between mb-6 md:mb-7 flex-wrap gap-3 pb-3 border-b border-[var(--border)]/70">
+    <div className="flex items-start md:items-end justify-between mb-6 md:mb-7 flex-wrap gap-3 pb-3.5 border-b border-[var(--border)]/70">
       <div className="max-w-3xl">
-        <h1 className="text-xl sm:text-2xl md:text-[26px] font-extrabold tracking-tight text-[var(--text)] leading-tight mb-1">{title}</h1>
-        {subtitle && <p className="text-xs sm:text-sm text-[var(--text-soft)] leading-relaxed">{subtitle}</p>}
+        <h1 className="text-2xl sm:text-3xl md:text-[30px] font-extrabold tracking-tight text-[var(--text)] leading-tight mb-1.5">{title}</h1>
+        {subtitle && <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0 flex items-center gap-2">{action}</div>}
     </div>

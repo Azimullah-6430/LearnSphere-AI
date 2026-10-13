@@ -31,7 +31,7 @@ import {
 import { useApp } from '../context/AppContext.jsx'
 
 const navItemClass = ({ isActive }) =>
-  `relative group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 cursor-pointer ${
+  `relative group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm sm:text-[14.5px] font-semibold transition-all duration-150 cursor-pointer ${
     isActive
       ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-bold shadow-xs border border-[var(--accent)]/20'
       : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
@@ -39,7 +39,7 @@ const navItemClass = ({ isActive }) =>
 
 function NavLabel({ children }) {
   return (
-    <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)] px-3.5 pt-4 pb-1.5 flex items-center justify-between">
+    <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] px-3.5 pt-4 pb-1.5 flex items-center justify-between">
       <span>{children}</span>
     </div>
   )
@@ -48,10 +48,10 @@ function NavLabel({ children }) {
 function Item({ to, icon: Icon, children, onClick, badge }) {
   return (
     <NavLink to={to} className={navItemClass} onClick={onClick}>
-      <Icon size={18} strokeWidth={1.8} className="shrink-0 opacity-90 transition-transform group-hover:scale-105" />
+      <Icon size={19} strokeWidth={1.8} className="shrink-0 opacity-90 transition-transform group-hover:scale-105" />
       <span className="truncate flex-1">{children}</span>
       {badge && (
-        <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+        <span className="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
           {badge}
         </span>
       )}
@@ -79,12 +79,12 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
       <div className="px-5 py-4 border-b border-[var(--border)]">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/learnsphere-icon.png" alt="LearnSphere AI" className="w-9 h-9 rounded-xl object-contain shrink-0 shadow-xs" />
+            <img src="/learnsphere-icon.png" alt="LearnSphere AI" className="w-10 h-10 rounded-xl object-contain shrink-0 shadow-xs" />
             <div className="min-w-0">
-              <div className="text-base font-extrabold tracking-tight text-[var(--text)] leading-none truncate">
+              <div className="text-lg font-extrabold tracking-tight text-[var(--text)] leading-none truncate">
                 LearnSphere<span className="text-[var(--accent)] ml-0.5">AI</span>
               </div>
-              <div className="text-[10.5px] text-[var(--text-faint)] font-medium mt-1 truncate">
+              <div className="text-xs text-[var(--text-faint)] font-medium mt-1 truncate">
                 Education Intelligence
               </div>
             </div>
