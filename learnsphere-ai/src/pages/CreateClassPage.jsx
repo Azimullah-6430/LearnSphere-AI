@@ -2,7 +2,29 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { Card, Badge, Button } from '../components/ui/Primitives.jsx'
-import { Building, School, GraduationCap, Plus, ArrowRight, CheckCircle2, Users, Upload, Sparkles, Trash2, LogOut } from 'lucide-react'
+import { api } from '../services/api.js'
+import {
+  Building,
+  School,
+  GraduationCap,
+  Plus,
+  ArrowRight,
+  CheckCircle2,
+  Users,
+  Upload,
+  Sparkles,
+  Trash2,
+  LogOut,
+  FileSpreadsheet,
+  FileText,
+  AlertTriangle,
+  FileUp,
+  X,
+  Edit2,
+  Check,
+  RefreshCw,
+  Info
+} from 'lucide-react'
 
 export default function CreateClassPage() {
   const {
@@ -12,7 +34,6 @@ export default function CreateClassPage() {
     deleteClass,
     activeClassId,
     setActiveClassId,
-    uploadStudentRoster,
     logout,
     institutionMode
   } = useApp()
@@ -36,121 +57,229 @@ export default function CreateClassPage() {
   const [collegeSection, setCollegeSection] = useState(user?.section || '')
   const [collegeSubjects, setCollegeSubjects] = useState('')
 
-  // Roster Text / File State
-  const [rosterText, setRosterText] = useState('')
+  // Student Roster Section State
+  const [rosterTab, setRosterTab] = useState('file') // 'file' | 'manual'
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [manualText, setManualText] = useState('')
+  const [isParsing, setIsParsing] = useState(false)
+  const [parseError, setParseError] = useState('')
+  
+  // Extracted Roster Review State
+  const [extractedRoster, setExtractedRoster] = useState(null) // Array of students
+  const [detectedFields, setDetectedFields] = useState([])
+  const [duplicateWarnings, setDuplicateWarnings] = useState([])
+  const [isLowConfidence, setIsLowConfidence] = useState(false)
+  const [lowConfidenceReason, setLowConfidenceReason] = useState('')
+  const [reviewConfirmed, setReviewConfirmed] = useState(false)
+
   const [toast, setToast] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef(null)
 
   const showToastMsg = (msg) => {
     setToast(msg)
-    setTimeout(() => setToast(''), 3500)
+    setTimeout(() => setToast(''), 4000)
   }
 
-  const parseRosterText = (text) => {
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-    const newStudents = []
+  // Handle File Upload and Parse
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-    lines.forEach((line, idx) => {
-      const lower = line.toLowerCase()
-      if (idx === 0 && (lower.includes('name') || lower.includes('roll') || lower.includes('rrn') || lower.includes('s.no'))) {
-        return
-      }
+    setParseError('')
+    setSelectedFile(file)
 
-      const parts = line.split(/[,;\t]+/).map((p) => p.trim()).filter(Boolean)
-      if (parts.length >= 2) {
-        newStudents.push({
-          id: `std_${Date.now()}_${idx}`,
-          rollNo: parts[0],
-          name: parts.slice(1).join(' '),
-          order: newStudents.length + 1,
-          marksHistory: []
-        })
-      } else if (parts.length === 1) {
-        newStudents.push({
-          id: `std_${Date.now()}_${idx}`,
-          rollNo: isSchool ? `ROLL-${100 + newStudents.length + 1}` : `RRN-${2000 + newStudents.length + 1}`,
-          name: parts[0],
-          order: newStudents.length + 1,
-          marksHistory: []
-        })
-      }
-    })
-
-    return newStudents
-  }
-
-  const handleCreateClass = (e) => {
-    e.preventDefault()
-
-    let created = null
-    if (isSchool) {
-      if (!schoolClassName.trim()) return
-      const subs = schoolSubjects.split(',').map((s) => s.trim()).filter(Boolean)
-      created = addClass({
-        level: 'school',
-        name: schoolClassName.trim(),
-        type: 'School Class',
-        board,
-        gradeLevel,
-        section,
-        subjects: subs.length > 0 ? subs : ['Mathematics', 'Science'],
-        students_count: 0,
-        students: []
-      })
-    } else {
-      if (!collegeDept.trim()) return
-      const name = `${collegeDept.trim()} — Semester ${semester || '1'}`
-      const subs = collegeSubjects.split(',').map((s) => s.trim()).filter(Boolean)
-      created = addClass({
-        level: 'college',
-        name,
-        type: 'College Department',
-        department: collegeDept.trim(),
-        semester,
-        section: collegeSection,
-        subjects: subs.length > 0 ? subs : ['Core Subject 1', 'Core Subject 2'],
-        students_count: 0,
-        students: []
-      })
+    const ext = '.' + file.name.split('.').pop().toLowerCase()
+    const allowed = ['.xlsx', '.xls', '.csv', '.tsv', '.txt', '.docx', '.pdf']
+    if (!allowed.includes(ext)) {
+      setParseError(`Unsupported file format '${ext}'. Please upload an Excel, CSV, Word, or PDF file.`)
+      return
     }
 
-    if (created) {
-      if (rosterText.trim()) {
-        const parsed = parseRosterText(rosterText)
-        if (parsed.length > 0) {
-          uploadStudentRoster(created.id, parsed)
-        }
+    if (file.size > 10 * 1024 * 1024) {
+      setParseError(`File size exceeds 10MB limit (${(file.size / (1024 * 1024)).toFixed(1)}MB).`)
+      return
+    }
+
+    await parseFile(file)
+  }
+
+  const parseFile = async (file) => {
+    setIsParsing(true)
+    setParseError('')
+    try {
+      const res = await api.parseRosterFile(file)
+      if (res && res.success && Array.isArray(res.students)) {
+        setExtractedRoster(res.students)
+        setDetectedFields(res.detected_fields || [])
+        setDuplicateWarnings(res.duplicates || [])
+        setIsLowConfidence(Boolean(res.low_confidence))
+        setLowConfidenceReason(res.low_confidence_reason || '')
+        setReviewConfirmed(false)
+        showToastMsg(`Successfully extracted ${res.students.length} student${res.students.length === 1 ? '' : 's'} from ${file.name}. Review list below.`)
+      } else {
+        setParseError(res?.error || 'Failed to parse student list from file.')
+      }
+    } catch (err) {
+      console.error('[CreateClass] Error parsing file:', err)
+      setParseError(err.message || 'Error uploading and analyzing file.')
+    } finally {
+      setIsParsing(false)
+    }
+  }
+
+  const handleManualParse = async () => {
+    if (!manualText.trim()) {
+      setParseError('Please enter or paste student names.')
+      return
+    }
+
+    setIsParsing(true)
+    setParseError('')
+    try {
+      const res = await api.parseRosterText(manualText)
+      if (res && res.success && Array.isArray(res.students)) {
+        setExtractedRoster(res.students)
+        setDetectedFields(res.detected_fields || [])
+        setDuplicateWarnings(res.duplicates || [])
+        setIsLowConfidence(Boolean(res.low_confidence))
+        setLowConfidenceReason(res.low_confidence_reason || '')
+        setReviewConfirmed(false)
+        showToastMsg(`Parsed ${res.students.length} student${res.students.length === 1 ? '' : 's'} from text. Review below.`)
+      } else {
+        setParseError(res?.error || 'Failed to parse student roster text.')
+      }
+    } catch (err) {
+      console.error('[CreateClass] Error parsing manual text:', err)
+      setParseError(err.message || 'Error analyzing student text.')
+    } finally {
+      setIsParsing(false)
+    }
+  }
+
+  // Row Manipulation in Review Screen
+  const handleUpdateStudentRow = (index, field, value) => {
+    if (!extractedRoster) return
+    const updated = [...extractedRoster]
+    updated[index] = { ...updated[index], [field]: value }
+    setExtractedRoster(updated)
+  }
+
+  const handleRemoveStudentRow = (index) => {
+    if (!extractedRoster) return
+    const updated = extractedRoster.filter((_, i) => i !== index)
+    setExtractedRoster(updated)
+  }
+
+  const handleAddStudentRow = () => {
+    const newStudent = {
+      id: `manual_std_${Date.now()}`,
+      name: '',
+      rollNo: '',
+      email: '',
+      section: isSchool ? section : collegeSection,
+      order: (extractedRoster ? extractedRoster.length : 0) + 1
+    }
+    setExtractedRoster(extractedRoster ? [...extractedRoster, newStudent] : [newStudent])
+  }
+
+  const handleClearRoster = () => {
+    setExtractedRoster(null)
+    setDetectedFields([])
+    setDuplicateWarnings([])
+    setIsLowConfidence(false)
+    setLowConfidenceReason('')
+    setSelectedFile(null)
+    setManualText('')
+    setReviewConfirmed(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Class Submission
+  const handleCreateClass = async (e) => {
+    e.preventDefault()
+
+    // Validate class details
+    if (isSchool && !schoolClassName.trim()) {
+      showToastMsg('Please enter a class name.')
+      return
+    }
+    if (!isSchool && !collegeDept.trim()) {
+      showToastMsg('Please enter a department name.')
+      return
+    }
+
+    // Filter valid students from review screen if available
+    let finalizedStudents = []
+    if (extractedRoster && extractedRoster.length > 0) {
+      finalizedStudents = extractedRoster
+        .map((st, idx) => ({
+          id: st.id || `std_${Date.now()}_${idx}`,
+          name: (st.name || '').trim(),
+          rollNo: (st.rollNo || st.roll_number || '').trim(),
+          roll_number: (st.rollNo || st.roll_number || '').trim(),
+          email: (st.email || '').trim(),
+          section: (st.section || (isSchool ? section : collegeSection) || '').trim(),
+          order: idx + 1,
+          marksHistory: st.marksHistory || []
+        }))
+        .filter(st => st.name.length > 0)
+    }
+
+    setIsSubmitting(true)
+    try {
+      let created = null
+      if (isSchool) {
+        const subs = schoolSubjects.split(',').map((s) => s.trim()).filter(Boolean)
+        created = addClass({
+          level: 'school',
+          name: schoolClassName.trim(),
+          type: 'School Class',
+          board,
+          gradeLevel,
+          section,
+          subjects: subs.length > 0 ? subs : ['Mathematics', 'Science'],
+          students_count: finalizedStudents.length,
+          students: finalizedStudents
+        })
+      } else {
+        const name = `${collegeDept.trim()} — Semester ${semester || '1'}`
+        const subs = collegeSubjects.split(',').map((s) => s.trim()).filter(Boolean)
+        created = addClass({
+          level: 'college',
+          name,
+          type: 'College Department',
+          department: collegeDept.trim(),
+          semester,
+          section: collegeSection,
+          subjects: subs.length > 0 ? subs : ['Core Subject 1', 'Core Subject 2'],
+          students_count: finalizedStudents.length,
+          students: finalizedStudents
+        })
       }
 
-      setActiveClassId(created.id)
-      showToastMsg(`${isSchool ? 'Class' : 'Department'} "${created.name}" created! Entering portal...`)
-      setSchoolClassName('')
-      setCollegeDept('')
-      setRosterText('')
+      if (created) {
+        setActiveClassId(created.id)
+        showToastMsg(`${isSchool ? 'Class' : 'Department'} "${created.name}" created with ${finalizedStudents.length} students!`)
+        setSchoolClassName('')
+        setCollegeDept('')
+        handleClearRoster()
 
-      setTimeout(() => {
-        navigate('/app/dashboard')
-      }, 500)
+        setTimeout(() => {
+          navigate('/app/dashboard')
+        }, 600)
+      }
+    } catch (err) {
+      console.error('[CreateClass] Error saving class:', err)
+      showToastMsg('Failed to save class: ' + (err.message || 'Unknown error'))
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
   const handleEnterPortal = (clsId) => {
     setActiveClassId(clsId)
     navigate('/app/dashboard')
-  }
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const content = event.target?.result
-      if (typeof content === 'string') {
-        setRosterText(content)
-        showToastMsg(`Roster file "${file.name}" loaded for parsing!`)
-      }
-    }
-    reader.readAsText(file)
   }
 
   return (
@@ -209,7 +338,7 @@ export default function CreateClassPage() {
               {isSchool ? 'School Class Setup' : 'College Department Setup'}
             </h1>
             <p className="text-sm md:text-base text-emerald-100/85 max-w-xl leading-relaxed">
-              Organize isolated class sections, define subject syllabi, and import your student roster for automated grading and analytics.
+              Organize isolated class sections, define subject syllabi, and import your student roster via Excel, CSV, Word, PDF, or manual entry.
             </p>
           </div>
 
@@ -245,7 +374,7 @@ export default function CreateClassPage() {
         )}
 
         {/* SECTION 1: CREATE FORM */}
-        <Card className="p-7 md:p-8 space-y-6 border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        <Card className="p-7 md:p-8 space-y-7 border border-[var(--border)] bg-[var(--surface)] shadow-sm">
           <div className="flex items-start md:items-center justify-between border-b border-[var(--border)] pb-4 gap-4 flex-wrap">
             <div>
               <h2 className="text-xl font-extrabold text-[var(--text)] flex items-center gap-2.5">
@@ -256,8 +385,8 @@ export default function CreateClassPage() {
               </h2>
               <p className="text-sm text-[var(--text-soft)] mt-1 font-normal">
                 {isSchool
-                  ? 'Define class name, education board, grade level, section, and enrolled subjects.'
-                  : 'Define department name, semester, section batch, and course modules.'}
+                  ? 'Define class name, education board, grade level, section, and optional student roster.'
+                  : 'Define department name, semester, section batch, and optional student roster.'}
               </p>
             </div>
             <Badge tone="accent">
@@ -265,13 +394,13 @@ export default function CreateClassPage() {
             </Badge>
           </div>
 
-          <form onSubmit={handleCreateClass} className="space-y-5">
+          <form onSubmit={handleCreateClass} className="space-y-7">
             {/* Form Fields: School vs College */}
             {isSchool ? (
               <div className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Class Name</label>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Class Name *</label>
                     <input
                       type="text"
                       required
@@ -336,7 +465,7 @@ export default function CreateClassPage() {
               <div className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Department Name</label>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Department Name *</label>
                     <input
                       type="text"
                       required
@@ -383,53 +512,333 @@ export default function CreateClassPage() {
               </div>
             )}
 
-            {/* Student Roster Upload */}
-            <div className="p-5 rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-alt)]/60 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <label className="block font-bold text-[var(--text)] text-sm">
-                  Upload Student Roster ({isSchool ? 'Roll No & Name' : 'Register No & Name'}):
-                </label>
+            {/* OPTIONAL STUDENT-LIST UPLOAD & MANUAL ENTRY SECTION */}
+            <div className="pt-2 border-t border-[var(--border)]">
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-[var(--text)] flex items-center gap-2">
+                    <Users size={18} className="text-[var(--accent)]" />
+                    <span>Optional Student Roster Upload</span>
+                  </h3>
+                  <p className="text-xs text-[var(--text-soft)] mt-0.5">
+                    Upload an Excel, CSV, Word, or PDF student list, or enter names manually. Extracted rows are reviewed before saving.
+                  </p>
+                </div>
 
-                <input
-                  type="file"
-                  id="roster-file-upload"
-                  aria-label="Upload student roster CSV or TXT file"
-                  accept=".csv,.txt,.tsv"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] text-xs font-bold hover:bg-[var(--accent-soft)] transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <Upload size={14} />
-                  <span>Choose Roster File (CSV / TXT)</span>
-                </button>
+                {/* Tab Switcher */}
+                <div className="flex items-center bg-[var(--surface-alt)] p-1 rounded-xl border border-[var(--border)]">
+                  <button
+                    type="button"
+                    onClick={() => { setRosterTab('file'); setParseError('') }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      rosterTab === 'file'
+                        ? 'bg-[var(--surface)] text-[var(--accent)] shadow-xs'
+                        : 'text-[var(--text-soft)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    File Upload
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRosterTab('manual'); setParseError('') }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      rosterTab === 'manual'
+                        ? 'bg-[var(--surface)] text-[var(--accent)] shadow-xs'
+                        : 'text-[var(--text-soft)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    Manual Entry
+                  </button>
+                </div>
               </div>
 
-              <textarea
-                id="roster-textarea-input"
-                aria-label="Paste student roster text"
-                rows={3}
-                value={rosterText}
-                onChange={(e) => setRosterText(e.target.value)}
-                placeholder={
-                  isSchool
-                    ? "ROLL-01, Student Name\nROLL-02, Student Name"
-                    : "REG-101, Student Name\nREG-102, Student Name"
-                }
-                className="w-full p-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm font-mono text-[var(--text)] outline-none focus:border-[var(--accent)] transition-all"
-              />
+              {parseError && (
+                <div className="p-3.5 mb-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)]/30 text-[var(--error)] text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle size={16} className="shrink-0" />
+                  <span>{parseError}</span>
+                </div>
+              )}
+
+              {rosterTab === 'file' ? (
+                /* File Upload Dropzone */
+                <div className="space-y-3">
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-6 rounded-2xl border-2 border-dashed border-[var(--border-strong)] hover:border-[var(--accent)] bg-[var(--surface-alt)]/50 hover:bg-[var(--accent-soft)]/20 transition-all text-center cursor-pointer flex flex-col items-center justify-center gap-3"
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      accept=".xlsx,.xls,.csv,.tsv,.txt,.docx,.pdf"
+                      className="hidden"
+                      id="roster-file-picker"
+                      aria-label="Upload student roster file"
+                    />
+
+                    <div className="w-12 h-12 rounded-2xl bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center text-[var(--accent)] shadow-xs">
+                      <FileUp size={24} />
+                    </div>
+
+                    <div>
+                      <div className="text-sm font-bold text-[var(--text)]">
+                        {selectedFile ? selectedFile.name : 'Click to upload or drag & drop student list'}
+                      </div>
+                      <div className="text-xs text-[var(--text-soft)] mt-1 font-medium">
+                        Supports Excel (.xlsx, .xls), CSV (.csv), Word (.docx), and PDF (.pdf) • Max 10MB
+                      </div>
+                    </div>
+
+                    {isParsing && (
+                      <div className="flex items-center gap-2 text-xs font-bold text-[var(--accent)] pt-1">
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Extracting student names and identifiers...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedFile && !isParsing && (
+                    <div className="flex items-center justify-between text-xs px-3 py-2 bg-[var(--surface)] rounded-xl border border-[var(--border)]">
+                      <span className="font-semibold text-[var(--text)] truncate max-w-sm">
+                        📄 {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => parseFile(selectedFile)}
+                        className="text-[var(--accent)] font-bold hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshCw size={12} />
+                        <span>Re-analyze</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Manual Entry Tab */
+                <div className="space-y-3">
+                  <textarea
+                    rows={4}
+                    value={manualText}
+                    onChange={(e) => setManualText(e.target.value)}
+                    placeholder={
+                      isSchool
+                        ? "Paste roster list, for example:\n1. John Doe (Roll: 101)\n2. Priya Sharma (Roll: 102)\nOr CSV format: Roll No, Student Name, Email"
+                        : "Paste student roster list, for example:\nREG-201, Alex Johnson, alex@university.edu\nREG-202, Brenda Vance, brenda@university.edu"
+                    }
+                    className="w-full p-3.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm font-mono text-[var(--text)] outline-none focus:border-[var(--accent)] transition-all"
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleManualParse}
+                      disabled={isParsing || !manualText.trim()}
+                      className="font-bold flex items-center gap-1.5"
+                    >
+                      {isParsing ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                      <span>Extract Students from Text</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* REVIEW SCREEN BEFORE SAVING */}
+              {extractedRoster && extractedRoster.length > 0 && (
+                <div className="mt-6 p-5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] space-y-4 shadow-sm">
+                  {/* Review Header & Summary */}
+                  <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[var(--border)]">
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-extrabold text-[var(--text)] flex items-center gap-2">
+                        <CheckCircle2 size={16} className="text-[var(--accent)]" />
+                        <span>Roster Review Screen</span>
+                        <span className="text-xs bg-[var(--accent-soft)] text-[var(--accent)] px-2 py-0.5 rounded-full font-bold">
+                          {extractedRoster.length} Extracted
+                        </span>
+                      </div>
+                      <div className="text-xs text-[var(--text-soft)]">
+                        Verify names, roll numbers, and details before saving. You can edit cells, remove entries, or add rows.
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAddStudentRow}
+                        className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] hover:bg-[var(--surface-hover)] text-xs font-bold text-[var(--accent)] flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Plus size={13} />
+                        <span>Add Row</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearRoster}
+                        className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] hover:bg-[var(--error-soft)] text-xs font-bold text-[var(--error)] flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <X size={13} />
+                        <span>Discard Roster</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Detected Fields Badges */}
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-bold text-[var(--text-soft)]">Detected Fields:</span>
+                    {detectedFields.map((fld) => (
+                      <span key={fld} className="px-2 py-0.5 rounded-md bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--text)] font-semibold uppercase text-[10px] tracking-wider">
+                        {fld === 'rollNo' ? 'Roll / Register No' : fld}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* LOW CONFIDENCE / SCANNED DOCUMENT WARNING */}
+                  {isLowConfidence && (
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400" />
+                        <span>Low Confidence Scan / Document Review Needed</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {lowConfidenceReason || 'Some characters or layout structures in this document scan were unclear. Please check and correct student names and identifiers in the table below before confirming.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* DUPLICATE IDENTIFIER WARNINGS */}
+                  {duplicateWarnings && duplicateWarnings.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-[var(--error-soft)] border border-[var(--error)]/30 text-[var(--error)] text-xs space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle size={15} />
+                        <span>Duplicate Entries Detected ({duplicateWarnings.length})</span>
+                      </div>
+                      <div className="text-[11px] space-y-0.5">
+                        {duplicateWarnings.slice(0, 3).map((w, wIdx) => (
+                          <div key={wIdx}>• Row {w.row_index}: &ldquo;{w.name}&rdquo; shares identifier with Row {w.matches_row}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Editable Review Table */}
+                  <div className="overflow-x-auto max-h-72 overflow-y-auto border border-[var(--border)] rounded-xl scrollbar-thin">
+                    <table className="w-full text-xs border-collapse">
+                      <thead className="sticky top-0 bg-[var(--surface-alt)] z-10">
+                        <tr>
+                          <th className="py-2.5 px-3 text-left font-bold text-[var(--text-soft)] uppercase tracking-wider w-12">#</th>
+                          <th className="py-2.5 px-3 text-left font-bold text-[var(--text-soft)] uppercase tracking-wider">Student Name *</th>
+                          <th className="py-2.5 px-3 text-left font-bold text-[var(--text-soft)] uppercase tracking-wider">Roll / Register No</th>
+                          <th className="py-2.5 px-3 text-left font-bold text-[var(--text-soft)] uppercase tracking-wider">Email (Optional)</th>
+                          <th className="py-2.5 px-3 text-left font-bold text-[var(--text-soft)] uppercase tracking-wider">Section</th>
+                          <th className="py-2.5 px-3 text-center font-bold text-[var(--text-soft)] uppercase tracking-wider w-14">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)] bg-[var(--surface)]">
+                        {extractedRoster.map((st, idx) => (
+                          <tr key={st.id || idx} className="hover:bg-[var(--surface-alt)]/50 transition-colors">
+                            <td className="py-2 px-3 text-[var(--text-soft)] font-mono text-[11px]">
+                              {idx + 1}
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={st.name || ''}
+                                onChange={(e) => handleUpdateStudentRow(idx, 'name', e.target.value)}
+                                placeholder="Full Name"
+                                className={`w-full p-1.5 rounded-lg border font-semibold text-xs outline-none bg-[var(--surface)] ${
+                                  !st.name?.trim() ? 'border-[var(--error)] bg-[var(--error-soft)]/20' : 'border-[var(--border)] focus:border-[var(--accent)]'
+                                }`}
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={st.rollNo || st.roll_number || ''}
+                                onChange={(e) => handleUpdateStudentRow(idx, 'rollNo', e.target.value)}
+                                placeholder="Optional"
+                                className="w-full p-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] font-mono text-xs outline-none focus:border-[var(--accent)]"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="email"
+                                value={st.email || ''}
+                                onChange={(e) => handleUpdateStudentRow(idx, 'email', e.target.value)}
+                                placeholder="student@example.com"
+                                className="w-full p-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs outline-none focus:border-[var(--accent)]"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                value={st.section || ''}
+                                onChange={(e) => handleUpdateStudentRow(idx, 'section', e.target.value)}
+                                placeholder="Sec"
+                                className="w-20 p-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs outline-none focus:border-[var(--accent)]"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveStudentRow(idx)}
+                                className="p-1 rounded-md text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors cursor-pointer"
+                                title="Remove row"
+                                aria-label={`Remove row ${idx + 1}`}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-[var(--text-soft)] pt-1">
+                    <span>
+                      ✓ Roster will be confirmed and linked when class is created.
+                    </span>
+                    <span className="font-semibold text-[var(--accent)]">
+                      {extractedRoster.filter(s => s.name?.trim()).length} valid rows
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="pt-2 flex justify-end">
-              <Button type="submit" size="lg" className="w-full md:w-auto font-bold flex items-center justify-center gap-2 shadow-sm">
-                <Plus size={18} />
-                <span>
-                  {isSchool ? 'Create School Class' : 'Create College Department'}
-                </span>
+            {/* Submit Action */}
+            <div className="pt-4 border-t border-[var(--border)] flex items-center justify-between flex-wrap gap-4">
+              <div className="text-xs text-[var(--text-soft)]">
+                {extractedRoster && extractedRoster.length > 0 ? (
+                  <span>
+                    Ready to attach <strong>{extractedRoster.filter(s => s.name?.trim()).length}</strong> student roster entries.
+                  </span>
+                ) : (
+                  <span>You can create this class now and import or add students later.</span>
+                )}
+              </div>
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={isSubmitting}
+                className="w-full md:w-auto font-bold flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    <span>Saving Class...</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={18} />
+                    <span>
+                      {extractedRoster && extractedRoster.length > 0
+                        ? `Create Class & Confirm Roster (${extractedRoster.filter(s => s.name?.trim()).length})`
+                        : isSchool
+                        ? 'Create School Class'
+                        : 'Create College Department'}
+                    </span>
+                  </>
+                )}
               </Button>
             </div>
           </form>

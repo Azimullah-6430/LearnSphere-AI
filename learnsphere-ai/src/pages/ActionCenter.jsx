@@ -93,6 +93,19 @@ export default function ActionCenter() {
     showToast(`Status updated to "${newStatus}"`)
   }
 
+  const handleDismiss = async (item) => {
+    if (!item?.id) return
+    const id = item.id
+    try {
+      await api.deleteActionCenterItem(id)
+    } catch (err) {
+      console.warn('Dismiss error:', err)
+    }
+    setItems((prev) => prev.filter((i) => i.id !== id))
+    recordActivity('action_center', `Dismissed Action Item for ${item.student_name}: ${item.topic || item.subject}`)
+    showToast(`Action item dismissed with audit record.`)
+  }
+
   const showToast = (msg) => {
     setToastMessage(msg)
     setTimeout(() => setToastMessage(''), 3500)
@@ -130,9 +143,13 @@ export default function ActionCenter() {
       const matchText = (
         (item.student_name || '') +
         (item.student_id || '') +
+        (item.class_name || '') +
         (item.evaluation_id || '') +
         (item.subject || '') +
+        (item.assessment_title || '') +
         (item.topic || '') +
+        (item.skill_or_topic || '') +
+        (item.priority_reason || '') +
         (item.issue || '') +
         (item.misconception || '') +
         (item.student_answer || '')
@@ -144,7 +161,7 @@ export default function ActionCenter() {
   })
 
   // Summary Metrics
-  const atRiskCount = items.filter(i => (i.marks_lost || 0) > 20 || i.category === 'excessive_marks_lost').length
+  const atRiskCount = items.filter(i => (i.marks_lost || 0) > 20 || i.category === 'excessive_marks_lost' || (i.loss_ratio || 0) >= 35).length
   const misconceptionCount = items.filter(i => i.category === 'severe_misconception' || i.category === 'repeated_concept_loss' || i.misconception).length
   const inProgressCount = items.filter(i => i.status === 'In Progress').length
   const completedCount = items.filter(i => i.status === 'Completed').length
@@ -318,12 +335,36 @@ export default function ActionCenter() {
             <div className="text-sm font-semibold text-[var(--text-soft)]">Loading evaluation action items...</div>
           </Card>
         ) : filteredItems.length === 0 ? (
-          <Card className="text-center py-12 border-dashed border-2">
-            <CheckSquare size={40} className="mx-auto text-[var(--text-faint)] mb-3" />
-            <div className="font-bold text-[15px]">No action items match your current filter criteria.</div>
-            <p className="text-xs text-[var(--text-soft)] mt-1 mb-4">When evaluation data shows &gt;20 marks lost or genuine conceptual misunderstandings, they will appear here.</p>
-            <Button onClick={() => { setSearchQuery(''); setStatusFilter('All'); setPriorityFilter('All'); setSubjectFilter('All'); setCategoryFilter('All'); }}>Reset Filters</Button>
-          </Card>
+          items.length === 0 ? (
+            <Card className="text-center py-14 border-dashed border-2 bg-[var(--surface-alt)] space-y-3">
+              <CheckCircle2 size={46} className="mx-auto text-[var(--success)] mb-2" />
+              <h3 className="font-extrabold text-[18px] text-[var(--text)]">
+                All Students on Track &mdash; No Support Actions Required
+              </h3>
+              <p className="text-xs text-[var(--text-soft)] max-w-lg mx-auto leading-relaxed">
+                Support action items are dynamically derived from completed, authorized teacher evaluations when students encounter verified marks loss, repeated conceptual difficulties, or unreadable scripts. No active intervention flags currently require attention.
+              </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <Button variant="secondary" onClick={() => navigate('/app/evaluate')}>
+                  Upload New Evaluation Scripts
+                </Button>
+                <Button variant="secondary" onClick={() => navigate('/app/history')}>
+                  Browse Evaluation History
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            <Card className="text-center py-12 border-dashed border-2">
+              <CheckSquare size={40} className="mx-auto text-[var(--text-faint)] mb-3" />
+              <div className="font-bold text-[15px]">No action items match your current filter criteria.</div>
+              <p className="text-xs text-[var(--text-soft)] mt-1 mb-4">
+                Try adjusting your status, subject, priority, or search term filters to view remaining items.
+              </p>
+              <Button onClick={() => { setSearchQuery(''); setStatusFilter('All'); setPriorityFilter('All'); setSubjectFilter('All'); setCategoryFilter('All'); }}>
+                Reset Filters
+              </Button>
+            </Card>
+          )
         ) : (
           filteredItems.map((item) => {
             const isCritical = item.priority === 'Critical' || item.severity === 'Critical'
@@ -333,6 +374,13 @@ export default function ActionCenter() {
             const marksPerQ = item.marks_lost_per_question && typeof item.marks_lost_per_question === 'object' ? item.marks_lost_per_question : {}
             const studentId = item.student_id || item.roll_number || 'N/A'
             const evalId = item.evaluation_id || item.eval_id || 'N/A'
+            const className = item.class_name || (activeClass?.name || 'Class Scope')
+            const assessmentTitle = item.assessment_title || item.topic || `${item.subject} Evaluation`
+            const questionNum = item.question_num || 'Overall Examination'
+            const focusTopic = item.skill_or_topic || item.topic || item.misconception || 'Curriculum Competency'
+            const marksAwardedVsMax = item.marks_awarded_vs_max || (item.question_max_marks !== undefined ? `${item.question_awarded_marks} / ${item.question_max_marks} marks` : `${item.total_marks || 0} / ${item.maximum_marks || 0} marks`)
+            const priorityReason = item.priority_reason || item.issue || 'Identified learning deficit from completed evaluation.'
+            const recommendedAction = item.recommended_action || item.action || 'Assign targeted remediation worksheet and schedule review.'
 
             return (
               <Card
@@ -348,33 +396,40 @@ export default function ActionCenter() {
                 }`}
               >
                 <div className="space-y-3.5">
-                  {/* Header: Student Name, ID, Evaluation ID, Subject, Status */}
+                  {/* Header: Student Name, Class, ID, Assessment, Evaluation ID, Subject, Status */}
                   <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 border-b border-[var(--border)] pb-3">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <div className="w-9 h-9 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-[12.5px] font-extrabold flex items-center justify-center shrink-0">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] text-[13px] font-extrabold flex items-center justify-center shrink-0 shadow-xs">
                         {item.student_name ? item.student_name.split(' ').map(n => n[0]).join('') : 'S'}
                       </div>
 
                       <div>
                         <div className="text-[16px] font-extrabold text-[var(--text)] flex items-center gap-2 flex-wrap">
                           <span>{item.student_name}</span>
-                          <span className="text-[12px] font-bold text-[var(--text-faint)]">
+                          <span className="text-[12px] font-bold text-[var(--text-faint)] bg-[var(--surface-alt)] px-2 py-0.5 rounded-md border border-[var(--border)]">
+                            Class: {className}
+                          </span>
+                          <span className="text-[12px] font-mono text-[var(--text-faint)]">
                             [ID: {studentId}]
                           </span>
                           <span className="text-[13px] font-bold text-[var(--accent)]">
                             — {item.subject}
                           </span>
                           <Badge tone={isCritical ? 'error' : isHigh ? 'warning' : 'accent'}>
-                            {item.academic_status || (marksLost > 20 ? `At Risk (Lost ${marksLost}m)` : 'Intervention Flag')}
+                            {item.academic_status || 'Support Priority'}
                           </Badge>
                         </div>
-                        <div className="text-[11.5px] text-[var(--text-soft)] font-semibold mt-0.5">
-                          Evaluation ID: <span className="font-mono text-[var(--text)]">{evalId}</span> &bull; Assessment: <strong>{item.topic || `${item.subject} Examination`}</strong>
+                        <div className="text-[11.5px] text-[var(--text-soft)] font-semibold mt-1 flex items-center gap-2 flex-wrap">
+                          <span>Assessment: <strong className="text-[var(--text)]">{assessmentTitle}</strong></span>
+                          <span>&bull;</span>
+                          <span>Evaluation ID: <span className="font-mono text-[var(--text)]">{evalId}</span></span>
+                          <span>&bull;</span>
+                          <span>Target: <strong className="text-[var(--accent)]">{focusTopic}</strong> ({questionNum})</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Status Dropdown Picker */}
+                    {/* Status & Priority Controls */}
                     <div className="flex items-center gap-2 shrink-0">
                       <Badge tone={isCritical ? 'error' : isHigh ? 'warning' : 'accent'}>
                         {item.priority || item.severity || 'Medium'} Priority
@@ -401,48 +456,58 @@ export default function ActionCenter() {
                     </div>
                   </div>
 
-                  {/* Quantitative Marks Breakdown Strip */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[12.5px] bg-[var(--surface-alt)] p-2.5 rounded-xl border border-[var(--border)]">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[var(--text-faint)] font-bold">Obtained / Max:</span>
-                      <strong className="text-[var(--text)]">{item.total_marks || 0} / {item.maximum_marks || 0} marks</strong>
+                  {/* Explicit Explainable Prioritization Rule Strip */}
+                  <div className="p-2.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-[12px] flex items-center gap-2">
+                    <div className="font-bold text-[var(--text-faint)] uppercase tracking-wider text-[10.5px] shrink-0">
+                      Priority Basis:
                     </div>
+                    <div className="font-semibold text-[var(--text)] flex-1">
+                      {priorityReason}
+                    </div>
+                  </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[var(--error)] font-bold">Total Marks Lost:</span>
-                      <strong className="text-[var(--error)] bg-[var(--error-soft)] px-2 py-0.5 rounded-md border border-[var(--error)]">
-                        &minus;{marksLost} Marks {marksLost > 20 ? '(&gt;20 Rule)' : ''}
+                  {/* Quantitative Marks Breakdown Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[12px] bg-[var(--surface-alt)] p-2.5 rounded-xl border border-[var(--border)]">
+                    <div className="flex items-center justify-between sm:justify-start gap-1.5">
+                      <span className="text-[var(--text-faint)] font-bold">Question Marks:</span>
+                      <strong className="text-[var(--text)] bg-[var(--surface)] px-2 py-0.5 rounded border border-[var(--border)]">
+                        {item.question_max_marks !== undefined ? `${item.question_awarded_marks} / ${item.question_max_marks} marks` : marksAwardedVsMax}
                       </strong>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[var(--text-faint)] font-bold">Affected Questions:</span>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {affectedQs.length > 0 ? (
-                          affectedQs.slice(0, 4).map((q, idx) => (
-                            <span key={idx} className="bg-[var(--surface)] text-[var(--text)] px-1.5 py-0.5 rounded text-[11px] font-mono border border-[var(--border)]">
-                              {q} {marksPerQ[q] ? `(-${marksPerQ[q]}m)` : ''}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-[var(--text-soft)]">{item.question_num || 'Overall'}</span>
-                        )}
-                        {affectedQs.length > 4 && (
-                          <span className="text-[11px] text-[var(--text-faint)] font-bold">+{affectedQs.length - 4} more</span>
-                        )}
-                      </div>
+                    <div className="flex items-center justify-between sm:justify-start gap-1.5">
+                      <span className="text-[var(--text-faint)] font-bold">Paper Score / Total:</span>
+                      <strong className="text-[var(--text)]">
+                        {item.total_marks || 0} / {item.maximum_marks || 0} marks
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-start gap-1.5">
+                      <span className="text-[var(--error)] font-bold">Total Marks Lost:</span>
+                      <strong className="text-[var(--error)] bg-[var(--error-soft)] px-2 py-0.5 rounded-md border border-[var(--error)]">
+                        &minus;{marksLost} Marks {item.loss_ratio ? `(${item.loss_ratio}% loss)` : ''}
+                      </strong>
                     </div>
                   </div>
 
                   {/* Student Answer & Misconception Diagnosis */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12.5px]">
-                    {item.student_answer && (
+                    {item.student_answer ? (
                       <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
                         <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
-                          Student's Actual Script Answer:
+                          Student's Actual Written Response ({questionNum}):
                         </span>
                         <p className="font-mono text-[11.5px] text-[var(--text)] italic bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)] line-clamp-2">
                           &ldquo;{item.student_answer}&rdquo;
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                          Specific Focus Area:
+                        </span>
+                        <p className="font-semibold text-[12px] text-[var(--text)] bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)]">
+                          {focusTopic} &mdash; Question {questionNum}
                         </p>
                       </div>
                     )}
@@ -469,59 +534,97 @@ export default function ActionCenter() {
                     )}
                   </div>
 
-                  {/* Recommended Teacher Action */}
+                  {/* Concise Suggested Follow-up Action */}
                   <div className="p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
                     <Zap size={16} className="text-[var(--accent)] shrink-0 mt-0.5" />
                     <div>
-                      <strong className="text-[var(--accent)]">Recommended Teacher Action:</strong>{' '}
-                      <span>{item.recommended_action || item.action || 'Assign targeted remediation worksheet and schedule review.'}</span>
+                      <strong className="text-[var(--accent)]">Suggested Follow-up Action:</strong>{' '}
+                      <span>{recommendedAction}</span>
                     </div>
                   </div>
 
-                  {/* Traceability & Action Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[var(--border)]">
-                    <div className="flex items-center gap-2">
+                  {/* Traceability, Source Links & Action Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-[var(--border)]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Source Link to Evaluation Record */}
                       <button
-                        onClick={() => handleMasterInTrainer(item)}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[12px] font-extrabold bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white hover:shadow-md transition-all"
+                        onClick={() => navigate('/app/history', { state: { selectedEvalId: item.evaluation_id } })}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--accent-dim)] bg-[var(--accent-soft)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-all shadow-xs"
+                        title="View Source Evaluation Record"
                       >
-                        <Sparkles size={14} />
-                        <span>Launch AI Trainer Practice</span>
+                        <FileText size={13} />
+                        <span>Evaluation Record</span>
                       </button>
 
+                      {/* Source Link to Misconception Record if present */}
+                      {item.misconception && (
+                        <button
+                          onClick={() => navigate('/app/misconceptions', { state: { concept: item.misconception || focusTopic, class_id: item.class_id } })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--gold)] bg-[var(--gold-soft)] text-[var(--gold)] hover:bg-[var(--gold)] hover:text-white transition-all shadow-xs"
+                          title="View Misconception Record in Misconception Map"
+                        >
+                          <AlertTriangle size={13} />
+                          <span>Misconception Record</span>
+                        </button>
+                      )}
+
+                      {/* AI Trainer Practice */}
+                      <button
+                        onClick={() => handleMasterInTrainer(item)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-bold bg-gradient-to-r from-[var(--accent)] to-[var(--accent-dim)] text-white hover:shadow-md transition-all"
+                      >
+                        <Sparkles size={13} />
+                        <span>AI Trainer Practice</span>
+                      </button>
+
+                      {/* Review Evidence Trace */}
                       <button
                         onClick={() => setTraceModalItem(item)}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-colors"
                       >
-                        <Eye size={14} />
-                        <span>Trace Evaluation Evidence</span>
+                        <Eye size={13} />
+                        <span>Review Evidence Trace</span>
                       </button>
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Dispatch Intervention */}
                       <button
                         onClick={() => {
                           setInterventionModalItem(item)
-                          setInterventionNote(`Assigned remedial revision for ${item.subject}: ${item.topic || item.misconception || 'Key concepts'}.`)
+                          setInterventionNote(`Assigned remedial revision for ${item.subject}: ${focusTopic || 'Key concepts'}.`)
                         }}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-[12px] font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] transition-colors shadow-sm"
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[12px] font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-dim)] transition-colors shadow-sm"
                       >
-                        <Send size={14} />
+                        <Send size={13} />
                         <span>Create Intervention</span>
                       </button>
 
+                      {/* Mark Completed Button if not completed */}
+                      {item.status !== 'Completed' && (
+                        <button
+                          onClick={() => handleStatusChange(item.id, 'Completed')}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)] hover:bg-[var(--success)] hover:text-white transition-colors"
+                          title="Mark Action Completed"
+                        >
+                          <CheckCircle2 size={13} />
+                          <span>Complete</span>
+                        </button>
+                      )}
+
+                      {/* Dismiss Action Item */}
                       <button
                         onClick={() => {
-                          if (window.confirm(`Delete action item for ${item.student_name} permanently?`)) {
-                            setItems(prev => prev.filter(i => i.id !== item.id))
-                            showToast(`Action item deleted.`)
+                          if (window.confirm(`Dismiss action item for ${item.student_name}? This will archive the item with an audit entry.`)) {
+                            handleDismiss(item)
                           }
                         }}
-                        className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
-                        title="Delete Action Item"
-                        aria-label={`Delete action item for ${item.student_name}`}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[12px] font-bold border border-[var(--border)] text-[var(--text-faint)] hover:text-[var(--error)] hover:border-[var(--error)] hover:bg-[var(--error-soft)] transition-colors"
+                        title="Dismiss Action Item"
+                        aria-label={`Dismiss action item for ${item.student_name}`}
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={13} />
+                        <span className="hidden sm:inline">Dismiss</span>
                       </button>
                     </div>
                   </div>
@@ -532,7 +635,7 @@ export default function ActionCenter() {
         )}
       </div>
 
-      {/* MODAL 1: FULL TRACEABILITY MODAL (Action Center -> Student -> Evaluation -> Question -> Student Answer -> Feedback -> Misconception) */}
+      {/* MODAL 1: FULL TRACEABILITY MODAL */}
       {traceModalItem && (
         <div 
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
@@ -552,7 +655,7 @@ export default function ActionCenter() {
                   <Badge tone="accent">Action Center Trace</Badge>
                 </h3>
                 <p className="text-xs text-[var(--text-soft)]">
-                  Student: <strong>{traceModalItem.student_name}</strong> (ID: {traceModalItem.student_id || traceModalItem.roll_number}) &bull; {traceModalItem.subject}
+                  Student: <strong>{traceModalItem.student_name}</strong> &bull; Class: <strong>{traceModalItem.class_name || 'Class Scope'}</strong> &bull; Assessment: <strong>{traceModalItem.assessment_title || traceModalItem.topic}</strong>
                 </p>
               </div>
               <button 
@@ -586,12 +689,23 @@ export default function ActionCenter() {
                 <span className="font-mono text-[var(--text)] font-semibold">{traceModalItem.evaluation_id || traceModalItem.eval_id || 'N/A'}</span>
               </div>
               <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)]">
-                <span className="font-bold text-[var(--text-faint)] block mb-0.5">Score Impact:</span>
+                <span className="font-bold text-[var(--text-faint)] block mb-0.5">Score Breakdown:</span>
                 <span className="text-[var(--error)] font-bold">
-                  {traceModalItem.total_marks || 0} / {traceModalItem.maximum_marks || 0} marks (&minus;{traceModalItem.marks_lost} marks lost)
+                  {traceModalItem.question_max_marks !== undefined ? `Question: ${traceModalItem.question_awarded_marks}/${traceModalItem.question_max_marks}m | ` : ''}
+                  Paper: {traceModalItem.total_marks || 0}/{traceModalItem.maximum_marks || 0}m (&minus;{traceModalItem.marks_lost}m)
                 </span>
               </div>
             </div>
+
+            {/* Priority Reason */}
+            {traceModalItem.priority_reason && (
+              <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs">
+                <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block text-[10.5px] mb-1">
+                  Prioritization Basis:
+                </span>
+                <p className="text-[var(--text)] font-semibold">{traceModalItem.priority_reason}</p>
+              </div>
+            )}
 
             {/* Official Question */}
             {traceModalItem.exact_question && (
@@ -645,13 +759,24 @@ export default function ActionCenter() {
             </div>
 
             {/* Modal Controls */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[var(--border)]">
               <Button variant="secondary" onClick={() => setTraceModalItem(null)}>Close Trace</Button>
+              {traceModalItem.misconception && (
+                <Button variant="secondary" onClick={() => {
+                  const mConcept = traceModalItem.misconception
+                  const mClassId = traceModalItem.class_id
+                  setTraceModalItem(null)
+                  navigate('/app/misconceptions', { state: { concept: mConcept, class_id: mClassId } })
+                }}>
+                  View Misconception Record
+                </Button>
+              )}
               <Button onClick={() => {
+                const eId = traceModalItem.evaluation_id
                 setTraceModalItem(null)
-                navigate('/app/history')
+                navigate('/app/history', { state: { selectedEvalId: eId } })
               }}>
-                View Full Evaluation History
+                View Evaluation Record
               </Button>
             </div>
           </div>

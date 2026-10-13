@@ -67,7 +67,7 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
     <aside
       role="navigation"
       aria-label="Main sidebar navigation"
-      className={`w-[272px] shrink-0 bg-[var(--surface)] border-r border-[var(--border)] flex flex-col fixed top-0 bottom-0 left-0 overflow-y-auto z-40 transition-transform duration-200 md:translate-x-0 ${
+      className={`w-[260px] shrink-0 bg-[var(--surface)] border-r border-[var(--border)] flex flex-col fixed top-0 bottom-0 left-0 overflow-y-auto z-40 transition-transform duration-200 md:translate-x-0 scrollbar-thin ${
         open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
       }`}
       style={{

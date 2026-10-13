@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
+import { api } from '../services/api.js'
 import { Card, PageHead, Badge, Button } from '../components/ui/Primitives.jsx'
 import { Building, School, GraduationCap, Plus, ArrowRight, CheckCircle2, Users, FileSpreadsheet, Upload, Sparkles, BookOpen } from 'lucide-react'
 
@@ -24,8 +25,9 @@ export default function SelectClass() {
   const [collegeSection, setCollegeSection] = useState(user?.section || '')
   const [collegeSubjects, setCollegeSubjects] = useState('')
 
-  // Optional Initial Roster Paste
+  // Optional Initial Roster Paste / File
   const [rosterText, setRosterText] = useState('')
+  const [uploadedStudents, setUploadedStudents] = useState([])
   const [toast, setToast] = useState('')
   const fileInputRef = useRef(null)
 
@@ -61,7 +63,7 @@ export default function SelectClass() {
       } else if (parts.length === 1) {
         newStudents.push({
           id: `std_${Date.now()}_${idx}`,
-          rollNo: `ROLL-${100 + newStudents.length + 1}`,
+          rollNo: '',
           name: parts[0],
           order: newStudents.length + 1,
           marksHistory: []
@@ -72,8 +74,20 @@ export default function SelectClass() {
     return newStudents
   }
 
-  const handleCreateNewClass = (e) => {
+  const handleCreateNewClass = async (e) => {
     e.preventDefault()
+
+    let studentsToAttach = [...uploadedStudents]
+    if (studentsToAttach.length === 0 && rosterText.trim()) {
+      try {
+        const res = await api.parseRosterText(rosterText)
+        if (res && res.success && Array.isArray(res.students)) {
+          studentsToAttach = res.students
+        }
+      } catch {
+        studentsToAttach = parseRosterText(rosterText)
+      }
+    }
 
     let created = null
     if (classLevel === 'school') {
@@ -87,8 +101,8 @@ export default function SelectClass() {
         gradeLevel,
         section,
         subjects: subs.length > 0 ? subs : ['Mathematics', 'Science'],
-        students_count: 0,
-        students: []
+        students_count: studentsToAttach.length,
+        students: studentsToAttach
       })
     } else {
       const name = `${collegeDept} — Semester ${semester}`
@@ -101,36 +115,31 @@ export default function SelectClass() {
         semester,
         section: collegeSection,
         subjects: subs.length > 0 ? subs : ['Core Subject 1', 'Core Subject 2'],
-        students_count: 0,
-        students: []
+        students_count: studentsToAttach.length,
+        students: studentsToAttach
       })
     }
 
     if (created) {
-      if (rosterText.trim()) {
-        const parsedRoster = parseRosterText(rosterText)
-        if (parsedRoster.length > 0) {
-          uploadStudentRoster(created.id, parsedRoster)
-        }
-      }
-
       setActiveClassId(created.id)
       navigate('/app/dashboard')
     }
   }
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const content = event.target?.result
-      if (typeof content === 'string') {
-        setRosterText(content)
-        showToastMsg(`Roster file "${file.name}" loaded for parsing!`)
+    try {
+      const res = await api.parseRosterFile(file)
+      if (res && res.success && Array.isArray(res.students) && res.students.length > 0) {
+        setUploadedStudents(res.students)
+        showToastMsg(`Parsed ${res.students.length} students from "${file.name}"!`)
+      } else {
+        showToastMsg(res?.error || 'Could not parse student names from file.')
       }
+    } catch (err) {
+      showToastMsg('Failed to parse file: ' + err.message)
     }
-    reader.readAsText(file)
   }
 
   return (
@@ -407,7 +416,7 @@ export default function SelectClass() {
 
               <input
                 type="file"
-                accept=".csv,.txt,.tsv"
+                accept=".xlsx,.xls,.csv,.tsv,.txt,.docx,.pdf"
                 ref={fileInputRef}
                 onChange={handleFileUpload}
                 className="hidden"
@@ -415,12 +424,17 @@ export default function SelectClass() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] text-[11.5px] font-bold hover:bg-[var(--accent-soft)] transition-colors flex items-center gap-1"
+                className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] text-[11.5px] font-bold hover:bg-[var(--accent-soft)] transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Upload size={13} />
-                <span>Upload File</span>
+                <span>Upload File (Excel, CSV, Word, PDF)</span>
               </button>
             </div>
+            {uploadedStudents.length > 0 && (
+              <div className="text-xs font-semibold text-[var(--accent)]">
+                ✓ {uploadedStudents.length} students loaded and ready to attach to this class.
+              </div>
+            )}
 
             <textarea
               rows={2}

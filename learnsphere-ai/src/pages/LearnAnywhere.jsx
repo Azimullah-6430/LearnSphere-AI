@@ -49,32 +49,36 @@ import {
   Terminal,
   Play,
   Bug,
-  BookOpenCheck
+  BookOpenCheck,
+  GraduationCap,
+  User,
+  Calculator,
+  CheckSquare
 } from 'lucide-react'
 
 const RESOURCE_ENVIRONMENTS = [
-  { id: 'All Local Resources', label: 'All Village Resources', icon: Compass },
-  { id: 'Farmland & Soil', label: 'Farmland & Soil', icon: Sprout },
-  { id: 'Sunlight & Shadows', label: 'Sunlight & Shadows', icon: Sun },
-  { id: 'Village Water & Wells', label: 'Water & Irrigation', icon: Droplets },
-  { id: 'Plants & Bio Resources', label: 'Plants & Natural Bio', icon: TreePine },
-  { id: 'Household & Crafts', label: 'Household & Clay Pots', icon: Home },
-  { id: 'Bicycle & Simple Tools', label: 'Bicycle & Simple Tools', icon: Wrench },
+  { id: 'All Local Resources', label: 'Everyday Surroundings', icon: Compass },
+  { id: 'Household & Crafts', label: 'Paper & Household Objects', icon: Home },
+  { id: 'Sunlight & Shadows', label: 'Sunlight & Outdoors', icon: Sun },
+  { id: 'Plants & Bio Resources', label: 'Leaves & Natural Materials', icon: TreePine },
+  { id: 'Village Water & Wells', label: 'Water & Common Cups', icon: Droplets },
+  { id: 'Farmland & Soil', label: 'Soil, Sand & Rocks', icon: Sprout },
+  { id: 'Bicycle & Simple Tools', label: 'Rulers & Common Tools', icon: Wrench },
 ]
 
 const QUICK_MATERIAL_TAGS = [
-  'Red Clay / Farm Soil',
-  'River Sand',
-  'Sunlight & Cardboard',
-  'Turmeric Powder',
-  'Hibiscus Petals',
-  'Charcoal / Wood Ash',
-  'Clay Pot (Matka)',
-  'Bicycle Wheel / Chain',
-  'Clean Water & Glass',
-  'Cotton Thread & Ruler',
-  'Mustard / Gram Seeds',
-  'Banana Leaf'
+  'Notebook Paper & Pencil',
+  'Ruler & Eraser',
+  'Clean Water & Cup',
+  'Coins or Bottle Caps',
+  'Cotton Thread or String',
+  'Cardboard or Carton',
+  'Fallen Leaves or Petals',
+  'Common Salt or Sugar',
+  'Small Pebbles or Sand',
+  'Sunlight & Shadows',
+  'Kitchen Bowl or Spoon',
+  'Free Software or Calculator'
 ]
 
 const EXPLANATION_LANGUAGES = [
@@ -126,7 +130,9 @@ export default function LearnAnywhere() {
   const [revealedQuestions, setRevealedQuestions] = useState({})
   const [showReflectionAnswer, setShowReflectionAnswer] = useState(false)
   const [showAcademicTheory, setShowAcademicTheory] = useState(false)
+  const [showMaterialAlternatives, setShowMaterialAlternatives] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [profileIncomplete, setProfileIncomplete] = useState(false)
 
   // Student On-Demand Assistance Action State
   const [actionLoading, setActionLoading] = useState(false)
@@ -244,18 +250,35 @@ export default function LearnAnywhere() {
     setHistoryList([])
     setActionResult(null)
 
+    // User-scoped cache loader: ensure Student A's cached activity is NEVER presented to Student B
     if (!user?.id && !user?._id && !user?.email) return
     const currentUid = String(user?.id || user?._id || user?.email)
     const cacheKey = `learn_anywhere_activity_${currentUid}`
     let restoredFromCache = false
+
+    const isSchool = user?.student_type === 'SCHOOL' || user?.level === 'school' || !!user?.grade_level || !!user?.grade
+    const expectedLevel = isSchool ? 'SCHOOL' : 'COLLEGE'
+
     try {
       const rawCache = sessionStorage.getItem(cacheKey)
       if (rawCache) {
         const parsed = JSON.parse(rawCache)
         if (parsed && parsed.user_id === currentUid && parsed.activity) {
-          setActivity(parsed.activity)
-          if (parsed.completedSteps) setCompletedSteps(parsed.completedSteps)
-          restoredFromCache = true
+          const actSub = parsed.activity?.academic_grounding?.subject || parsed.activity?.subject
+          const actLevel = (parsed.activity?.student_type || parsed.activity?.academic_level || '').toUpperCase()
+          const isLevelMismatch = actLevel && actLevel !== expectedLevel
+          const isSubMismatch = subjects.length > 0 && actSub && !subjects.includes(actSub)
+          if (isSubMismatch || isLevelMismatch) {
+            sessionStorage.removeItem(cacheKey)
+          } else {
+            setActivity(parsed.activity)
+            if (actSub) setSelectedSubject(actSub)
+            if (parsed.activity?.academic_grounding?.topic || parsed.activity?.topic) {
+              setSelectedTopic(parsed.activity?.academic_grounding?.topic || parsed.activity?.topic)
+            }
+            if (parsed.completedSteps) setCompletedSteps(parsed.completedSteps)
+            restoredFromCache = true
+          }
         }
       }
     } catch (e) {
@@ -264,17 +287,26 @@ export default function LearnAnywhere() {
 
     // If no session cached locally, check server session endpoint to restore active activity
     if (!restoredFromCache && navigator.onLine) {
-      api.getLearnAnywhereSession().then(res => {
+      const activeQuerySub = selectedSubject || (subjects.length > 0 ? subjects[0] : '')
+      api.getLearnAnywhereSession(activeQuerySub ? { subject: activeQuerySub } : {}).then(res => {
         if (res && res.success && res.activity) {
-          setActivity(res.activity)
-          if (res.subject) setSelectedSubject(res.subject)
-          if (res.topic) setSelectedTopic(res.topic)
+          const actSub = res.activity?.academic_grounding?.subject || res.activity?.subject || res.subject
+          const actLevel = (res.activity?.student_type || res.activity?.academic_level || '').toUpperCase()
+          const isLevelMismatch = actLevel && actLevel !== expectedLevel
+          const isSubMismatch = subjects.length > 0 && actSub && !subjects.includes(actSub)
+          if (isSubMismatch || isLevelMismatch) {
+            // Activity does not belong to active validated syllabus or educational level
+          } else {
+            setActivity(res.activity)
+            if (actSub && (!subjects.length || subjects.includes(actSub))) setSelectedSubject(actSub)
+            if (res.topic || res.activity?.topic) setSelectedTopic(res.topic || res.activity?.topic)
+          }
         }
       }).catch(err => {
         console.warn('Session restoration check skipped:', err)
       })
     }
-  }, [user])
+  }, [user, subjects])
 
   // Handle On-Demand Student Assistance Actions (Simpler Explanation, Another Example, Worked Solution, Challenge Task)
   const handleStudentAction = async (actionType) => {
@@ -321,8 +353,9 @@ export default function LearnAnywhere() {
   useEffect(() => {
     if (subjects.length > 0 && (!selectedSubject || !subjects.includes(selectedSubject))) {
       setSelectedSubject(subjects[0])
+      clearActivityState()
     }
-  }, [subjects, selectedSubject])
+  }, [subjects, selectedSubject, clearActivityState])
 
   // Extract validated topics specifically for the active subject from authoritative syllabus
   const validatedSubjectTopics = useMemo(() => {
@@ -508,8 +541,10 @@ export default function LearnAnywhere() {
     requestIdRef.current += 1
     const currentRequestId = requestIdRef.current
 
+    setActivity(null)
     setLoading(true)
     setErrorMsg('')
+    setProfileIncomplete(false)
     setShowReflectionAnswer(false)
     setCompletedSteps({})
     setCheckedMaterials({})
@@ -578,11 +613,19 @@ export default function LearnAnywhere() {
         }
       } else {
         setActivity(null)
-        setErrorMsg(res?.error || 'Failed to design practical activity. Please check your connection and retry.')
+        if (res?.profile_incomplete || res?.action_required === 'complete_profile' || /profile.*incomplete|complete.*profile/i.test(res?.error || '')) {
+          setProfileIncomplete(true)
+          setErrorMsg(res?.error || res?.message || 'Your student profile is incomplete. Please update your academic classification in Settings.')
+        } else {
+          setErrorMsg(res?.error || 'Failed to design practical activity. Please check your connection and retry.')
+        }
       }
     } catch (err) {
       if (currentRequestId !== requestIdRef.current) return
       setActivity(null)
+      if (err?.response?.data?.profile_incomplete || /profile.*incomplete|complete.*profile/i.test(err?.message || '')) {
+        setProfileIncomplete(true)
+      }
       setErrorMsg(err?.message || 'Connection error while contacting the activity generator. Please try again.')
     } finally {
       if (currentRequestId === requestIdRef.current) {
@@ -728,6 +771,98 @@ export default function LearnAnywhere() {
   const totalSteps = activity?.steps?.length || 0
   const completedCount = Object.values(completedSteps).filter(Boolean).length
   const progressPercent = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0
+
+  const isSubjectMismatched = useMemo(() => {
+    if (!activity || !selectedSubject) return false
+    const actSub = String(activity.academic_grounding?.subject || activity.subject || '').trim().toLowerCase()
+    return actSub && actSub !== selectedSubject.trim().toLowerCase()
+  }, [activity, selectedSubject])
+
+  const isCodingTask = useMemo(() => {
+    if (!activity) return false
+    return Boolean(
+      activity.coding_task?.is_coding_topic ||
+      activity.code_snippet ||
+      activity.coding_task?.code ||
+      activity.coding_task?.code_snippet ||
+      activity.demonstration_type === 'code_and_logic_simulation' ||
+      activity.demonstration_type === 'coding_task' ||
+      /coding|software|algorithm|python|program|data structure/i.test(`${activity.subject || ''} ${activity.topic || ''}`)
+    )
+  }, [activity])
+
+  const cleanMaterialsList = useMemo(() => {
+    if (!activity) return []
+    if (isCodingTask) {
+      const raw = activity.materials_student_has || activity.local_materials || []
+      const list = (Array.isArray(raw) ? raw : [raw]).filter(Boolean)
+      const filtered = list.filter(m => !/soil|sand|matka|leaf|bicycle|clay|water & glass|charcoal|pebbles/i.test(m))
+      if (filtered.length > 0) return filtered
+      return ['Python 3 or browser IDE', 'Text editor or terminal', 'Paper & pen for trace table']
+    }
+    const raw = activity.materials_student_has || activity.local_materials || []
+    return (Array.isArray(raw) ? raw : [raw]).filter(Boolean)
+  }, [activity, isCodingTask])
+
+  const stepsList = useMemo(() => {
+    if (!activity) return []
+    const raw = activity.steps || []
+    const list = Array.isArray(raw) ? raw : [raw]
+    return list
+      .filter(Boolean)
+      .map(s => String(s).replace(/^(?:step\s*\d+\s*[:.-]?\s*|\d+[\.)]\s*)/i, '').trim())
+  }, [activity])
+
+  const learningObjective = useMemo(() => {
+    if (!activity) return ''
+    if (activity.learning_objective) return activity.learning_objective
+    if (Array.isArray(activity.learning_objectives) && activity.learning_objectives[0]) {
+      return activity.learning_objectives[0]
+    }
+    return `Understand the core principles and practical behavior of ${selectedTopic || activity.topic || selectedSubject}.`
+  }, [activity, selectedTopic, selectedSubject])
+
+  const resultOrExampleText = useMemo(() => {
+    if (!activity) return ''
+    if (activity.expected_observation || activity.expected_observations) {
+      return activity.expected_observation || activity.expected_observations
+    }
+    if (activity.worked_example || activity.worked_solution) {
+      return activity.worked_example || activity.worked_solution
+    }
+    if (activity.coding_task?.expected_output) {
+      return `Expected Output:\n${activity.coding_task.expected_output}`
+    }
+    return activity.simple_explanation || 'Observe the expected change or completed solution output.'
+  }, [activity])
+
+  const questionsToShow = useMemo(() => {
+    if (!activity) return []
+    const qList = activity.understanding_questions
+    if (Array.isArray(qList) && qList.length > 0) {
+      return qList.slice(0, 2)
+    }
+    if (activity.reflection_task || activity.reflection_question) {
+      return [{
+        question: activity.reflection_task || activity.reflection_question,
+        answer: activity.simple_explanation || 'Consider how parameters change the final observation.',
+        explanation: activity.simple_explanation || ''
+      }]
+    }
+    return []
+  }, [activity])
+
+  const safetyText = useMemo(() => {
+    const raw = (activity?.safety_precautions || activity?.safety_notes || '').trim()
+    if (!raw || /^(none|n\/a|not applicable|no special precautions|safe|no precautions needed)$/i.test(raw)) return ''
+    return raw
+  }, [activity])
+
+  const limitationText = useMemo(() => {
+    const raw = (activity?.limitations_and_misconceptions || activity?.practical_limitation || '').trim()
+    if (!raw || /^(none|n\/a|not applicable|no limitations)$/i.test(raw)) return ''
+    return raw
+  }, [activity])
 
   return (
     <div className="space-y-6">
@@ -931,7 +1066,7 @@ export default function LearnAnywhere() {
           <div className="space-y-2.5">
             <label className="text-sm sm:text-base font-semibold text-[var(--text)] flex items-center gap-2">
               <Camera size={16} className="text-[var(--accent)]" />
-              <span>Photograph Materials (Optional)</span>
+              <span>Photograph Materials (Optional — Never Required)</span>
             </label>
             {imagePreview ? (
               <div className="relative inline-block rounded-xl overflow-hidden border border-[var(--border-strong)] bg-[var(--surface-alt)] p-1">
@@ -962,6 +1097,10 @@ export default function LearnAnywhere() {
                 />
               </label>
             )}
+            <p className="text-[11px] text-[var(--text-faint)] leading-normal flex items-start gap-1.5 pt-0.5">
+              <span className="font-semibold text-[var(--accent)]">Privacy note:</span>
+              <span>Never photograph faces, private documents, home interiors, or sensitive locations. Impersonal everyday objects only.</span>
+            </p>
           </div>
 
           {/* Material Constraint Mode Selector */}
@@ -1051,22 +1190,65 @@ export default function LearnAnywhere() {
         </div>
       </Card>
 
+      {/* Profile Incomplete Guidance Banner */}
+      {profileIncomplete && (
+        <div className="p-4 md:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-sm font-medium flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fadeIn shadow-sm">
+          <div className="flex items-start sm:items-center gap-3">
+            <AlertTriangle size={20} className="shrink-0 text-amber-600 dark:text-amber-400 mt-0.5 sm:mt-0" />
+            <div className="space-y-0.5">
+              <div className="font-bold text-amber-950 dark:text-amber-100 text-sm sm:text-base">
+                Profile Incomplete: Academic Level Required
+              </div>
+              <div className="text-xs sm:text-sm text-amber-800 dark:text-amber-300">
+                Learn from Anywhere adapts explanations and activities specifically to School or College students. Please complete your academic profile (School Grade or College Semester) in Settings.
+              </div>
+            </div>
+          </div>
+          <Button
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.location.href = '/settings'
+              }
+            }}
+            variant="primary"
+            size="sm"
+            className="shrink-0 flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white border-0 shadow-sm"
+          >
+            <User size={14} />
+            <span>Go to Settings</span>
+          </Button>
+        </div>
+      )}
+
       {/* Error & Retry State */}
-      {errorMsg && (
+      {errorMsg && !profileIncomplete && (
         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
           <div className="flex items-center gap-2">
             <AlertTriangle size={17} className="shrink-0 text-red-500" />
             <span>{errorMsg}</span>
           </div>
-          <Button
-            onClick={handleGenerateActivity}
-            variant="outline"
-            size="sm"
-            className="shrink-0 flex items-center gap-1.5 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs"
-          >
-            <RefreshCw size={12} />
-            <span>Retry</span>
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/syllabus|curriculum/i.test(errorMsg) && (
+              <Button
+                onClick={() => setIsSyllabusModalOpen(true)}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-xs"
+              >
+                <BookOpen size={12} />
+                <span>Upload / Validate Syllabus</span>
+              </Button>
+            )}
+            <Button
+              onClick={handleGenerateActivity}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-1.5 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs"
+            >
+              <RefreshCw size={12} />
+              <span>Retry</span>
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1112,631 +1294,448 @@ export default function LearnAnywhere() {
         </Card>
       )}
 
-      {/* Generated Activity Presentation */}
-      {!loading && activity && (
+      {/* Subject Mismatch Guard */}
+      {!loading && activity && isSubjectMismatched && (
+        <Card className="p-8 text-center space-y-3 border-amber-500/30 bg-amber-500/5 my-4">
+          <AlertTriangle size={32} className="mx-auto text-amber-500" />
+          <h3 className="text-sm font-bold text-[var(--text)]">
+            Subject Switched to {selectedSubject}
+          </h3>
+          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto leading-relaxed">
+            The previously loaded activity belonged to another subject. Generate a fresh practical activity specifically designed for <strong>{selectedSubject}</strong>.
+          </p>
+          <Button
+            onClick={handleGenerateActivity}
+            size="sm"
+            className="mt-2 text-xs font-bold inline-flex items-center gap-1.5"
+          >
+            <Sparkles size={13} />
+            <span>Generate Activity for {selectedSubject}</span>
+          </Button>
+        </Card>
+      )}
+
+      {/* Generated Activity Presentation (Compact Simplified Structure) */}
+      {!loading && activity && !isSubjectMismatched && (
         <div className="space-y-6 animate-fadeIn">
-          <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 md:p-8 shadow-sm space-y-7">
-            {/* Header / Badges */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[var(--border)] pb-6">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge tone="accent">{activity.subject || selectedSubject}</Badge>
-                  <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
-                    <Compass size={13} /> {activity.resource_category || selectedEnv}
+          <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4 sm:p-6 md:p-7 shadow-sm space-y-6">
+
+            {/* 1. Activity Title */}
+            <div className="border-b border-[var(--border)] pb-4 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge tone="accent">{activity.subject || selectedSubject}</Badge>
+                {(activity.student_type === 'SCHOOL' || activity.academic_level === 'SCHOOL') ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1.5">
+                    <GraduationCap size={12} className="text-emerald-600 dark:text-emerald-400" />
+                    <span>School • {activity.academic_grounding?.grade_or_semester || user?.grade_level || 'Curriculum'}</span>
                   </span>
-                  {activity.demonstration_type === 'thought_experiment_and_analog' ? (
-                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1.5">
-                      <Lightbulb size={13} /> Thought Experiment & Physical Analog
-                    </span>
-                  ) : activity.demonstration_type === 'outdoor_observation' ? (
-                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                      <TreePine size={13} /> Outdoor & Nature Observation
-                    </span>
-                  ) : (
-                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1.5">
-                      <Home size={13} /> Household Hands-on Activity
-                    </span>
-                  )}
-                  <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-[var(--surface-alt)] text-[var(--text-soft)] border border-[var(--border)]">
-                    Topic: {activity.syllabus_topic || selectedTopic || 'Syllabus Grounding'}
-                  </span>
-                  {(activity.syllabus_id || activeSyllabusId) && (
-                    <span className="px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                      <ShieldCheck size={13} /> Validated Syllabus Traceable
-                    </span>
-                  )}
-                </div>
-                <h2 className="heading-section text-2xl sm:text-3xl font-black text-[var(--text)] tracking-tight leading-snug">
-                  {activity.title || activity.activity_title}
-                </h2>
-                <div className="text-sm sm:text-base text-[var(--text-soft)] flex items-start gap-2 pt-1">
-                  <Lightbulb size={18} className="text-amber-500 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">
-                    <strong className="text-[var(--text)]">Learning Objective: </strong>
-                    {activity.learning_objective || (activity.learning_objectives && activity.learning_objectives[0])}
-                  </span>
-                </div>
-              </div>
-
-              {/* Progress Indicator Card */}
-              <div className="shrink-0 bg-[var(--surface-alt)] p-4 rounded-2xl border border-[var(--border)] text-center min-w-[170px]">
-                <div className="text-xs sm:text-sm font-semibold text-[var(--text-soft)] uppercase tracking-wider mb-1">
-                  Practical Steps
-                </div>
-                <div className="text-2xl sm:text-3xl font-black text-[var(--accent)]">
-                  {completedCount} / {totalSteps} Done
-                </div>
-                <div className="w-full bg-[var(--border)] h-2.5 rounded-full overflow-hidden mt-2.5">
-                  <div
-                    className="bg-[var(--accent)] h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-                <div className="text-xs font-semibold text-[var(--text-soft)] mt-2">
-                  {progressPercent === 100 ? '🎉 Activity Complete!' : `${progressPercent}% Completed`}
-                </div>
-              </div>
-            </div>
-
-            {/* Non-Physical / Thought Experiment Feasibility Notice */}
-            {activity.demonstration_type === 'thought_experiment_and_analog' && (
-              <div className="p-4 md:p-5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-sm sm:text-base text-purple-900 dark:text-purple-300 flex items-start gap-3">
-                <Info size={20} className="text-purple-500 shrink-0 mt-0.5" />
-                <div className="leading-relaxed">
-                  <strong>Concept Feasibility Notice: </strong>
-                  This syllabus topic involves microscopic, relativistic, or theoretical concepts that cannot be physically isolated in a household setting without specialized laboratory equipment. This activity uses rigorous thought experiments and macroscopic everyday analogs to build concrete scientific intuition.
-                </div>
-              </div>
-            )}
-
-            {/* Multimodal Image Observation & Analysis Block */}
-            {activity.image_analysis && (
-              <div className={`p-5 md:p-6 rounded-2xl border space-y-4 ${
-                activity.image_analysis.image_processed
-                  ? 'bg-sky-500/5 border-sky-500/20'
-                  : 'bg-[var(--surface-alt)] border-[var(--border)]'
-              }`}>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
-                    <Camera size={18} className={activity.image_analysis.image_processed ? 'text-sky-500' : 'text-[var(--text-faint)]'} />
-                    <span>Image Observation & Visual Identification</span>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs sm:text-[13px] font-semibold border ${
-                    activity.image_analysis.image_processed
-                      ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30'
-                      : 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20'
-                  }`}>
-                    {activity.image_analysis.image_processed
-                      ? `Confidence: ${activity.image_analysis.confidence_level || 'High'}`
-                      : 'Text Fallback / No Image'}
-                  </span>
-                </div>
-
-                {activity.image_analysis.image_processed ? (
-                  <div className="space-y-3 text-sm sm:text-base text-[var(--text-soft)]">
-                    <div className="font-semibold text-[var(--text)] flex items-center gap-2">
-                      <Target size={16} className="text-sky-500" />
-                      <span>Identified Object / Structure: </span>
-                      <span className="font-bold text-sky-700 dark:text-sky-300">
-                        {activity.image_analysis.identified_object_or_structure}
-                      </span>
-                    </div>
-
-                    {activity.image_analysis.visible_features?.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="text-xs sm:text-sm font-semibold text-[var(--text-soft)]">
-                          Observed Visual Features:
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {activity.image_analysis.visible_features.map((feat, fIdx) => (
-                            <span key={fIdx} className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs sm:text-sm font-medium text-[var(--text)]">
-                              • {feat}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {activity.image_analysis.syllabus_connection && (
-                      <p className="text-sm sm:text-base leading-relaxed pt-1 text-[var(--text)]">
-                        <strong>Syllabus Connection: </strong>
-                        {activity.image_analysis.syllabus_connection}
-                      </p>
-                    )}
-
-                    {activity.image_analysis.clarification_needed && (
-                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-sm flex items-start gap-2.5 mt-2">
-                        <HelpCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                        <div>
-                          <strong>Clarification Needed: </strong>
-                          {activity.image_analysis.clarification_needed}
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 ) : (
-                  <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed">
-                    {activity.image_analysis.image_note || 'Generated a structured text-based practical activity based on your syllabus topic.'}
-                  </p>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-800 dark:text-indigo-300 border border-indigo-500/20 flex items-center gap-1.5">
+                    <GraduationCap size={12} className="text-indigo-600 dark:text-indigo-400" />
+                    <span>College • {activity.academic_grounding?.grade_or_semester ? `Sem ${activity.academic_grounding?.grade_or_semester}` : (user?.semester ? `Sem ${user.semester}` : 'Higher Ed')}</span>
+                  </span>
                 )}
               </div>
-            )}
+              <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)] tracking-tight leading-snug">
+                {activity.title || activity.activity_title || `${selectedSubject}: ${selectedTopic}`}
+              </h2>
+            </div>
 
-            {/* Required Zero-Cost Materials Checklist */}
-            <div className="p-5 md:p-6 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 space-y-4">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-emerald-800 dark:text-emerald-300">
-                  <Sprout size={18} />
-                  <span>Required Zero-Cost & Locally Sourced Materials</span>
+            {/* 2. What you will learn */}
+            <div className="p-3.5 sm:p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-sm text-[var(--text)] space-y-2.5">
+              <div className="flex items-start gap-3">
+                <Lightbulb size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="text-[var(--text)] font-semibold">What you will learn: </strong>
+                  <span className="text-[var(--text-soft)]">{learningObjective}</span>
                 </div>
-                <span className="text-xs sm:text-sm text-emerald-700 dark:text-emerald-400 font-medium">
-                  Tap item to check off
-                </span>
               </div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {(activity.local_materials || activity.materials_student_has || []).map((mat, idx) => {
-                  const isChecked = Boolean(checkedMaterials[idx])
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => toggleMaterial(idx)}
-                      className={`min-h-[46px] p-3 rounded-xl border text-left text-sm sm:text-base flex items-start gap-3 transition-all cursor-pointer ${
-                        isChecked
-                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-100 line-through opacity-80'
-                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text)] hover:border-emerald-500/40'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold ${
-                        isChecked ? 'bg-emerald-500 text-white border-emerald-500' : 'border-[var(--border-strong)] bg-[var(--surface)]'
-                      }`}>
-                        {isChecked ? '✓' : ''}
-                      </div>
-                      <span className="leading-snug">{mat}</span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* No Purchase Alternative & Safe Substitutions */}
-              {(activity.no_purchase_alternative || (activity.safe_substitutions && activity.safe_substitutions.length > 0)) && (
-                <div className="pt-2.5 border-t border-emerald-500/20 text-sm sm:text-base text-emerald-900 dark:text-emerald-300 space-y-1">
-                  <div className="font-bold flex items-center gap-2">
-                    <ShieldCheck size={16} className="text-emerald-600 dark:text-emerald-400" />
-                    <span>No-Purchase Zero-Cost Substitutions:</span>
-                  </div>
-                  <p className="opacity-95 leading-relaxed text-sm">
-                    {activity.no_purchase_alternative || activity.safe_substitutions?.join(' • ')}
-                  </p>
+              {activity.why_it_matters && (
+                <div className="text-xs sm:text-sm text-[var(--text-soft)] pl-7.5 leading-relaxed border-t border-amber-500/15 pt-2">
+                  <strong className="text-[var(--text)] font-semibold">Why this matters: </strong>
+                  <span>{activity.why_it_matters}</span>
                 </div>
               )}
             </div>
 
-            {/* Step-by-Step Practical Instructions */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-center gap-2">
-                  <Layers size={17} className="text-[var(--accent)]" />
-                  <span>Step-by-Step Procedure</span>
+            {/* Word Bank / Glossary (School Students) */}
+            {activity.unfamiliar_words?.length > 0 && (
+              <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1.5">
+                <div className="font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                  <BookOpen size={13} />
+                  <span>Word Bank:</span>
                 </div>
-                <span className="text-xs sm:text-sm text-[var(--text-soft)]">
-                  Tap step to mark complete
-                </span>
-              </div>
-              <div className="space-y-3">
-                {(activity.steps || []).map((step, idx) => {
-                  const isDone = Boolean(completedSteps[idx])
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => toggleStep(idx)}
-                      className={`min-h-[54px] p-4 md:p-5 rounded-xl border transition-all cursor-pointer flex items-start gap-4 ${
-                        isDone
-                          ? 'bg-[var(--accent-soft)]/50 border-[var(--accent)] text-[var(--text)] shadow-2xs'
-                          : 'bg-[var(--surface-alt)]/60 border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-soft)]'
-                      }`}
-                      role="checkbox"
-                      aria-checked={isDone}
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === ' ' || e.key === 'Enter') {
-                          e.preventDefault()
-                          toggleStep(idx)
-                        }
-                      }}
-                    >
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 border text-sm font-bold transition-colors ${
-                        isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)]'
-                      }`}>
-                        {isDone ? '✓' : idx + 1}
-                      </div>
-                      <div className="text-sm sm:text-base font-medium leading-relaxed flex-1">
-                        {step}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Observation & Simple Explanation Grid */}
-            <div className="grid md:grid-cols-2 gap-5 pt-3 border-t border-[var(--border)]">
-              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5">
-                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
-                  <Eye size={18} className="text-blue-500" />
-                  <span>What You Will Observe</span>
+                <div className="flex flex-wrap gap-2">
+                  {activity.unfamiliar_words.map((item, idx) => (
+                    <span key={idx} className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]">
+                      <strong className="text-[var(--accent)]">{typeof item === 'object' ? item.word : item}</strong>
+                      {typeof item === 'object' && item.simple_meaning ? `: ${item.simple_meaning}` : ''}
+                    </span>
+                  ))}
                 </div>
-                <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed">
-                  {activity.expected_observation || activity.expected_observations}
-                </p>
               </div>
+            )}
 
-              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5">
-                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
-                  <Lightbulb size={18} className="text-amber-500" />
-                  <span>Simple Explanation (Why It Works)</span>
+            {/* 3. What you need */}
+            {cleanMaterialsList.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs sm:text-sm font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-2">
+                  {isCodingTask ? <Code size={15} className="text-emerald-500" /> : <Wrench size={15} className="text-emerald-500" />}
+                  <span>{isCodingTask ? 'What you need (Software & Tools)' : 'What you need'}</span>
                 </div>
-                <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed font-normal">
-                  {activity.simple_explanation || activity.scientific_principle}
-                </p>
-              </div>
-            </div>
+                <div className="flex flex-wrap gap-2">
+                  {cleanMaterialsList.map((mat, idx) => {
+                    const isChecked = Boolean(checkedMaterials[idx])
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => toggleMaterial(idx)}
+                        className={`px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                          isChecked
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-100 line-through opacity-75'
+                            : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text)] hover:border-emerald-500/40'
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] font-bold ${
+                          isChecked ? 'bg-emerald-500 text-white' : 'border border-[var(--border-strong)]'
+                        }`}>
+                          {isChecked ? '✓' : ''}
+                        </span>
+                        <span>{mat}</span>
+                      </button>
+                    )
+                  })}
+                </div>
 
-            {/* Readable Dark Monospace Code Block Component (for Computer Science / Coding Tasks) */}
-            {(activity.coding_task || activity.code_snippet) && (() => {
-              const codeObj = activity.coding_task || { code: activity.code_snippet, language: 'python', task_objective: 'Algorithm Implementation' }
-              return (
-                <div className="rounded-2xl bg-gray-900 border border-gray-800 text-gray-100 overflow-hidden shadow-md space-y-0 my-5">
-                  <div className="px-5 py-3.5 bg-gray-950 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2.5">
-                    <div className="flex items-center gap-2.5 text-sm font-mono font-bold text-emerald-400">
-                      <Code size={17} />
-                      <span className="uppercase">{codeObj.language || 'Python / Pseudocode'}</span>
-                      <span className="text-xs text-gray-300 font-normal border border-gray-700 rounded-md px-2.5 py-0.5">
-                        {codeObj.task_objective || 'Executable Code Task'}
-                      </span>
-                    </div>
+                {/* Free Substitutes & Offline Alternative Helper */}
+                {(activity.safe_substitutions?.length > 0 || activity.no_purchase_alternative || activity.offline_alternative) && (
+                  <div className="pt-1.5">
                     <button
                       type="button"
-                      onClick={() => handleCopyCode(codeObj.code)}
-                      className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs sm:text-sm font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      onClick={() => setShowMaterialAlternatives((prev) => !prev)}
+                      className="text-xs font-semibold text-[var(--accent)] hover:underline flex items-center gap-1.5 cursor-pointer"
                     >
-                      {copyCodeSuccess ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
-                      <span>{copyCodeSuccess ? 'Copied!' : 'Copy Code'}</span>
+                      <span>{showMaterialAlternatives ? 'Hide zero-cost substitutions & offline alternative' : 'Missing items or limited internet? View free substitutions & offline option'}</span>
+                      <ChevronDown size={13} className={`transition-transform duration-200 ${showMaterialAlternatives ? 'rotate-180' : ''}`} />
                     </button>
-                  </div>
 
-                  {/* Code Editor Body */}
-                  <pre className="p-5 md:p-6 text-sm sm:text-base font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre font-normal bg-gray-900/90 selection:bg-emerald-900 selection:text-white">
-                    <code>{codeObj.code}</code>
-                  </pre>
-
-                  {/* Logic Breakdown & Execution Box */}
-                  <div className="p-5 bg-gray-950/80 border-t border-gray-800 text-sm text-gray-300 space-y-3.5">
-                    {codeObj.logic_breakdown && codeObj.logic_breakdown.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="text-xs sm:text-sm font-mono font-bold uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
-                          <Terminal size={15} /> Logic Breakdown:
+                    {showMaterialAlternatives && (
+                      <div className="mt-2 p-3.5 rounded-xl bg-[var(--surface-alt)]/60 border border-[var(--border)] space-y-2 text-xs">
+                        {/* No purchase guarantee */}
+                        <div className="flex items-start gap-2 text-emerald-700 dark:text-emerald-400 font-medium">
+                          <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                          <span><strong>Zero Purchase Required:</strong> {activity.no_purchase_alternative || "No purchases needed. All concepts can be explored using notebook paper, pencil, ruler, water, or ordinary household items."}</span>
                         </div>
-                        <ul className="space-y-1.5 pl-1">
-                          {codeObj.logic_breakdown.map((lb, lbIdx) => (
-                            <li key={lbIdx} className="text-xs sm:text-sm text-gray-300 flex items-start gap-2">
-                              <span className="text-emerald-500 font-mono shrink-0">•</span>
-                              <span className="leading-relaxed">{lb}</span>
-                            </li>
-                          ))}
-                        </ul>
+
+                        {/* Safe substitutions */}
+                        {Array.isArray(activity.safe_substitutions) && activity.safe_substitutions.length > 0 && (
+                          <div className="space-y-1">
+                            <strong className="text-[var(--text)] block font-semibold">Free Substitutions:</strong>
+                            <div className="space-y-1 text-[var(--text-soft)] pl-2 border-l-2 border-[var(--border)]">
+                              {activity.safe_substitutions.map((sub, sIdx) => (
+                                <div key={sIdx} className="flex items-start gap-1.5">
+                                  <span>•</span>
+                                  <span>{sub}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Offline alternative */}
+                        {activity.offline_alternative && (
+                          <div className="pt-2 border-t border-[var(--border)] text-[var(--text-soft)]">
+                            <strong className="text-[var(--text)] block font-semibold text-[var(--accent)] mb-0.5">Offline / Paper Alternative:</strong>
+                            <p className="leading-relaxed">{activity.offline_alternative}</p>
+                          </div>
+                        )}
                       </div>
                     )}
-
-                    <div className="grid sm:grid-cols-2 gap-3.5 pt-1">
-                      {codeObj.run_command && (
-                        <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
-                          <div className="text-xs font-mono font-bold text-gray-400 uppercase flex items-center gap-1.5">
-                            <Play size={13} className="text-emerald-400" /> How to Run:
-                          </div>
-                          <div className="text-xs sm:text-sm font-mono text-emerald-300 font-bold">
-                            {codeObj.run_command}
-                          </div>
-                        </div>
-                      )}
-
-                      {codeObj.expected_output && (
-                        <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 space-y-1">
-                          <div className="text-xs font-mono font-bold text-gray-400 uppercase flex items-center gap-1.5">
-                            <CheckCircle2 size={13} className="text-sky-400" /> Expected Output:
-                          </div>
-                          <div className="text-xs sm:text-sm font-mono text-sky-300">
-                            {codeObj.expected_output}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {codeObj.debugging_tips && (
-                      <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/40 text-amber-300 text-xs sm:text-sm flex items-start gap-2.5">
-                        <Bug size={16} className="text-amber-400 shrink-0 mt-0.5" />
-                        <div className="leading-relaxed">
-                          <strong>Debugging Guidance: </strong>
-                          {codeObj.debugging_tips}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* Expandable Accordion for Academic Theory (Avoid Walls of Text) */}
-            {(activity.academic_theory || activity.scientific_principle) && (
-              <div className="rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] overflow-hidden transition-all">
-                <button
-                  type="button"
-                  onClick={() => setShowAcademicTheory(!showAcademicTheory)}
-                  className="w-full p-4 md:p-5 flex items-center justify-between text-left cursor-pointer hover:bg-[var(--surface)] transition-colors"
-                >
-                  <div className="flex items-center gap-2.5 text-sm sm:text-base font-bold text-[var(--text)]">
-                    <Sparkles size={18} className="text-[var(--accent)]" />
-                    <span>Academic Theory & Textbook Formulation</span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-[var(--accent-dim)] text-[var(--accent)] font-semibold">
-                      {showAcademicTheory ? 'Click to collapse' : 'Click to expand'}
-                    </span>
-                  </div>
-                  {showAcademicTheory ? <ChevronUp size={18} className="text-[var(--text-soft)]" /> : <ChevronDown size={18} className="text-[var(--text-soft)]" />}
-                </button>
-
-                {showAcademicTheory && (
-                  <div className="p-5 pt-0 border-t border-[var(--border)] animate-fadeIn space-y-2 mt-2">
-                    <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed bg-[var(--surface)] p-4 rounded-xl border border-[var(--border)]">
-                      {activity.academic_theory || activity.scientific_principle}
-                    </p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Interactive Student On-Demand Assistance Actions */}
-            <div className="p-5 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-center gap-2">
-                  <Sparkles size={16} className="text-[var(--accent)]" />
-                  <span>On-Demand Learning Assistance</span>
+            {/* 4. Steps */}
+            {stepsList.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs sm:text-sm font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-2">
+                    <Layers size={15} className="text-[var(--accent)]" />
+                    <span>Steps</span>
+                  </div>
+                  <span className="text-xs text-[var(--text-soft)]">
+                    {completedCount} / {stepsList.length} completed
+                  </span>
                 </div>
-                <span className="text-xs sm:text-sm text-[var(--text-soft)] font-medium">
-                  Tap button for instant AI support
-                </span>
+                <div className="space-y-2">
+                  {stepsList.map((stepText, idx) => {
+                    const isDone = Boolean(completedSteps[idx])
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => toggleStep(idx)}
+                        className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                          isDone
+                            ? 'bg-[var(--accent-soft)]/40 border-[var(--accent)] text-[var(--text)]'
+                            : 'bg-[var(--surface-alt)]/50 border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)]'
+                        }`}
+                        role="checkbox"
+                        aria-checked={isDone}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault()
+                            toggleStep(idx)
+                          }
+                        }}
+                      >
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold ${
+                          isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)]'
+                        }`}>
+                          {isDone ? '✓' : idx + 1}
+                        </div>
+                        <div className={`text-sm leading-relaxed flex-1 ${isDone ? 'line-through opacity-75' : ''}`}>
+                          {stepText}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleStudentAction('simpler_explanation')}
-                  disabled={actionLoading}
-                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <Lightbulb size={16} className="text-amber-500" />
-                  <span>Simpler Explanation</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleStudentAction('another_example')}
-                  disabled={actionLoading}
-                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <FileText size={16} className="text-blue-500" />
-                  <span>Another Example</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleStudentAction('worked_solution')}
-                  disabled={actionLoading}
-                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <Target size={16} className="text-emerald-500" />
-                  <span>Worked Solution</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleStudentAction('more_challenging_task')}
-                  disabled={actionLoading}
-                  className="min-h-[46px] p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)] text-[var(--text)] text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <Sparkles size={16} className="text-purple-500" />
-                  <span>Challenge Task</span>
-                </button>
+            {/* 5. Result or example */}
+            <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3">
+              <div className="text-xs sm:text-sm font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-2">
+                <Eye size={15} className="text-blue-500" />
+                <span>Result or Example</span>
               </div>
+              <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed whitespace-pre-wrap">
+                {resultOrExampleText}
+              </p>
 
-              {actionLoading && (
-                <div className="py-4 text-center text-sm text-[var(--text-soft)] font-medium flex items-center justify-center gap-2">
-                  <Loader2 size={18} className="animate-spin text-[var(--accent)]" />
-                  <span>Generating tailored learning response...</span>
+              {/* Progressive Maths Practice (Easy, Medium, Hard with worked method and calculations) */}
+              {activity.math_progressive_practice && (
+                <div className="space-y-2.5 pt-3 border-t border-[var(--border)]">
+                  <div className="text-xs font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-1.5">
+                    <Calculator size={14} className="text-[var(--accent)]" />
+                    <span>Progressive Practice & Method (Easy, Medium, Hard)</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                    {['easy', 'medium', 'hard'].map((level) => {
+                      const tier = activity.math_progressive_practice[level]
+                      if (!tier) return null
+                      const badgeColor = level === 'easy'
+                        ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border-emerald-500/20'
+                        : level === 'medium'
+                        ? 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/20'
+                        : 'bg-purple-500/10 text-purple-800 dark:text-purple-300 border-purple-500/20'
+                      return (
+                        <div key={level} className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] border ${badgeColor}`}>
+                              {level}
+                            </span>
+                          </div>
+                          <p className="font-semibold text-[var(--text)] leading-snug">{tier.question}</p>
+                          {tier.method_and_calculations && (
+                            <div className="p-2 rounded bg-[var(--surface-alt)] border border-[var(--border)] text-[11px] text-[var(--text-soft)] font-mono whitespace-pre-wrap leading-relaxed">
+                              <div className="font-sans font-semibold text-[var(--text)] mb-1 text-[10px] uppercase">Method & Calculations:</div>
+                              {tier.method_and_calculations}
+                            </div>
+                          )}
+                          {tier.answer && (
+                            <div className="font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
+                              Answer: {tier.answer}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
-              {actionResult && (
-                <div className="p-5 rounded-xl bg-[var(--surface)] border border-[var(--accent-dim)] space-y-3 animate-fadeIn relative">
-                  <button
-                    type="button"
-                    onClick={() => setActionResult(null)}
-                    className="absolute top-3 right-3 text-[var(--text-faint)] hover:text-[var(--text)] p-1.5 cursor-pointer"
-                    title="Close assistance card"
-                  >
-                    <X size={16} />
-                  </button>
-                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--accent)]">
-                    <Sparkles size={16} />
-                    <span>{actionResult.title || 'Learning Assistance'}</span>
+              {/* Coding block if coding task present */}
+              {(activity.coding_task?.code || activity.code_snippet || activity.coding_task?.code_snippet) && (() => {
+                const codeSnippet = activity.coding_task?.code || activity.code_snippet || activity.coding_task?.code_snippet
+                const lang = activity.coding_task?.target_language || activity.coding_task?.language || 'Python'
+                const out = activity.coding_task?.expected_output
+                const runInst = activity.coding_task?.run_instructions
+                const modTask = activity.coding_task?.modification_task
+                return (
+                  <div className="rounded-xl bg-gray-900 border border-gray-800 text-gray-100 overflow-hidden shadow-xs mt-2">
+                    <div className="px-3.5 py-2 bg-gray-950 border-b border-gray-800 flex items-center justify-between text-xs font-mono">
+                      <span className="text-emerald-400 font-semibold">{lang}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCode(codeSnippet)}
+                        className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        {copyCodeSuccess ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copyCodeSuccess ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    {runInst && runInst !== 'N/A' && (
+                      <div className="px-3.5 py-1.5 bg-gray-950/70 border-b border-gray-800 text-xs font-mono text-gray-300 flex items-center gap-1.5">
+                        <Play size={11} className="text-emerald-400" />
+                        <span className="text-gray-400">Run: </span>
+                        <span>{runInst}</span>
+                      </div>
+                    )}
+                    <pre className="p-3.5 text-xs sm:text-sm font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+                      <code>{codeSnippet}</code>
+                    </pre>
+                    {out && out !== 'N/A' && (
+                      <div className="px-3.5 py-2 bg-gray-950/90 border-t border-gray-800 text-xs font-mono text-sky-300">
+                        <span className="text-gray-400">Expected Output: </span>{out}
+                      </div>
+                    )}
+                    {modTask && modTask !== 'N/A' && (
+                      <div className="px-3.5 py-2.5 bg-gray-950 border-t border-gray-800 text-xs text-amber-300 flex items-start gap-2">
+                        <Terminal size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <strong className="text-amber-200">Modification Task: </strong>
+                          <span>{modTask}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm sm:text-base text-[var(--text-soft)] leading-relaxed whitespace-pre-wrap font-medium">
-                    {actionResult.content}
+                )
+              })()}
+
+              {/* Model Answer (English & Social Science) */}
+              {activity.model_answer && activity.model_answer !== 'N/A' && (
+                <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] space-y-1.5 text-xs">
+                  <div className="font-semibold text-[var(--text)] flex items-center gap-1.5">
+                    <CheckCircle2 size={13} className="text-emerald-500" />
+                    <span>Model Answer:</span>
+                  </div>
+                  <p className="text-[var(--text-soft)] leading-relaxed italic whitespace-pre-wrap">
+                    {activity.model_answer}
                   </p>
-                  {actionResult.steps?.length > 0 && (
-                    <ol className="list-decimal list-inside space-y-1.5 text-sm sm:text-base text-[var(--text)] pt-1">
-                      {actionResult.steps.map((st, stIdx) => (
-                        <li key={stIdx} className="leading-relaxed">{st}</li>
-                      ))}
-                    </ol>
-                  )}
+                </div>
+              )}
+
+              {/* Assessment Checklist (English & Social Science) */}
+              {Array.isArray(activity.assessment_checklist) && activity.assessment_checklist.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] space-y-2 text-xs">
+                  <div className="font-semibold text-[var(--text)] flex items-center gap-1.5">
+                    <CheckSquare size={13} className="text-blue-500" />
+                    <span>Assessment Checklist:</span>
+                  </div>
+                  <div className="space-y-1 text-[var(--text-soft)]">
+                    {activity.assessment_checklist.map((item, cIdx) => (
+                      <div key={cIdx} className="flex items-start gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1.5" />
+                        <span className="leading-relaxed">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Assumptions & Reasoning (College Students) */}
+              {activity.assumptions_and_reasoning?.length > 0 && (
+                <div className="text-xs text-[var(--text-soft)] pt-2 border-t border-[var(--border)]">
+                  <strong className="text-[var(--text)]">Assumptions & Reasoning: </strong>
+                  <span>{activity.assumptions_and_reasoning.join(' • ')}</span>
                 </div>
               )}
             </div>
 
-            {/* Village & Everyday Application Connection */}
-            {(activity.everyday_applications || activity.village_application) && (
-              <div className="p-5 md:p-6 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-2.5">
-                <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-amber-800 dark:text-amber-300">
-                  <Home size={17} />
-                  <span>Everyday, Farming & Sustainability Applications</span>
-                </div>
-                <p className="text-sm sm:text-base text-[var(--text)] leading-relaxed">
-                  {activity.everyday_applications || activity.village_application}
-                </p>
-              </div>
-            )}
-
-            {/* Interactive Syllabus Understanding & Concept Checks */}
-            {activity.understanding_questions && activity.understanding_questions.length > 0 && (
-              <div className="space-y-5 pt-3 border-t border-[var(--border)]">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
-                    <HelpCircle size={16} className="text-[var(--accent)]" />
-                    <span>Interactive Syllabus Concept Checks & Submissions</span>
-                  </div>
-                  {saveStatus === 'saving' && (
-                    <span className="text-xs sm:text-sm font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <Loader2 size={13} className="animate-spin" /> Syncing progress...
-                    </span>
-                  )}
-                  {saveStatus === 'saved' && (
-                    <span className="text-xs sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <Check size={13} /> Saved to Database
-                    </span>
-                  )}
+            {/* 6. Check your understanding */}
+            {questionsToShow.length > 0 && (
+              <div className="space-y-3.5 pt-2 border-t border-[var(--border)]">
+                <div className="text-xs sm:text-sm font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-2">
+                  <HelpCircle size={15} className="text-[var(--accent)]" />
+                  <span>Check Your Understanding</span>
                 </div>
 
-                <div className="space-y-4">
-                  {activity.understanding_questions.map((qObj, qIdx) => {
+                <div className="space-y-3">
+                  {questionsToShow.map((qObj, qIdx) => {
                     const isRevealed = Boolean(revealedQuestions[qIdx])
                     const evalResult = evaluations[qIdx]
                     const isEvaluating = Boolean(evaluatingQ[qIdx])
-                    const attemptNum = attemptsCount[qIdx] || 0
 
                     return (
                       <div
                         key={qIdx}
-                        className={`p-5 rounded-xl border transition-all space-y-3.5 ${
+                        className={`p-3.5 sm:p-4 rounded-xl border space-y-2.5 transition-all ${
                           evalResult
                             ? evalResult.is_correct
                               ? 'bg-emerald-500/5 border-emerald-500/30'
                               : 'bg-amber-500/5 border-amber-500/30'
-                            : 'bg-[var(--surface-alt)]/60 border-[var(--border)]'
+                            : 'bg-[var(--surface-alt)]/50 border-[var(--border)]'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="text-sm sm:text-base font-bold text-[var(--text)] flex items-start gap-2.5">
-                            <span className="w-6 h-6 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center text-xs shrink-0 mt-0.5 font-bold">
-                              {qIdx + 1}
-                            </span>
-                            <span className="leading-snug">{qObj.question}</span>
-                          </div>
-                          {attemptNum > 0 && (
-                            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] shrink-0">
-                              Attempt #{attemptNum}
-                            </span>
-                          )}
+                        <div className="text-sm font-semibold text-[var(--text)] flex items-start gap-2">
+                          <span className="text-xs font-bold text-[var(--accent)] px-1.5 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] shrink-0 mt-0.5">
+                            Q{qIdx + 1}
+                          </span>
+                          <span className="leading-snug">{qObj.question}</span>
                         </div>
 
-                        {/* Interactive Answer Input & Submit */}
-                        <div className="space-y-2 pt-1">
-                          <div className="flex gap-2.5">
-                            <input
-                              type="text"
-                              value={userAnswers[qIdx] || ''}
-                              onChange={(e) => setUserAnswers(prev => ({ ...prev, [qIdx]: e.target.value }))}
-                              placeholder="Type your answer here..."
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !isEvaluating) {
-                                  e.preventDefault()
-                                  handleSubmitAnswer(qIdx, qObj)
-                                }
-                              }}
-                              className="flex-1 px-4 py-2.5 text-sm sm:text-base rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-faint)] min-h-[44px]"
-                            />
-                            <Button
-                              onClick={() => handleSubmitAnswer(qIdx, qObj)}
-                              disabled={isEvaluating || !(userAnswers[qIdx] || '').trim()}
-                              size="md"
-                              className="px-5 text-sm font-bold shrink-0 flex items-center gap-2 cursor-pointer min-h-[44px]"
-                            >
-                              {isEvaluating ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-                              <span>{evalResult ? 'Retry Answer' : 'Submit'}</span>
-                            </Button>
-                          </div>
+                        {/* Answer Input */}
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={userAnswers[qIdx] || ''}
+                            onChange={(e) => setUserAnswers(prev => ({ ...prev, [qIdx]: e.target.value }))}
+                            placeholder="Your answer..."
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !isEvaluating) {
+                                e.preventDefault()
+                                handleSubmitAnswer(qIdx, qObj)
+                              }
+                            }}
+                            className="flex-1 px-3 py-1.5 text-xs sm:text-sm rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] min-h-[38px]"
+                          />
+                          <Button
+                            onClick={() => handleSubmitAnswer(qIdx, qObj)}
+                            disabled={isEvaluating || !(userAnswers[qIdx] || '').trim()}
+                            size="sm"
+                            className="px-3 text-xs font-bold shrink-0 min-h-[38px]"
+                          >
+                            {isEvaluating ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
+                            <span>{evalResult ? 'Retry' : 'Submit'}</span>
+                          </Button>
                         </div>
 
-                        {/* AI Evaluation Feedback Card */}
+                        {/* Evaluation Feedback */}
                         {evalResult && (
-                          <div className={`p-4 rounded-xl border text-sm space-y-2.5 animate-fadeIn ${
+                          <div className={`p-2.5 rounded-lg text-xs leading-relaxed ${
                             evalResult.is_correct
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
-                              : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                              ? 'bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
+                              : 'bg-amber-500/10 text-amber-900 dark:text-amber-200'
                           }`}>
-                            <div className="flex items-center justify-between gap-2 flex-wrap font-bold">
-                              <div className="flex items-center gap-2">
-                                {evalResult.is_correct ? (
-                                  <CheckCircle2 size={17} className="text-emerald-500 shrink-0" />
-                                ) : (
-                                  <AlertTriangle size={17} className="text-amber-500 shrink-0" />
-                                )}
-                                <span>{evalResult.is_correct ? 'Conceptually Correct!' : 'Review Concept'}</span>
-                              </div>
-                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--border)] uppercase">
-                                {evalResult.error_type === 'spelling_grammar_only'
-                                  ? 'Minor Typo (Accepted)'
-                                  : evalResult.error_type === 'conceptual_misunderstanding'
-                                  ? 'Conceptual Misunderstanding'
-                                  : 'Accurate'}
-                              </span>
-                            </div>
-
-                            <p className="text-sm sm:text-base leading-relaxed opacity-95">
-                              {evalResult.feedback}
-                            </p>
-
-                            {evalResult.additional_hint && (
-                              <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)] flex items-start gap-2">
-                                <Lightbulb size={15} className="text-amber-500 shrink-0 mt-0.5" />
-                                <div>
-                                  <strong>Hint for Next Attempt: </strong>
-                                  {evalResult.additional_hint}
-                                </div>
-                              </div>
-                            )}
+                            <strong>{evalResult.is_correct ? 'Correct! ' : 'Review: '}</strong>
+                            {evalResult.feedback}
                           </div>
                         )}
 
-                        {/* Reference Explanation Toggle */}
-                        <div className="pt-1 flex items-center justify-between text-xs sm:text-sm">
+                        {/* Reference Answer Toggle */}
+                        <div className="pt-0.5 flex justify-end">
                           <button
                             type="button"
                             onClick={() => setRevealedQuestions(prev => ({ ...prev, [qIdx]: !prev[qIdx] }))}
-                            className="font-semibold text-[var(--accent)] hover:underline flex items-center gap-1.5 cursor-pointer"
+                            className="text-xs font-semibold text-[var(--accent)] hover:underline cursor-pointer flex items-center gap-1"
                           >
-                            <Info size={14} />
-                            <span>{isRevealed ? 'Hide Explanation' : 'Review Explanation'}</span>
+                            <Info size={12} />
+                            <span>{isRevealed ? 'Hide answer' : 'Show answer'}</span>
                           </button>
                         </div>
 
                         {isRevealed && (
-                          <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm sm:text-base space-y-2 animate-fadeIn">
-                            <div className="font-bold text-emerald-600 dark:text-emerald-400">
-                              Reference Answer: {qObj.answer}
+                          <div className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--text-soft)] space-y-1 animate-fadeIn">
+                            <div className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              Answer: {qObj.answer}
                             </div>
                             {qObj.explanation && (
-                              <div className="text-sm text-[var(--text-soft)] leading-relaxed">
-                                <em>Academic Explanation:</em> {qObj.explanation}
+                              <div className="leading-relaxed">
+                                {qObj.explanation}
                               </div>
                             )}
                           </div>
@@ -1745,114 +1744,31 @@ export default function LearnAnywhere() {
                     )
                   })}
                 </div>
-
-                {/* Additional Practice Generator Card for Difficulties */}
-                <div className="pt-4 border-t border-[var(--border)]">
-                  {additionalPractice.length > 0 ? (
-                    <div className="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20 space-y-3.5 animate-fadeIn">
-                      <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-purple-900 dark:text-purple-300">
-                        <Sparkles size={16} className="text-purple-500" />
-                        <span>Additional Targeted Practice Questions</span>
-                      </div>
-                      <div className="space-y-2.5">
-                        {additionalPractice.map((apObj, apIdx) => (
-                          <div key={apIdx} className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm space-y-1.5">
-                            <div className="font-bold text-[var(--text)]">P{apIdx + 1}. {apObj.question}</div>
-                            <div className="text-sm text-emerald-600 dark:text-emerald-400 font-semibold">Answer: {apObj.answer}</div>
-                            <div className="text-xs sm:text-sm text-[var(--text-soft)] leading-relaxed">{apObj.explanation}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-3">
-                      <div className="text-sm text-[var(--text-soft)] leading-relaxed">
-                        <strong className="text-[var(--text)]">Need Extra Practice on {selectedTopic || 'this topic'}? </strong>
-                        Generate additional practice questions tailored to your performance.
-                      </div>
-                      <Button
-                        onClick={handleLoadAdditionalPractice}
-                        disabled={loadingPractice}
-                        variant="outline"
-                        size="md"
-                        className="shrink-0 text-sm font-bold flex items-center gap-2 cursor-pointer min-h-[42px]"
-                      >
-                        {loadingPractice ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-                        <span>Load Additional Practice</span>
-                      </Button>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
-            {/* Limitations, Boundary Conditions & Misconceptions */}
-            {activity.limitations_and_misconceptions && (
-              <div className="p-4 md:p-5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] flex items-start gap-3.5 text-sm sm:text-base text-[var(--text-soft)]">
-                <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+            {/* Optional Safety Guidance (Appears only when relevant) */}
+            {hasRealSafety && (
+              <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs sm:text-sm text-red-900 dark:text-red-300 flex items-start gap-2.5">
+                <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
-                  <strong className="text-[var(--text)]">Limitations & Common Misconceptions: </strong>
-                  {activity.limitations_and_misconceptions}
+                  <strong className="font-bold text-red-700 dark:text-red-400">Safety guidance: </strong>
+                  <span>{safetyText}</span>
                 </div>
               </div>
             )}
 
-            {/* Safety Guidance */}
-            {(activity.safety_precautions || activity.safety_notes) && (
-              <div className="p-4 md:p-5 rounded-xl bg-red-500/5 border border-red-500/20 flex items-start gap-3.5 text-sm sm:text-base text-red-900 dark:text-red-300">
-                <ShieldAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
+            {/* Optional Practical Limitation (Appears only when there is a real limitation to explain) */}
+            {hasRealLimitation && (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs sm:text-sm text-amber-900 dark:text-amber-300 flex items-start gap-2.5">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
-                  <strong className="text-red-700 dark:text-red-400">Safety Precautions: </strong>
-                  {activity.safety_precautions || activity.safety_notes}
+                  <strong className="font-bold text-amber-700 dark:text-amber-400">Practical limitation: </strong>
+                  <span>{limitationText}</span>
                 </div>
               </div>
             )}
 
-            {/* Follow-up Syllabus Practice */}
-            {activity.follow_up_practice && (
-              <div className="p-4 md:p-5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-sm sm:text-base text-blue-900 dark:text-blue-300 space-y-1.5">
-                <div className="font-bold flex items-center gap-2 text-blue-700 dark:text-blue-400">
-                  <Target size={16} />
-                  <span>Suggested Follow-up Syllabus Practice:</span>
-                </div>
-                <p className="leading-relaxed text-sm">
-                  {activity.follow_up_practice}
-                </p>
-              </div>
-            )}
-
-            {/* Understanding Reflection Challenge */}
-            {(activity.reflection_task || activity.reflection_question) && (
-              <div className="p-5 md:p-6 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[var(--text)]">
-                    <HelpCircle size={18} className="text-[var(--accent)]" />
-                    <span>Reflection & Village Observation Challenge</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowReflectionAnswer(!showReflectionAnswer)}
-                    className="text-sm font-bold text-[var(--accent)] hover:underline cursor-pointer"
-                  >
-                    {showReflectionAnswer ? 'Hide Conceptual Answer' : 'Think & Reveal Concept'}
-                  </button>
-                </div>
-                <p className="text-sm sm:text-base font-medium text-[var(--text)] leading-relaxed">
-                  {activity.reflection_task || activity.reflection_question}
-                </p>
-                {showReflectionAnswer && (
-                  <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm sm:text-base text-[var(--text-soft)] leading-relaxed animate-fadeIn space-y-1.5">
-                    <div className="font-bold text-[var(--text)] flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-emerald-500" />
-                      <span>Academic Concept Breakdown</span>
-                    </div>
-                    <p>
-                      This physical phenomenon directly verifies the underlying curriculum law. When parameters such as density, particle surface area, light angle, or concentration change, the physical system responds according to established mathematical and scientific principles.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       )}

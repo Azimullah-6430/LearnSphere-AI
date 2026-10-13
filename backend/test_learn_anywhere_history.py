@@ -95,7 +95,15 @@ class TestLearnAnywhereHistory(unittest.TestCase):
         with app.test_request_context():
             with self.client.session_transaction() as sess:
                 sess["user_id"] = self.student_a_id
-                sess["user"] = {"id": self.student_a_id, "user_id": self.student_a_id, "role": "student"}
+                sess["user"] = {
+                    "id": self.student_a_id,
+                    "user_id": self.student_a_id,
+                    "role": "student",
+                    "student_type": "SCHOOL",
+                    "level": "school",
+                    "grade_level": 10,
+                    "board": "CBSE"
+                }
 
             resp = self.client.post("/api/learn-anywhere/generate", json={
                 "subject": "Physics",

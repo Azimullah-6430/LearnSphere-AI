@@ -1,16 +1,25 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { PageHead, Card, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
-import { CheckCircle2, Lightbulb, ShieldAlert, Trash2, Check, Sparkles, BookOpen, AlertCircle, FileText, X } from 'lucide-react'
+import { CheckCircle2, Lightbulb, ShieldAlert, Trash2, Check, Sparkles, BookOpen, AlertCircle, FileText, X, Filter } from 'lucide-react'
 
 export default function MisconceptionMap() {
   const { activeClass } = useApp()
   const navigate = useNavigate()
+  const location = useLocation()
   const [misconceptions, setMisconceptions] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedEvidence, setSelectedEvidence] = useState(null)
+  const [conceptFilter, setConceptFilter] = useState(
+    location.state?.concept || new URLSearchParams(location.search).get('concept') || ''
+  )
+
+  useEffect(() => {
+    const c = location.state?.concept || new URLSearchParams(location.search).get('concept') || ''
+    if (c) setConceptFilter(c)
+  }, [location.search, location.state])
 
   useEffect(() => {
     async function loadMisconceptions() {
@@ -68,7 +77,20 @@ export default function MisconceptionMap() {
     })
   }
 
-  const hasData = misconceptions.length > 0
+  const filteredMisconceptions = misconceptions.filter(m => {
+    if (!conceptFilter.trim()) return true
+    const target = conceptFilter.trim().toLowerCase()
+    const match = (
+      (m.concept || '') + ' ' +
+      (m.identified_concept || '') + ' ' +
+      (m.actual_misconception || '') + ' ' +
+      (m.topic || '') + ' ' +
+      (m.student_name || '')
+    ).toLowerCase()
+    return match.includes(target)
+  })
+
+  const hasData = filteredMisconceptions.length > 0
 
   return (
     <>
@@ -84,17 +106,41 @@ export default function MisconceptionMap() {
         </div>
       )}
 
+      {conceptFilter && (
+        <div className="mb-5 p-3.5 rounded-2xl bg-[var(--gold-soft)] border border-[var(--gold)] text-xs font-bold text-[var(--gold)] flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <Filter size={15} />
+            <span>Filtered by concept evidence: <strong className="text-[var(--text)]">&ldquo;{conceptFilter}&rdquo;</strong></span>
+          </div>
+          <button
+            onClick={() => setConceptFilter('')}
+            className="px-2.5 py-1 rounded-lg bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] hover:bg-[var(--surface-alt)] font-bold text-[11px] cursor-pointer"
+          >
+            Clear Filter
+          </button>
+        </div>
+      )}
+
       {!hasData ? (
         <Card className="p-12 text-center my-6 border-dashed border-2">
           <CheckCircle2 size={44} className="text-emerald-500 mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Conceptual Misconceptions Flagged</h3>
+          <h3 className="text-lg font-bold mb-1 text-[var(--text)]">
+            {conceptFilter ? "No Misconceptions Match This Concept" : "No Conceptual Misconceptions Flagged"}
+          </h3>
           <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto leading-relaxed">
-            When evaluation evidence proves a student has misunderstood an underlying concept, detailed evidence cards will automatically appear here.
+            {conceptFilter
+              ? `No evaluated records match "${conceptFilter}". Try resetting your filter to view all diagnosed items.`
+              : "When evaluation evidence proves a student has misunderstood an underlying concept, detailed evidence cards will automatically appear here."}
           </p>
+          {conceptFilter && (
+            <div className="mt-4">
+              <Button onClick={() => setConceptFilter('')}>View All Misconceptions</Button>
+            </div>
+          )}
         </Card>
       ) : (
         <div className="space-y-5">
-          {misconceptions.map((m, i) => {
+          {filteredMisconceptions.map((m, i) => {
             const studentName = m.student_name || (m.student_names && m.student_names[0]) || "Student"
             const isHigh = (m.confidence || m.severity) === 'High'
             const isResolved = m.status === 'Completed / Resolved'

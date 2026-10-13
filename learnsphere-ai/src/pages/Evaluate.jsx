@@ -107,10 +107,26 @@ export default function Evaluate() {
   const [syllabusRawFile, setSyllabusRawFile] = useState(null)
 
   // Details
-  const [studentName, setStudentName] = useState(user?.name || '')
+  const [selectedStudentId, setSelectedStudentId] = useState('')
+  const [studentName, setStudentName] = useState(role === 'student' ? (user?.name || '') : '')
   const [subject, setSubject] = useState(user?.subjects?.[0] || '')
-  const [rollNumber, setRollNumber] = useState(user?.roll_number || '')
+  const [rollNumber, setRollNumber] = useState(role === 'student' ? (user?.roll_number || '') : '')
   const [assessmentTitle, setAssessmentTitle] = useState('')
+
+  const handleSelectRosterStudent = (e) => {
+    const val = e.target.value
+    setSelectedStudentId(val)
+    if (!val) {
+      setStudentName('')
+      setRollNumber('')
+      return
+    }
+    const matched = activeClass?.students?.find((s) => String(s.id) === String(val))
+    if (matched) {
+      setStudentName(matched.name || '')
+      setRollNumber(matched.rollNo || matched.roll_number || '')
+    }
+  }
 
   const [level, setLevel] = useState(user?.level || '')
   const [board, setBoard] = useState(user?.board || '')
@@ -194,10 +210,13 @@ export default function Evaluate() {
       } catch {}
     }
 
-    if (activeClass?.id && addOrUpdateStudentMarks) {
-      addOrUpdateStudentMarks(activeClass.id, studentName, {
+    if (activeClass?.id && (selectedStudentId || studentName) && addOrUpdateStudentMarks) {
+      addOrUpdateStudentMarks(activeClass.id, selectedStudentId || studentName, {
+        id: evalId,
+        evaluationId: evalId,
+        evaluation_id: evalId,
         subject,
-        assessment: assessmentTitle,
+        assessment: assessmentTitle || `${subject} Examination`,
         totalMarks: newTotal,
         obtainedMarks: newObtained,
         percentage: newPct,
@@ -246,6 +265,25 @@ export default function Evaluate() {
       return
     }
 
+    if (role === 'teacher') {
+      if (!activeClass?.id) {
+        setErrorMsg('Please select an active class roster before starting evaluation.')
+        setStep(3)
+        return
+      }
+      if (!selectedStudentId) {
+        setErrorMsg('Please select an enrolled student from the class roster.')
+        setStep(3)
+        return
+      }
+      const matched = activeClass.students?.find((s) => String(s.id) === String(selectedStudentId))
+      if (!matched) {
+        setErrorMsg(`Selected student is not enrolled in class '${activeClass.name || 'Active Class'}'. Please select an enrolled student or add them to the roster first.`)
+        setStep(3)
+        return
+      }
+    }
+
     setStep(5)
     setProcessing(true)
     setResult(false)
@@ -264,6 +302,9 @@ export default function Evaluate() {
       formData.append('subject', subject)
       formData.append('student_name', studentName)
       formData.append('roll_number', rollNumber)
+      if (selectedStudentId) {
+        formData.append('student_id', selectedStudentId)
+      }
       formData.append('assessment_title', assessmentTitle)
       formData.append('role', role || 'teacher')
       formData.append('evaluation_source', 'TEACHER_EVALUATION')
@@ -289,13 +330,30 @@ export default function Evaluate() {
 
       setTimeout(() => {
         setProcessing(false)
-        if (response && response.success) {
+        if (response && response.success && response.evaluation_id) {
           setEvalData(response.result)
           setPlagiarismData(response.plagiarism)
           setEvalId(response.evaluation_id)
           setResult(true)
+
+          // Update student roster marks in context
+          if (activeClass?.id && selectedStudentId && addOrUpdateStudentMarks) {
+            const resObj = response.result || {}
+            addOrUpdateStudentMarks(activeClass.id, selectedStudentId, {
+              id: response.evaluation_id,
+              evaluationId: response.evaluation_id,
+              evaluation_id: response.evaluation_id,
+              subject: subject,
+              assessment: assessmentTitle || `${subject} Examination`,
+              totalMarks: resObj.total_marks,
+              obtainedMarks: resObj.obtained_marks,
+              percentage: resObj.percentage,
+              grade: resObj.grade,
+              date: new Date().toISOString().split('T')[0]
+            })
+          }
         } else {
-          setErrorMsg(response.error || 'Paper evaluation failed.')
+          setErrorMsg(response?.error || 'Paper evaluation failed.')
         }
       }, 500)
     } catch (err) {
@@ -402,11 +460,43 @@ export default function Evaluate() {
               subtitle="Link the script to student identifiers and academic curriculum guidelines"
             />
             <div className="space-y-4">
+              {role === 'teacher' && (!activeClass || !activeClass.students || activeClass.students.length === 0) && (
+                <div className="p-4 bg-[var(--warning-soft)] border border-[var(--warning)]/30 rounded-2xl text-sm text-[var(--warning)] flex items-center justify-between">
+                  <span>{!activeClass ? "No active class selected. Please select a class from your portal first." : `Class "${activeClass.name}" has no enrolled students. Please add students first.`}</span>
+                  <Button size="sm" variant="secondary" onClick={() => navigate('/students')}>Go to Roster</Button>
+                </div>
+              )}
+
+              {role === 'teacher' && activeClass?.students && activeClass.students.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[var(--accent)] mb-2">
+                    Enrolled Student ({activeClass.name || 'Class Roster'}) <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedStudentId}
+                    onChange={handleSelectRosterStudent}
+                    className="w-full px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm md:text-base outline-none focus:border-[var(--accent)] font-medium"
+                  >
+                    <option value="">-- Select enrolled student from roster ({activeClass.name}) --</option>
+                    {activeClass.students.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} {st.rollNo || st.roll_number ? `(${st.rollNo || st.roll_number})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Student Full Name</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">
+                  Student Full Name {role === 'teacher' && selectedStudentId && <span className="text-[var(--accent)] font-semibold">(Verified Roster Student)</span>}
+                </label>
                 <input
                   value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
+                  readOnly={role === 'teacher' && !!selectedStudentId}
+                  onChange={(e) => {
+                    setStudentName(e.target.value)
+                  }}
+                  placeholder={role === 'teacher' ? "Select student from roster dropdown above" : "Student name"}
                   className="w-full px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm md:text-base outline-none focus:border-[var(--accent)]"
                 />
               </div>
@@ -424,7 +514,9 @@ export default function Evaluate() {
                   <label className="block text-xs font-bold uppercase tracking-wider text-[var(--text-soft)] mb-2">Roll / Registration Number</label>
                   <input
                     value={rollNumber}
+                    readOnly={role === 'teacher' && !!selectedStudentId}
                     onChange={(e) => setRollNumber(e.target.value)}
+                    placeholder={role === 'teacher' ? "Auto-populated from roster" : "e.g. ROLL-101"}
                     className="w-full px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm md:text-base outline-none focus:border-[var(--accent)]"
                   />
                 </div>
@@ -487,8 +579,8 @@ export default function Evaluate() {
               />
               <RowItem
                 title="Student Context"
-                subtitle={`${studentName} (${rollNumber}) · ${subject} · ${(level || 'school').toUpperCase()}`}
-                right={<Badge tone="success">Confirmed</Badge>}
+                subtitle={`${studentName || 'Not specified'} (${rollNumber || 'N/A'}) · ${subject || 'Not specified'} · ${(level || 'school').toUpperCase()}${selectedStudentId ? ` · ID: ${selectedStudentId}` : ''}`}
+                right={<Badge tone={selectedStudentId || role === 'student' ? "success" : "warning"}>{selectedStudentId ? "Roster Verified" : role === 'student' ? "Confirmed" : "Unlinked"}</Badge>}
               />
               {syllabusFile && (
                 <RowItem
@@ -566,24 +658,24 @@ export default function Evaluate() {
 
           {/* Grand Evaluation Header Card */}
           <Card className="border-l-4 border-l-[var(--accent)]">
-            <div className="flex items-center justify-between flex-wrap gap-5">
-              <div>
-                <div className="flex items-center gap-2.5 mb-2">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-5">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2.5 mb-2 flex-wrap">
                   <Badge tone={evalData.is_unreadable ? "warning" : "success"}>
                     {evalData.is_unreadable ? "Needs Teacher Review" : "Evaluation Complete & Persistent"}
                   </Badge>
                   {evalId && <span className="text-xs font-mono text-[var(--text-faint)]">ID: {evalId.slice(0, 12)}…</span>}
                 </div>
                 <h2 className="text-2xl md:text-3xl font-extrabold text-[var(--text)] tracking-tight">
-                  {studentName} — {subject}
+                  {studentName}{subject ? ` — ${subject}` : ''}
                 </h2>
                 <p className="text-xs md:text-sm text-[var(--text-soft)] mt-1 font-medium">
                   {assessmentTitle} · Roll: {rollNumber} ({level ? level.toUpperCase() : 'ACC'})
                 </p>
               </div>
 
-              <div className="flex flex-col items-end gap-3">
-                <div className="text-right">
+              <div className="flex flex-row sm:flex-col items-center sm:items-end gap-3 shrink-0">
+                <div className="sm:text-right">
                   {totalMarks !== null && totalMax !== null ? (
                     <>
                       <div className="text-4xl md:text-5xl font-extrabold text-[var(--accent)] tracking-tight">
@@ -598,7 +690,7 @@ export default function Evaluate() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   {role === 'teacher' && (
                     <Button
                       size="sm"
@@ -615,14 +707,22 @@ export default function Evaluate() {
               </div>
             </div>
 
-            {role === 'teacher' && plagiarismData && plagiarismData.similarity > 0 && (
+            {role === 'teacher' && plagiarismData && (
               <div className="mt-5 pt-4 border-t border-[var(--border)] flex items-center justify-between flex-wrap gap-2 text-xs md:text-sm">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert size={17} className={plagiarismData.suspected ? "text-[var(--warning)]" : "text-[var(--success)]"} />
+                  {plagiarismData.suspected ? (
+                    <ShieldAlert size={17} className="text-[var(--warning)]" />
+                  ) : (
+                    <CheckCircle2 size={17} className="text-[var(--success)]" />
+                  )}
                   <span className="font-bold text-[var(--text)]">Academic Integrity:</span>
-                  <span className="text-[var(--text-soft)]">{plagiarismData.details}</span>
+                  <span className="text-[var(--text-soft)]">
+                    {plagiarismData.details || (plagiarismData.similarity === 0 ? 'Peer similarity checked — verified independent submission.' : 'Audited against class submissions.')}
+                  </span>
                 </div>
-                <Badge tone={plagiarismData.level}>{plagiarismData.similarity}% Similarity</Badge>
+                <Badge tone={plagiarismData.similarity >= 85 ? 'error' : plagiarismData.similarity >= 70 ? 'warning' : 'success'}>
+                  {plagiarismData.similarity}% Similarity
+                </Badge>
               </div>
             )}
           </Card>
@@ -665,15 +765,16 @@ export default function Evaluate() {
             </Card>
           )}
 
-          <div className="grid lg:grid-cols-[1fr_380px] gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="lg:col-span-7 xl:col-span-8">
             <Card>
               <CardHeader title="Question-Level Breakdown" subtitle="Detailed step analysis and examiner feedback" />
-              <div className="flex flex-wrap gap-2.5 mb-6">
+              <div className="flex flex-wrap gap-2 mb-6">
                 {questionsList.map((q, i) => (
                   <button
                     key={q.question_number || i}
                     onClick={() => setActiveQ(i)}
-                    className={`w-11 h-11 rounded-xl border flex items-center justify-center text-sm font-bold transition-all cursor-pointer ${
+                    className={`min-w-[40px] h-10 px-2.5 rounded-xl border flex items-center justify-center text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                       i === activeQ
                         ? 'bg-[var(--accent)] border-[var(--accent)] text-white shadow-sm ring-2 ring-[var(--accent-soft)]'
                         : q.awarded_marks < (q.maximum_marks ?? q.max_marks ?? 0)
@@ -779,8 +880,9 @@ export default function Evaluate() {
                 <div className="text-sm text-[var(--text-soft)]">No question data available.</div>
               )}
             </Card>
+            </div>
 
-            <div className="space-y-5">
+            <div className="lg:col-span-5 xl:col-span-4 space-y-5">
               <Card>
                 <CardHeader title="Overall Academic Summary" subtitle="Performance synthesis" />
                 <div className="text-sm leading-relaxed mb-4 text-[var(--text)]">
@@ -817,7 +919,7 @@ export default function Evaluate() {
                 </div>
               </Card>
             </div>
-          </div>
+          </div>{/* end grid */}
         </div>
       )}
     </>

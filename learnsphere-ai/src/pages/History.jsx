@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Card, PageHead, SearchBox, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
@@ -10,6 +11,7 @@ import {
 
 export default function History() {
   const { role, user, activeClass } = useApp()
+  const location = useLocation()
   const [evaluations, setEvaluations] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -61,6 +63,14 @@ export default function History() {
       setDetailLoading(false)
     }
   }
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search)
+    const evalId = location.state?.selectedEvalId || searchParams.get('eval_id')
+    if (evalId) {
+      handleViewDetail(evalId)
+    }
+  }, [location.search, location.state])
 
   // Delete evaluation record
   const handleDelete = async (id, e) => {

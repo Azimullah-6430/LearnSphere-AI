@@ -337,11 +337,16 @@ export const api = {
     return request(`/api/action-center${qs ? '?' + qs : ''}`)
   },
 
-  updateActionCenterStatus: (itemId, status) =>
-    request(`/api/action-center/${itemId}`, { method: 'PUT', body: { status } }),
+  updateActionCenterStatus: (itemId, status, note = '') =>
+    request(`/api/action-center/${encodeURIComponent(itemId)}`, { method: 'PUT', body: { status, note } }),
 
-  // ── Teacher Classes (MongoDB) ──────────────────────────────────────────────
+  deleteActionCenterItem: (itemId) =>
+    request(`/api/action-center/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
 
+  // ── Teacher Classes & Roster ───────────────────────────────────────────────
+
+  getStudents: (classId) =>
+    request(`/api/students${classId ? '?class_id=' + encodeURIComponent(classId) : ''}`),
   getTeacherClasses: () => request('/api/teacher/classes'),
   createTeacherClass: (data) =>
     request('/api/teacher/classes', { method: 'POST', body: data }),
@@ -349,6 +354,17 @@ export const api = {
     request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'PUT', body: data }),
   deleteTeacherClass: (classId) =>
     request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'DELETE' }),
+  parseRosterFile: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request('/api/teacher/classes/parse-roster', { method: 'POST', body: formData })
+  },
+  parseRosterText: (rawText) =>
+    request('/api/teacher/classes/parse-roster', { method: 'POST', body: { raw_text: rawText } }),
+  updateClassRoster: (classId, students) =>
+    request(`/api/teacher/classes/${encodeURIComponent(classId)}/roster`, { method: 'POST', body: { students } }),
+  addStudentToClass: (classId, studentData) =>
+    request(`/api/teacher/classes/${encodeURIComponent(classId)}/students`, { method: 'POST', body: studentData }),
 
   // ── Learn Anywhere Activity History ───────────────────────────────────────
 
@@ -362,4 +378,39 @@ export const api = {
     request(`/api/learn-anywhere/history/${encodeURIComponent(activityId)}`, { method: 'PUT', body: payload }),
   deleteLearnAnywhereHistory: (activityId) =>
     request(`/api/learn-anywhere/history/${encodeURIComponent(activityId)}`, { method: 'DELETE' }),
+
+  // ── Plagiarism & Integrity Audit ──────────────────────────────────────────
+
+  getPlagiarismMatches: (classId) =>
+    request(`/api/plagiarism/matches${classId && classId !== 'all' ? '?class_id=' + encodeURIComponent(classId) : ''}`),
+  getPlagiarismSummary: (classId) =>
+    request(`/api/plagiarism/summary${classId && classId !== 'all' ? '?class_id=' + encodeURIComponent(classId) : ''}`),
+  reviewPlagiarismRecord: (recordId, data) =>
+    request(`/api/plagiarism/records/${encodeURIComponent(recordId)}/review`, { method: 'POST', body: data }),
+  deletePlagiarismRecord: (recordId) =>
+    request(`/api/plagiarism/records/${encodeURIComponent(recordId)}`, { method: 'DELETE' }),
+  runPlagiarismAudit: (data = {}) =>
+    request('/api/plagiarism/audit', { method: 'POST', body: data }),
+
+  // ── Academic Reports & Evaluations ──────────────────────────────────────────
+  getEvaluations: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/api/evaluations${qs ? '?' + qs : ''}`)
+  },
+  deleteEvaluation: (evalId) =>
+    request(`/api/evaluations/${encodeURIComponent(evalId)}`, { method: 'DELETE' }),
+  downloadEvaluationPdf: (evalId) => {
+    const url = `${API_BASE_URL}/api/evaluations/${encodeURIComponent(evalId)}/pdf`
+    window.open(url, '_blank')
+  },
+  getClassReport: (classId, assessmentFilter = null) => {
+    const qs = assessmentFilter ? `?assessment_filter=${encodeURIComponent(assessmentFilter)}` : ''
+    return request(`/api/reports/class/${encodeURIComponent(classId)}${qs}`)
+  },
+  downloadClassReportPdf: (classId, assessmentFilter = null) => {
+    const qs = assessmentFilter ? `?assessment_filter=${encodeURIComponent(assessmentFilter)}` : ''
+    const url = `${API_BASE_URL}/api/reports/class/${encodeURIComponent(classId)}/pdf${qs}`
+    window.open(url, '_blank')
+  },
 }
+

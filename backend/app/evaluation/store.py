@@ -7,10 +7,14 @@ misconceptions, or grading data when fields are missing.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from ..db import get_mongodb, get_sqlite_db
+from .misconceptions import derive_misconceptions_from_evaluation, sync_misconceptions_for_evaluation
+
+logger = logging.getLogger(__name__)
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -76,6 +80,235 @@ def _status_for_percentage(percentage: float) -> str:
     if percentage >= 50:
         return "warning"
     return "danger"
+
+
+def resolve_student_identity_and_class(
+    request_data: Dict[str, Any],
+    student_name: str,
+    roll_number: str
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], str, str]:
+    """
+    Resolve and verify:
+    (class_id, teacher_id, student_id, student_user_id, identity_status, identity_review_reason)
+    Guarantees:
+    - Validates teacher ownership of class_id
+    - Links to stable student identity in class roster (via student_id, roll_number, email)
+    - Never links an evaluation to a student solely because their name matches (Requirement 4)
+    - Flags ambiguous name-only matches as NEEDS_REVIEW (Requirement 8)
+    - Preserves teacher/class/student ownership
+    """
+    submitter_role = str(request_data.get("submitter_role") or request_data.get("created_by_role") or "unknown").strip().lower()
+    submitted_by = request_data.get("submitted_by") or request_data.get("created_by_user_id")
+    req_teacher_id = request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
+    req_student_id = request_data.get("student_id") or (submitted_by if submitter_role == "student" else None)
+    req_class_id = request_data.get("class_id") or request_data.get("classId")
+
+    eval_source = str(request_data.get("evaluation_source") or request_data.get("evaluationSource") or "").strip()
+    if submitter_role == "student" or eval_source == "STUDENT_SELF_EVALUATION":
+        effective_student_id = str(submitted_by or req_student_id or "")
+        return (req_class_id, None, effective_student_id, effective_student_id, "VERIFIED", "")
+
+    effective_teacher_id = str(req_teacher_id or submitted_by or "")
+    mongo_db = get_mongodb()
+
+    target_class = None
+    if req_class_id:
+        if mongo_db is not None:
+            try:
+                target_class = mongo_db["teacher_classes"].find_one({"id": str(req_class_id), "teacher_id": effective_teacher_id})
+            except Exception:
+                pass
+        if not target_class:
+            conn = get_sqlite_db()
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM teacher_classes WHERE id = ? AND teacher_id = ?", (str(req_class_id), effective_teacher_id))
+            row = cur.fetchone()
+            if row:
+                target_class = dict(row)
+                target_class["students"] = json.loads(target_class.pop("students_json", "[]") or "[]")
+            conn.close()
+
+    if target_class:
+        verified_class_id = str(target_class["id"])
+        roster_students = target_class.get("students") or []
+
+        def _resolve_user_id(m_student):
+            if not m_student:
+                return None
+            if m_student.get("student_user_id") or m_student.get("userId") or m_student.get("user_id"):
+                return str(m_student.get("student_user_id") or m_student.get("userId") or m_student.get("user_id"))
+            m_sid = str(m_student.get("id") or m_student.get("student_id") or "")
+            m_email = str(m_student.get("email") or "").strip().lower()
+            if mongo_db is not None:
+                try:
+                    cm = mongo_db["class_memberships"].find_one({"class_id": verified_class_id, "student_id": m_sid})
+                    if cm and (cm.get("student_user_id") or cm.get("userId")):
+                        return str(cm.get("student_user_id") or cm.get("userId"))
+                    if m_email:
+                        u = mongo_db["users"].find_one({"email": {"$regex": f"^{m_email}$", "$options": "i"}, "role": "student"})
+                        if u:
+                            return str(u.get("user_id") or u.get("id") or u.get("_id"))
+                except Exception:
+                    pass
+            else:
+                try:
+                    conn_m = get_sqlite_db()
+                    cur_m = conn_m.cursor()
+                    cur_m.execute("SELECT student_user_id FROM class_memberships WHERE class_id = ? AND student_id = ?", (verified_class_id, m_sid))
+                    cm_r = cur_m.fetchone()
+                    conn_m.close()
+                    if cm_r and cm_r[0]:
+                        return str(cm_r[0])
+                    if m_email:
+                        from ..db import link_student_account_by_email_sqlite
+                        linked = link_student_account_by_email_sqlite(m_email)
+                        if linked:
+                            return str(linked)
+                except Exception:
+                    pass
+            return None
+
+        # 1. Match by explicit student_id if supplied
+        if req_student_id:
+            matched = next((s for s in roster_students if str(s.get("id") or s.get("student_id") or "") == str(req_student_id)), None)
+            if matched:
+                return (
+                    verified_class_id,
+                    effective_teacher_id,
+                    str(matched.get("id") or matched.get("student_id")),
+                    _resolve_user_id(matched),
+                    "VERIFIED",
+                    ""
+                )
+
+        # 2. Match by stable roll_number within this class (ignoring N/A, None, empty)
+        clean_roll = roll_number.strip().lower()
+        if clean_roll and clean_roll not in ("n/a", "none", "unknown", ""):
+            matched = next(
+                (
+                    s
+                    for s in roster_students
+                    if (s.get("rollNumber") or s.get("rollNo") or s.get("roll_number") or "").strip().lower() == clean_roll
+                ),
+                None,
+            )
+            if matched:
+                return (
+                    verified_class_id,
+                    effective_teacher_id,
+                    str(matched.get("id") or matched.get("student_id")),
+                    _resolve_user_id(matched),
+                    "VERIFIED",
+                    ""
+                )
+
+        # 3. Match by email within this class if present
+        clean_email = str(request_data.get("email") or "").strip().lower()
+        if clean_email:
+            matched = next((s for s in roster_students if (s.get("email") or "").strip().lower() == clean_email), None)
+            if matched:
+                return (
+                    verified_class_id,
+                    effective_teacher_id,
+                    str(matched.get("id") or matched.get("student_id")),
+                    _resolve_user_id(matched),
+                    "VERIFIED",
+                    ""
+                )
+
+        # 4. Check for name match without stable identifier match
+        # Requirement 4: DO NOT associate an evaluation with a student solely because their name matches!
+        clean_name = student_name.strip().lower()
+        name_match = next((s for s in roster_students if (s.get("name") or "").strip().lower() == clean_name), None)
+        if name_match:
+            return (
+                verified_class_id,
+                effective_teacher_id,
+                None,
+                None,
+                "NEEDS_REVIEW",
+                f"Name-only match rejected: evaluation name '{student_name}' matches roster student, but roll number / ID was not verified."
+            )
+
+        # 5. No student in the class matched
+        return (
+            verified_class_id,
+            effective_teacher_id,
+            None,
+            None,
+            "UNLINKED",
+            f"Student '{student_name}' (Roll: {roll_number}) not found in class '{target_class.get('name')}' roster."
+        )
+
+    else:
+        # No class_id specified or class_id not owned by teacher
+        clean_roll = roll_number.strip().lower()
+        if clean_roll and clean_roll not in ("n/a", "none", "unknown", ""):
+            matched_member = None
+            matched_cls = None
+            teacher_classes = []
+            if mongo_db is not None:
+                try:
+                    teacher_classes = list(mongo_db["teacher_classes"].find({"teacher_id": effective_teacher_id}))
+                except Exception:
+                    pass
+            if not teacher_classes:
+                conn = get_sqlite_db()
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM teacher_classes WHERE teacher_id = ?", (effective_teacher_id,))
+                for r in cur.fetchall():
+                    cd = dict(r)
+                    cd["students"] = json.loads(cd.pop("students_json", "[]") or "[]")
+                    teacher_classes.append(cd)
+                conn.close()
+
+            for tc in teacher_classes:
+                for st in tc.get("students") or []:
+                    if (st.get("rollNo") or st.get("roll_number") or "").strip().lower() == clean_roll:
+                        if matched_member is None:
+                            matched_member = st
+                            matched_cls = tc
+                        else:
+                            matched_member = None
+                            break
+
+            if matched_member and matched_cls:
+                return (
+                    str(matched_cls["id"]),
+                    effective_teacher_id,
+                    str(matched_member.get("id") or matched_member.get("student_id")),
+                    matched_member.get("student_user_id"),
+                    "VERIFIED",
+                    ""
+                )
+
+        if req_student_id:
+            return (
+                str(req_class_id) if req_class_id else None,
+                effective_teacher_id,
+                str(req_student_id),
+                str(req_student_id),
+                "VERIFIED",
+                ""
+            )
+        if req_class_id:
+            return (
+                str(req_class_id),
+                effective_teacher_id,
+                None,
+                None,
+                "UNLINKED",
+                "Evaluation submitted without verified student identifier in class."
+            )
+
+        return (
+            None,
+            effective_teacher_id,
+            None,
+            None,
+            "UNLINKED",
+            "Evaluation submitted without verified class membership or stable student identifier."
+        )
 
 
 def store_evaluation_pipeline(
@@ -161,9 +394,42 @@ def store_evaluation_pipeline(
     if not isinstance(eval_notes, list):
         eval_notes = []
 
-    evaluations = eval_result.get("evaluations")
+    evaluations = eval_result.get("evaluations") or eval_result.get("questions")
     if not isinstance(evaluations, list):
         evaluations = []
+
+    # Requirement 4: Validate that awarded marks do not exceed the maximum marks
+    # and that the total matches the question-wise marks according to marking rules.
+    if evaluations:
+        for idx, q in enumerate(evaluations):
+            if not isinstance(q, dict):
+                continue
+            q_num = q.get("question_number") or f"#{idx + 1}"
+            q_max = _number(q.get("maximum_marks") or q.get("max_marks"), 0)
+            q_awarded = _number(q.get("awarded_marks"), 0)
+            if q_awarded < 0:
+                raise ValueError(f"Question {q_num} has invalid negative awarded marks: {q_awarded}.")
+            if q_max > 0 and q_awarded > q_max:
+                raise ValueError(f"Question {q_num} awarded marks ({q_awarded}) exceed maximum marks ({q_max}).")
+
+        # Sum of questions counted in total (excluding extra elective choice attempts)
+        counted_awarded = sum(
+            _number(q.get("awarded_marks"), 0)
+            for q in evaluations
+            if isinstance(q, dict) and not q.get("is_extra_choice") and q.get("counted_in_total", True)
+        )
+        counted_max = sum(
+            _number(q.get("maximum_marks") or q.get("max_marks"), 0)
+            for q in evaluations
+            if isinstance(q, dict) and not q.get("is_extra_choice") and q.get("counted_in_total", True)
+        )
+        if counted_max >= (total_marks - 0.5) and (counted_awarded > 0 or any(q.get("attempted") for q in evaluations if isinstance(q, dict))):
+            if abs(obtained_marks - counted_awarded) > 0.05:
+                # Synchronize obtained_marks to match the question-wise marks
+                obtained_marks = round(counted_awarded, 2)
+                eval_result["obtained_marks"] = obtained_marks
+                percentage = round((obtained_marks / total_marks) * 100, 2) if total_marks > 0 else 0
+                eval_result["percentage"] = percentage
 
     qp_path = _path(request_data.get("question_paper"))
     ans_path = _path(request_data.get("answer_script"))
@@ -253,9 +519,16 @@ def _store_mongodb(
     now = datetime.utcnow()
     submitted_by = request_data.get("submitted_by")
     submitter_role = request_data.get("submitter_role")
-    student_id = request_data.get("student_id") or (submitted_by if submitter_role == "student" else None)
-    teacher_id = request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
-    class_id = request_data.get("class_id") or request_data.get("classId")
+
+    v_class_id, v_teacher_id, v_student_id, v_student_user_id, v_identity_status, v_review_reason = (
+        resolve_student_identity_and_class(request_data, student_name, roll_number)
+    )
+    class_id = v_class_id or request_data.get("class_id") or request_data.get("classId")
+    teacher_id = v_teacher_id or request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
+    student_id = v_student_id if v_identity_status == "VERIFIED" else (None if v_identity_status == "NEEDS_REVIEW" else (v_student_id or request_data.get("student_id")))
+    student_user_id = v_student_user_id
+    identity_status = v_identity_status
+    identity_review_reason = v_review_reason
     
     evaluation_source = request_data.get("evaluation_source") or request_data.get("evaluationSource")
     if not evaluation_source:
@@ -296,10 +569,15 @@ def _store_mongodb(
         "submitter_role": submitter_role,
         "student_id": student_id,
         "studentId": student_id,
+        "student_user_id": student_user_id,
         "teacher_id": teacher_id,
         "teacherId": teacher_id,
         "student_name": student_name,
+        "student_name_snapshot": request_data.get("student_name_snapshot") or student_name,
         "roll_number": roll_number,
+        "roll_number_snapshot": request_data.get("roll_number_snapshot") or roll_number,
+        "identity_status": identity_status,
+        "identity_review_reason": identity_review_reason,
         "subject": subject,
         "assessment_title": assessment_title,
         "total_marks": total_marks,
@@ -329,6 +607,37 @@ def _store_mongodb(
 
     result = db["evaluations"].insert_one(eval_doc)
     eval_id = str(result.inserted_id)
+
+    if plagiarism_result and (plagiarism_result.get("suspected") or float(plagiarism_result.get("similarity", 0)) > 0):
+        try:
+            db["plagiarism_records"].insert_one({
+                "teacher_id": teacher_id,
+                "class_id": class_id,
+                "student_id": student_id,
+                "evaluation_id": eval_id,
+                "student_name": student_name,
+                "roll_number": roll_number,
+                "subject": subject,
+                "assessment_title": assessment_title,
+                "pair_match": str(plagiarism_result.get("matched_with") or ""),
+                "matched_student_name": str(plagiarism_result.get("matched_student_name") or plagiarism_result.get("matched_with") or ""),
+                "matched_student_id": str(plagiarism_result.get("matched_student_id") or ""),
+                "matched_roll_number": str(plagiarism_result.get("matched_roll_number") or ""),
+                "matched_evaluation_id": str(plagiarism_result.get("matched_evaluation_id") or ""),
+                "matched_passage": str(plagiarism_result.get("matched_passage") or ""),
+                "evidence": str(plagiarism_result.get("evidence") or ""),
+                "context": str(plagiarism_result.get("context") or ""),
+                "similarity": float(plagiarism_result.get("similarity", 0.0)),
+                "similarity_score": float(plagiarism_result.get("similarity", 0.0)),
+                "level": str(plagiarism_result.get("level") or "info"),
+                "suspected": bool(plagiarism_result.get("suspected", False)),
+                "status": "Pending Review",
+                "details": str(plagiarism_result.get("details") or ""),
+                "is_repeated_submission": bool(plagiarism_result.get("is_repeated_submission", False)),
+                "created_at": now,
+            })
+        except Exception as p_err:
+            logger.warning(f"[Plagiarism] Error storing plagiarism record in Mongo: {p_err}")
 
     # Action Items: Generated exclusively for genuine TEACHER_EVALUATION records
     if evaluation_source == "TEACHER_EVALUATION":
@@ -689,9 +998,16 @@ def _store_sqlite(
 
     submitted_by = request_data.get("submitted_by")
     submitter_role = request_data.get("submitter_role")
-    student_id = request_data.get("student_id") or (submitted_by if submitter_role == "student" else None)
-    teacher_id = request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
-    class_id = request_data.get("class_id") or request_data.get("classId")
+
+    v_class_id, v_teacher_id, v_student_id, v_student_user_id, v_identity_status, v_review_reason = (
+        resolve_student_identity_and_class(request_data, student_name, roll_number)
+    )
+    class_id = v_class_id or request_data.get("class_id") or request_data.get("classId")
+    teacher_id = v_teacher_id or request_data.get("teacher_id") or (submitted_by if submitter_role == "teacher" else None)
+    student_id = v_student_id if v_identity_status == "VERIFIED" else (None if v_identity_status == "NEEDS_REVIEW" else (v_student_id or request_data.get("student_id")))
+    student_user_id = v_student_user_id
+    identity_status = v_identity_status
+    identity_review_reason = v_review_reason
     
     evaluation_source = request_data.get("evaluation_source") or request_data.get("evaluationSource")
     if not evaluation_source:
@@ -701,6 +1017,9 @@ def _store_sqlite(
             evaluation_source = "TEACHER_EVALUATION"
         else:
             evaluation_source = "UNKNOWN"
+
+    created_by_user_id = request_data.get("created_by_user_id") or submitted_by
+    created_by_role = request_data.get("created_by_role") or submitter_role or "unknown"
 
     if not created_by_role or created_by_role == "unknown":
         if evaluation_source == "STUDENT_SELF_EVALUATION" or submitter_role == "student":
@@ -714,6 +1033,9 @@ def _store_sqlite(
         elif evaluation_source == "TEACHER_EVALUATION":
             created_by_user_id = teacher_id
 
+    student_name_snapshot = request_data.get("student_name_snapshot") or student_name
+    roll_number_snapshot = request_data.get("roll_number_snapshot") or roll_number
+
     try:
         cursor.execute(
             """
@@ -722,8 +1044,9 @@ def _store_sqlite(
              total_marks, obtained_marks, percentage, grade, status,
              overall_feedback, evaluation_notes_json,
              question_paper_path, answer_script_path, rubrics_path,
-             evaluation_source, created_by_user_id, created_by_role, class_id, student_id, teacher_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             evaluation_source, created_by_user_id, created_by_role, class_id, student_id, teacher_id,
+             student_name_snapshot, roll_number_snapshot, student_user_id, identity_status, identity_review_reason, questions_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 student_name,
@@ -746,9 +1069,54 @@ def _store_sqlite(
                 class_id,
                 student_id,
                 teacher_id,
+                student_name_snapshot,
+                roll_number_snapshot,
+                student_user_id,
+                identity_status,
+                identity_review_reason,
+                _safe_json(evaluations),
             ),
         )
         eval_id = str(cursor.lastrowid)
+
+        if plagiarism_result and (plagiarism_result.get("suspected") or float(plagiarism_result.get("similarity", 0)) > 0):
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO plagiarism_records
+                    (student_name, roll_number, subject, assessment_title,
+                     pair_match, context, similarity, level, suspected, details,
+                     teacher_id, class_id, student_id, evaluation_id,
+                     matched_evaluation_id, matched_student_id, matched_student_name,
+                     matched_roll_number, matched_passage, evidence, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        student_name,
+                        roll_number,
+                        subject,
+                        assessment_title,
+                        str(plagiarism_result.get("matched_with") or ""),
+                        str(plagiarism_result.get("context") or ""),
+                        float(plagiarism_result.get("similarity", 0.0)),
+                        str(plagiarism_result.get("level") or "info"),
+                        1 if plagiarism_result.get("suspected") else 0,
+                        str(plagiarism_result.get("details") or ""),
+                        teacher_id,
+                        class_id,
+                        student_id,
+                        eval_id,
+                        str(plagiarism_result.get("matched_evaluation_id") or ""),
+                        str(plagiarism_result.get("matched_student_id") or ""),
+                        str(plagiarism_result.get("matched_student_name") or plagiarism_result.get("matched_with") or ""),
+                        str(plagiarism_result.get("matched_roll_number") or ""),
+                        str(plagiarism_result.get("matched_passage") or ""),
+                        str(plagiarism_result.get("evidence") or ""),
+                        "Pending Review",
+                    )
+                )
+            except Exception as p_err:
+                logger.warning(f"[Plagiarism] Error storing plagiarism record in SQLite: {p_err}")
 
         for q in evaluations:
             if not isinstance(q, dict):

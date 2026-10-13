@@ -282,3 +282,18 @@ textarea:focus-visible,
     scroll-behavior: auto !important;
   }
 }
+
+/* Overflow guard — prevent any inner element from stretching the viewport */
+.min-w-0 { min-width: 0; }
+
+/* Responsive table containers — wrap every data table in scrollable overflow */
+.table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fluid grid gap helpers */
+.grid-responsive {
+  display: grid;
+  gap: clamp(0.75rem, 2vw, 1.5rem);
+}

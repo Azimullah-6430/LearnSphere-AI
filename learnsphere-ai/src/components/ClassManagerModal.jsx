@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext.jsx'
+import { api } from '../services/api.js'
 import { Button, Card, Badge } from './ui/Primitives.jsx'
 import { School, GraduationCap, Plus, Trash2, CheckCircle2, Layers, BookOpen, Building, Upload, Users, UserCheck, FileSpreadsheet, Award, Edit3 } from 'lucide-react'
 
@@ -146,35 +147,36 @@ export default function ClassManagerModal({ isOpen, onClose }) {
     return newStudents
   }
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     setRosterFile(file)
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const content = event.target?.result
-      if (typeof content === 'string') {
-        const parsed = parseRosterText(content)
-        if (parsed.length > 0 && currentRosterClass) {
-          uploadStudentRoster(currentRosterClass.id, parsed)
-          showToastMsg(`Extracted & stored ${parsed.length} students in exact file order!`)
-        } else {
-          showToastMsg('Could not parse student names. Please check file format.')
-        }
+    try {
+      const res = await api.parseRosterFile(file)
+      if (res && res.success && Array.isArray(res.students) && res.students.length > 0 && currentRosterClass) {
+        uploadStudentRoster(currentRosterClass.id, res.students)
+        showToastMsg(`Extracted & stored ${res.students.length} students from ${file.name}!`)
+      } else {
+        showToastMsg(res?.error || 'Could not parse student names from file.')
       }
+    } catch (err) {
+      showToastMsg('Failed to parse file: ' + err.message)
     }
-    reader.readAsText(file)
   }
 
-  const handleProcessPastedText = () => {
+  const handleProcessPastedText = async () => {
     if (!pastedText.trim() || !currentRosterClass) return
-    const parsed = parseRosterText(pastedText)
-    if (parsed.length > 0) {
-      uploadStudentRoster(currentRosterClass.id, parsed)
-      showToastMsg(`Extracted & stored ${parsed.length} students in exact order!`)
-      setPastedText('')
-    } else {
-      showToastMsg('No valid student entries found.')
+    try {
+      const res = await api.parseRosterText(pastedText)
+      if (res && res.success && Array.isArray(res.students) && res.students.length > 0) {
+        uploadStudentRoster(currentRosterClass.id, res.students)
+        showToastMsg(`Extracted & stored ${res.students.length} students in exact order!`)
+        setPastedText('')
+      } else {
+        showToastMsg(res?.error || 'No valid student entries found.')
+      }
+    } catch (err) {
+      showToastMsg('Failed to parse text: ' + err.message)
     }
   }
 
@@ -413,8 +415,8 @@ export default function ClassManagerModal({ isOpen, onClose }) {
                 <input
                   type="file"
                   id="class-manager-roster-file"
-                  aria-label="Upload student roster CSV or TXT file"
-                  accept=".csv,.txt,.tsv"
+                  aria-label="Upload student roster file"
+                  accept=".xlsx,.xls,.csv,.tsv,.txt,.docx,.pdf"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
                   className="hidden"
@@ -424,7 +426,7 @@ export default function ClassManagerModal({ isOpen, onClose }) {
                   className="px-3.5 py-2 rounded-lg bg-[var(--accent)] text-white text-[12.5px] font-bold hover:opacity-90 transition-all flex items-center gap-1.5"
                 >
                   <Upload size={15} />
-                  <span>Choose Roster File (.csv, .txt)</span>
+                  <span>Choose Roster File (Excel, CSV, Word, PDF)</span>
                 </button>
                 {rosterFile && <span className="text-[12px] font-bold text-[var(--accent)]">{rosterFile.name}</span>}
               </div>

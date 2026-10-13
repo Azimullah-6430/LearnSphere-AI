@@ -154,7 +154,7 @@ export default function AppLayout() {
         onClose={() => setMenuOpen(false)}
         onOpenSyllabusModal={() => setSyllabusModalOpen(true)}
       />
-      <div className="flex-1 min-w-0 flex flex-col md:ml-[272px] transition-all">
+      <div className="flex-1 min-w-0 flex flex-col md:ml-[260px] transition-all">
         <Topbar
           title={title}
           crumb={crumb}

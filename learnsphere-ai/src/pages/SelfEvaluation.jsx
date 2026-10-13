@@ -2,12 +2,11 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
-import { getDynamicSubjects, sanitizeSubjectName } from '../data/syllabusData.js'
 import { api } from '../services/api.js'
 import {
   UploadCloud, FileText, CheckCircle2, AlertTriangle, Loader2,
-  Award, Brain, RotateCcw, ChevronRight, BookOpen, AlertCircle,
-  Sparkles, History, Check, X, ShieldAlert, Layers
+  Award, Brain, RotateCcw, BookOpen, AlertCircle,
+  History, User
 } from 'lucide-react'
 
 const STAGES = [
@@ -20,24 +19,13 @@ const STAGES = [
 ]
 
 export default function SelfEvaluation() {
-  const { user, syllabusData, recordActivity } = useApp()
+  const { user, recordActivity } = useApp()
   const navigate = useNavigate()
   const activeProfile = user
 
-  const dynamicSubjects = getDynamicSubjects(activeProfile, syllabusData)
-  const rawSubjects = dynamicSubjects.length > 0
-    ? dynamicSubjects
-    : (activeProfile?.subjects?.length > 0
-        ? activeProfile.subjects
-        : ['Mathematics', 'Physics', 'Chemistry', 'Computer Science', 'General'])
-
-  const subjects = Array.from(
-    new Set(
-      rawSubjects
-        .map((s) => (typeof s === 'string' ? sanitizeSubjectName(s) : sanitizeSubjectName(s?.name || '')))
-        .filter(Boolean)
-    )
-  )
+  // Manual inputs for Student Name and Subject
+  const [studentName, setStudentName] = useState(user?.name || '')
+  const [subjectName, setSubjectName] = useState('')
 
   // Upload state
   const [qpRawFile, setQpRawFile] = useState(null)
@@ -46,9 +34,6 @@ export default function SelfEvaluation() {
   const [ansFileName, setAnsFileName] = useState('')
   const [rubricRawFile, setRubricRawFile] = useState(null)
   const [rubricFileName, setRubricFileName] = useState('')
-
-  const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
-  const [customSubject, setCustomSubject] = useState('')
 
   // Status & Results
   const [processing, setProcessing] = useState(false)
@@ -84,6 +69,14 @@ export default function SelfEvaluation() {
   }
 
   const handleStartSelfEval = async () => {
+    if (!studentName.trim()) {
+      setErrorMsg('Please enter your Student Name.')
+      return
+    }
+    if (!subjectName.trim()) {
+      setErrorMsg('Please enter the Subject Name.')
+      return
+    }
     if (!qpRawFile) {
       setErrorMsg('Please upload a Question Paper file first.')
       return
@@ -104,9 +97,10 @@ export default function SelfEvaluation() {
 
     try {
       const formData = new FormData()
-      const effectiveSubject = selectedSubject || customSubject || 'General'
+      const effectiveSubject = subjectName.trim()
+      const effectiveStudent = studentName.trim()
       formData.append('subject', effectiveSubject)
-      formData.append('student_name', user?.name || 'Student')
+      formData.append('student_name', effectiveStudent)
       formData.append('roll_number', user?.roll_number || user?.id || 'N/A')
       formData.append('assessment_title', `${effectiveSubject} Self Evaluation`)
       formData.append('role', 'student')
@@ -166,7 +160,7 @@ export default function SelfEvaluation() {
         subtitle="Upload your exam papers and written scripts for rubric-aligned evaluation and actionable diagnostics."
       />
 
-      <div className="max-w-[900px] space-y-6">
+      <div className="space-y-6">
         {errorMsg && (
           <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center gap-2.5">
             <AlertTriangle size={18} className="shrink-0" />
@@ -268,40 +262,46 @@ export default function SelfEvaluation() {
               </div>
             </div>
 
-            {/* Subject Confirmation */}
-            <div className="space-y-3 pt-3 border-t border-[var(--border)]">
-              <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] block">
-                Select or Confirm Subject
-              </label>
-              <div className="flex gap-2 flex-wrap items-center">
-                {subjects.map((sub) => (
-                  <button
-                    key={sub}
-                    onClick={() => { setSelectedSubject(sub); setCustomSubject(''); }}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
-                      selectedSubject === sub
-                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] shadow-xs'
-                        : 'bg-[var(--surface-alt)] border-[var(--border)] text-[var(--text-soft)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]'
-                    }`}
-                  >
-                    {sub}
-                  </button>
-                ))}
+            {/* Manual Student Details & Subject Entry */}
+            <div className="pt-3 border-t border-[var(--border)] space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5 mb-1.5">
+                    <User size={13} className="text-[var(--accent)]" /> Student Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter student name..."
+                    value={studentName}
+                    onChange={(e) => setStudentName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-[var(--border)] rounded-xl text-xs bg-[var(--surface-alt)] text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] transition-all font-medium"
+                  />
+                  <span className="text-[11px] text-[var(--text-faint)] mt-1 block">
+                    Name as written on your answer sheet
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5 mb-1.5">
+                    <BookOpen size={13} className="text-[var(--accent)]" /> Subject Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter subject name (e.g. Machine Learning, Physics)..."
+                    value={subjectName}
+                    onChange={(e) => setSubjectName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 border border-[var(--border)] rounded-xl text-xs bg-[var(--surface-alt)] text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)] transition-all font-medium"
+                  />
+                  <span className="text-[11px] text-[var(--text-faint)] mt-1 block">
+                    Course / subject title for this evaluation
+                  </span>
+                </div>
               </div>
-              {!subjects.includes(selectedSubject) && (
-                <input
-                  type="text"
-                  placeholder="Subject title extracted from paper (or type custom subject)..."
-                  value={customSubject}
-                  onChange={(e) => setCustomSubject(e.target.value)}
-                  className="w-full mt-2 px-3.5 py-2.5 border border-[var(--border)] rounded-xl text-xs bg-[var(--surface-alt)] text-[var(--text)] focus:bg-[var(--surface)] focus:outline-none focus:border-[var(--accent)]"
-                />
-              )}
             </div>
 
             <Button
               onClick={handleStartSelfEval}
-              disabled={!qpRawFile || !ansRawFile}
+              disabled={!qpRawFile || !ansRawFile || !studentName.trim() || !subjectName.trim()}
               className="w-full justify-center py-3.5 text-sm font-extrabold"
             >
               <Brain size={18} /> Launch Central AI Evaluation
@@ -334,7 +334,7 @@ export default function SelfEvaluation() {
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-[var(--border)]">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <Badge tone="accent">{evalResult.student?.subject || selectedSubject || 'Self Evaluation'}</Badge>
+                      <Badge tone="accent">{evalResult.student?.subject || subjectName || 'Self Evaluation'}</Badge>
                       {evalId && (
                         <span className="text-[11px] font-mono text-[var(--text-faint)] bg-[var(--surface)] px-2 py-0.5 rounded border border-[var(--border)]">
                           Evaluation ID: {evalId}
@@ -352,7 +352,7 @@ export default function SelfEvaluation() {
                       </h2>
                     )}
                     <p className="text-xs text-[var(--text-soft)] mt-0.5">
-                      Student: <strong>{user?.name}</strong> &bull; Status: <strong className={evalResult.evaluation_status === 'COMPLETED' ? 'text-emerald-500' : 'text-amber-500'}>{evalResult.evaluation_status || 'COMPLETED'}</strong>
+                      Student: <strong>{evalResult.student?.name || studentName || user?.name || 'Student'}</strong> &bull; Status: <strong className={evalResult.evaluation_status === 'COMPLETED' ? 'text-emerald-500' : 'text-amber-500'}>{evalResult.evaluation_status || 'COMPLETED'}</strong>
                       {evalResult.grade && evalResult.grade !== 'NEEDS_REVIEW' && ` • Grade: ${evalResult.grade}`}
                     </p>
                   </div>

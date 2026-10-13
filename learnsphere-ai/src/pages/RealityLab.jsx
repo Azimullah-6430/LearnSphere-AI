@@ -349,7 +349,7 @@ export default function RealityLab() {
         </div>
       </div>
 
-      <div className="max-w-[880px] space-y-5">
+      <div className="space-y-5">
         {/* Scenario Header with Semester & Syllabus grounding */}
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-3 flex-wrap">

@@ -469,15 +469,20 @@ export function AppProvider({ children }) {
         if (cls.id !== classId) return cls
         const updatedStudents = newStudentsList.map((st, idx) => ({
           id: st.id || `std_${Date.now()}_${idx}`,
-          rollNo: st.rollNo || `ROLL-${idx + 1}`,
-          name: st.name, order: idx + 1, marksHistory: st.marksHistory || [],
+          rollNo: st.rollNo || st.roll_number || '',
+          roll_number: st.rollNo || st.roll_number || '',
+          name: st.name,
+          email: st.email || '',
+          section: st.section || '',
+          order: idx + 1,
+          marksHistory: st.marksHistory || [],
         }))
         targetCls = { ...cls, students: updatedStudents, students_count: updatedStudents.length }
         return targetCls
       })
       if (targetCls) {
         api.updateTeacherClass(classId, { students: targetCls.students, students_count: targetCls.students_count }).catch(err => {
-          console.error('[AppContext] Failed to update roster in MongoDB:', err)
+          console.error('[AppContext] Failed to update roster in database:', err)
         })
       }
       return updated
@@ -526,6 +531,15 @@ export function AppProvider({ children }) {
       }
       return updated
     })
+  }
+
+  const addStudentToClass = (classId, newStudent) => {
+    setTeacherClasses(prev => prev.map(cls => {
+      if (cls.id !== classId) return cls
+      const existing = cls.students || []
+      const updated = [...existing, newStudent]
+      return { ...cls, students: updated, students_count: updated.length }
+    }))
   }
 
   // ── Derived values (Strictly account-scoped) ──────────────────────────────
@@ -670,6 +684,7 @@ export function AppProvider({ children }) {
     uploadStudentRoster,
     addOrUpdateStudentMarks,
     deleteStudentFromClass,
+    addStudentToClass,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

@@ -195,7 +195,7 @@ export default function Settings() {
         subtitle="Manage your institutional affiliation, academic level, and curriculum preferences."
       />
 
-      <div className="grid md:grid-cols-[1.3fr_1fr] gap-6 max-w-[1040px]">
+      <div className="grid md:grid-cols-[1.3fr_1fr] gap-6">
         {/* Left Card: Academic Profile Details */}
         <Card className="p-7">
           <div className="flex items-center justify-between mb-5 pb-3.5 border-b border-[var(--border)]">

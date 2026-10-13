@@ -19,6 +19,7 @@ Key Guarantees & Rules:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -31,8 +32,23 @@ logger = logging.getLogger(__name__)
 
 def _create_backups_mongo(db, timestamp_str: str) -> Dict[str, int]:
     """Create timestamped snapshot backup collections in MongoDB before applying mutations."""
+    # Prune old backup collections to prevent exceeding MongoDB collection quotas
+    try:
+        all_cols = db.list_collection_names()
+        for base in ["evaluations", "misconceptions", "action_items", "teacher_classes", "class_memberships"]:
+            prefix = f"{base}_backup_"
+            matched = sorted([c for c in all_cols if c.startswith(prefix)])
+            if len(matched) >= 3:
+                for old_c in matched[:-2]:
+                    try:
+                        db[old_c].drop()
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning(f"[Repair] Backup pruning notice: {e}")
+
     backup_counts = {}
-    collections_to_backup = ["evaluations", "misconceptions", "action_items"]
+    collections_to_backup = ["evaluations", "misconceptions", "action_items", "teacher_classes", "class_memberships"]
     
     for col_name in collections_to_backup:
         backup_col_name = f"{col_name}_backup_{timestamp_str}"
@@ -53,14 +69,15 @@ def _create_backups_mongo(db, timestamp_str: str) -> Dict[str, int]:
 def _create_backups_sqlite(conn, timestamp_str: str) -> Dict[str, int]:
     """Create timestamped snapshot backup tables in SQLite before applying mutations."""
     backup_counts = {}
-    tables_to_backup = ["evaluations", "misconceptions", "action_items"]
+    tables_to_backup = ["evaluations", "misconceptions", "action_items", "teacher_classes", "class_memberships"]
     cursor = conn.cursor()
+    clean_ts = timestamp_str.replace("-", "_").replace(":", "_").replace(".", "_").replace("+", "_")
     
     for table_name in tables_to_backup:
-        backup_table_name = f"{table_name}_backup_{timestamp_str}"
+        backup_table_name = f"{table_name}_backup_{clean_ts}"
         try:
-            cursor.execute(f"CREATE TABLE IF NOT EXISTS {backup_table_name} AS SELECT * FROM {table_name};")
-            cursor.execute(f"SELECT COUNT(*) FROM {backup_table_name};")
+            cursor.execute(f'CREATE TABLE IF NOT EXISTS "{backup_table_name}" AS SELECT * FROM "{table_name}";')
+            cursor.execute(f'SELECT COUNT(*) FROM "{backup_table_name}";')
             count = cursor.fetchone()[0]
             backup_counts[backup_table_name] = count
             logger.info("[Repair] SQLite backup created: '%s' with %d records.", backup_table_name, count)
@@ -246,6 +263,12 @@ def run_safe_evaluation_repair(dry_run: bool = False, backup: bool = True) -> Di
             "flagged_needs_review": 0,
             "skipped_already_valid": 0,
         },
+        "identities": {
+            "memberships_synced": 0,
+            "verified": 0,
+            "flagged_needs_review": 0,
+            "unlinked": 0,
+        },
     }
 
     mongo_db = get_mongodb()
@@ -256,7 +279,8 @@ def run_safe_evaluation_repair(dry_run: bool = False, backup: bool = True) -> Di
 
     logger.info(
         "[Repair Summary] DB: %s | Evals: [T: %d, S: %d, Review: %d, Skipped: %d] | "
-        "Misconceptions: [T: %d, S: %d, Review: %d] | ActionItems: [T: %d, Review: %d]",
+        "Misconceptions: [T: %d, S: %d, Review: %d] | ActionItems: [T: %d, Review: %d] | "
+        "Identities: [Memberships: %d, Verified: %d, Review: %d, Unlinked: %d]",
         results["database_type"],
         results["evaluations"]["classified_teacher"],
         results["evaluations"]["classified_student"],
@@ -267,7 +291,12 @@ def run_safe_evaluation_repair(dry_run: bool = False, backup: bool = True) -> Di
         results["misconceptions"]["flagged_needs_review"],
         results["action_items"]["classified_teacher"],
         results["action_items"]["flagged_needs_review"],
+        results["identities"]["memberships_synced"],
+        results["identities"]["verified"],
+        results["identities"]["flagged_needs_review"],
+        results["identities"]["unlinked"],
     )
+    results["success"] = True
     return results
 
 
@@ -405,6 +434,145 @@ def _repair_mongodb(db, ts_str: str, results: Dict[str, Any], dry_run: bool, bac
                         }}
                     )
 
+    # 4. Class Memberships sync from teacher_classes
+    classes = list(db["teacher_classes"].find({}))
+    memberships_synced = 0
+    class_roster_map = {}
+
+    for cls in classes:
+        c_id = str(cls.get("id") or "")
+        t_id = str(cls.get("teacher_id") or "")
+        students = cls.get("students") or []
+        updated_students = []
+        class_roster_map[c_id] = students
+
+        for idx, st in enumerate(students):
+            s_name = str(st.get("name") or "").strip()
+            if not s_name:
+                continue
+            s_id = str(st.get("id") or st.get("student_id") or f"std_{c_id}_{idx}").strip()
+            s_roll = str(st.get("rollNumber") or st.get("rollNo") or st.get("roll_number") or "").strip()
+            s_email = str(st.get("email") or "").strip().lower()
+            s_sec = str(st.get("section") or cls.get("section") or "").strip()
+
+            # Reliable account linking check (Requirement 5)
+            linked_user_id = st.get("student_user_id") or st.get("userId")
+            if not linked_user_id and s_email:
+                user_doc = db["users"].find_one({"email": s_email, "role": "student"})
+                if user_doc:
+                    linked_user_id = str(user_doc.get("user_id") or user_doc.get("id") or user_doc.get("_id"))
+
+            st["student_user_id"] = linked_user_id
+            st["linked_account"] = bool(linked_user_id)
+            st["id"] = s_id
+            st["student_id"] = s_id
+            updated_students.append(st)
+
+            if not dry_run and c_id and t_id:
+                mem_id = f"mem_{c_id}_{s_id}"
+                db["class_memberships"].update_one(
+                    {"class_id": c_id, "student_id": s_id},
+                    {"$set": {
+                        "id": mem_id,
+                        "class_id": c_id,
+                        "teacher_id": t_id,
+                        "student_id": s_id,
+                        "student_user_id": linked_user_id,
+                        "student_name": s_name,
+                        "roll_number": s_roll,
+                        "email": s_email,
+                        "section": s_sec,
+                        "status": "Active",
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }, "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
+                    upsert=True
+                )
+                memberships_synced += 1
+
+        if not dry_run and c_id and updated_students != students:
+            db["teacher_classes"].update_one(
+                {"id": c_id},
+                {"$set": {"students": updated_students, "students_count": len(updated_students)}}
+            )
+
+    results["identities"]["memberships_synced"] = memberships_synced
+
+    # 5. Evaluations Identity & Snapshot Audit
+    eval_verified = 0
+    eval_needs_review = 0
+    eval_unlinked = 0
+
+    for doc in evals:
+        doc_id = doc.get("_id")
+        current_identity_status = doc.get("identity_status")
+        student_name = str(doc.get("student_name") or "").strip()
+        roll_number = str(doc.get("roll_number") or "").strip()
+        eval_source = doc.get("evaluation_source") or "UNKNOWN"
+        classified_info = eval_source_map.get(str(doc_id))
+        if classified_info and classified_info[0]:
+            eval_source = classified_info[0]
+
+        name_snapshot = doc.get("student_name_snapshot") or student_name
+        roll_snapshot = doc.get("roll_number_snapshot") or roll_number
+
+        doc_class_id = str(doc.get("class_id") or "").strip()
+        doc_student_id = doc.get("student_id")
+        resolved_sid = doc_student_id
+        resolved_status = current_identity_status or ("VERIFIED" if resolved_sid else "NEEDS_REVIEW")
+        resolved_reason = doc.get("identity_review_reason") or ""
+        resolved_user_id = doc.get("student_user_id")
+
+        if not resolved_sid:
+            if eval_source == "STUDENT_SELF_EVALUATION":
+                resolved_sid = doc.get("created_by_user_id") or doc.get("submitted_by")
+                resolved_status = "VERIFIED"
+            else: # TEACHER_EVALUATION or legacy unclassified
+                if doc_class_id and doc_class_id in class_roster_map:
+                    roster = class_roster_map[doc_class_id]
+                    clean_roll = roll_number.lower()
+                    matched_member = None
+                    if clean_roll and clean_roll not in ("n/a", "none", "unknown", ""):
+                        matched_member = next((m for m in roster if (m.get("rollNumber") or m.get("rollNo") or m.get("roll_number") or "").strip().lower() == clean_roll), None)
+                    if matched_member:
+                        resolved_sid = matched_member["id"]
+                        resolved_user_id = matched_member.get("student_user_id")
+                        resolved_status = "VERIFIED"
+                    else:
+                        name_match = next((m for m in roster if (m.get("name") or "").strip().lower() == student_name.lower()), None)
+                        if name_match:
+                            resolved_status = "NEEDS_REVIEW"
+                            resolved_reason = f"Ambiguous historical evaluation: name '{student_name}' matches roster but roll number did not match."
+                        else:
+                            resolved_status = "UNLINKED"
+                            resolved_reason = "Student not found in class roster."
+                else:
+                    resolved_status = "UNLINKED"
+                    resolved_reason = "Historical teacher evaluation without class reference."
+
+        if resolved_status == "VERIFIED":
+            eval_verified += 1
+        elif resolved_status == "NEEDS_REVIEW":
+            eval_needs_review += 1
+        else:
+            eval_unlinked += 1
+
+        if not dry_run and doc_id:
+            db["evaluations"].update_one(
+                {"_id": doc_id},
+                {"$set": {
+                    "student_name_snapshot": name_snapshot,
+                    "roll_number_snapshot": roll_snapshot,
+                    "student_id": resolved_sid,
+                    "student_user_id": resolved_user_id,
+                    "identity_status": resolved_status,
+                    "identity_review_reason": resolved_reason,
+                }}
+            )
+
+    results["identities"]["verified"] = eval_verified
+    results["identities"]["flagged_needs_review"] = eval_needs_review
+    results["identities"]["unlinked"] = eval_unlinked
+
 
 def _repair_sqlite(ts_str: str, results: Dict[str, Any], dry_run: bool, backup: bool) -> None:
     """Repair procedures for SQLite."""
@@ -529,6 +697,132 @@ def _repair_sqlite(ts_str: str, results: Dict[str, Any], dry_run: bool, backup: 
                         (a_id,)
                     )
 
+    # 4. Class Memberships sync from teacher_classes
+    cursor.execute("SELECT * FROM teacher_classes;")
+    classes = [dict(row) for row in cursor.fetchall()]
+    memberships_synced = 0
+    class_roster_map = {}
+
+    for cls in classes:
+        c_id = str(cls.get("id") or "")
+        t_id = str(cls.get("teacher_id") or "")
+        students = json.loads(cls.get("students_json") or "[]")
+        updated_students = []
+        class_roster_map[c_id] = students
+
+        for idx, st in enumerate(students):
+            s_name = str(st.get("name") or "").strip()
+            if not s_name:
+                continue
+            s_id = str(st.get("id") or st.get("student_id") or f"std_{c_id}_{idx}").strip()
+            s_roll = str(st.get("rollNumber") or st.get("rollNo") or st.get("roll_number") or "").strip()
+            s_email = str(st.get("email") or "").strip().lower()
+            s_sec = str(st.get("section") or cls.get("section") or "").strip()
+
+            linked_user_id = st.get("student_user_id") or st.get("userId")
+            if not linked_user_id and s_email:
+                cursor.execute("SELECT id, user_id FROM users WHERE LOWER(email) = ? AND role = 'student'", (s_email,))
+                u_row = cursor.fetchone()
+                if u_row:
+                    linked_user_id = str(u_row["user_id"] or u_row["id"])
+
+            st["student_user_id"] = linked_user_id
+            st["linked_account"] = bool(linked_user_id)
+            st["id"] = s_id
+            st["student_id"] = s_id
+            updated_students.append(st)
+
+            if not dry_run and c_id and t_id:
+                mem_id = f"mem_{c_id}_{s_id}"
+                cursor.execute("""
+                    INSERT OR REPLACE INTO class_memberships
+                    (id, class_id, teacher_id, student_id, student_user_id, student_name, roll_number, email, section, status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', CURRENT_TIMESTAMP)
+                """, (mem_id, c_id, t_id, s_id, linked_user_id, s_name, s_roll, s_email, s_sec))
+                memberships_synced += 1
+
+        if not dry_run and c_id and updated_students != students:
+            cursor.execute("""
+                UPDATE teacher_classes
+                SET students_json = ?, students_count = ?
+                WHERE id = ?
+            """, (json.dumps(updated_students), len(updated_students), c_id))
+
+    results["identities"]["memberships_synced"] = memberships_synced
+
+    # 5. Evaluations Identity & Snapshot Audit
+    eval_verified = 0
+    eval_needs_review = 0
+    eval_unlinked = 0
+
+    for row in eval_rows:
+        eval_id = row["id"]
+        current_identity_status = row.get("identity_status")
+        student_name = str(row.get("student_name") or "").strip()
+        roll_number = str(row.get("roll_number") or "").strip()
+        c_id = str(row.get("class_id") or "").strip()
+        s_id = row.get("student_id")
+        eval_source = row.get("evaluation_source") or "UNKNOWN"
+        classified_info = eval_source_map.get(str(eval_id))
+        if classified_info and classified_info[0]:
+            eval_source = classified_info[0]
+
+        name_snapshot = row.get("student_name_snapshot") or student_name
+        roll_snapshot = row.get("roll_number_snapshot") or roll_number
+
+        resolved_status = current_identity_status or ("VERIFIED" if s_id else "NEEDS_REVIEW")
+        resolved_reason = row.get("identity_review_reason") or ""
+        resolved_sid = s_id
+        resolved_user_id = row.get("student_user_id")
+
+        if not resolved_sid:
+            if eval_source == "STUDENT_SELF_EVALUATION":
+                resolved_sid = row.get("created_by_user_id") or row.get("submitted_by")
+                resolved_status = "VERIFIED"
+            else: # TEACHER_EVALUATION or legacy unclassified
+                if c_id and c_id in class_roster_map:
+                    roster = class_roster_map[c_id]
+                    clean_roll = roll_number.lower()
+                    matched_member = None
+                    if clean_roll and clean_roll not in ("n/a", "none", "unknown", ""):
+                        matched_member = next((m for m in roster if (m.get("rollNumber") or m.get("rollNo") or m.get("roll_number") or "").strip().lower() == clean_roll), None)
+                    if matched_member:
+                        resolved_sid = matched_member["id"]
+                        resolved_user_id = matched_member.get("student_user_id")
+                        resolved_status = "VERIFIED"
+                    else:
+                        name_match = next((m for m in roster if (m.get("name") or "").strip().lower() == student_name.lower()), None)
+                        if name_match:
+                            resolved_status = "NEEDS_REVIEW"
+                            resolved_reason = f"Ambiguous historical evaluation: name '{student_name}' matches roster but roll number did not match."
+                        else:
+                            resolved_status = "UNLINKED"
+                            resolved_reason = "Student not found in class roster."
+                else:
+                    resolved_status = "UNLINKED"
+                    resolved_reason = "Historical teacher evaluation without class reference."
+
+        if resolved_status == "VERIFIED":
+            eval_verified += 1
+        elif resolved_status == "NEEDS_REVIEW":
+            eval_needs_review += 1
+        else:
+            eval_unlinked += 1
+
+        if not dry_run:
+            cursor.execute("""
+                UPDATE evaluations
+                SET student_name_snapshot = ?, roll_number_snapshot = ?,
+                    student_id = COALESCE(?, student_id), student_user_id = ?,
+                    identity_status = ?, identity_review_reason = ?
+                WHERE id = ?
+            """, (name_snapshot, roll_snapshot, resolved_sid, resolved_user_id, resolved_status, resolved_reason, eval_id))
+
+    results["identities"]["verified"] = eval_verified
+    results["identities"]["flagged_needs_review"] = eval_needs_review
+    results["identities"]["unlinked"] = eval_unlinked
+
     if not dry_run:
         conn.commit()
     conn.close()
+

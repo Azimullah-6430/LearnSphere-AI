@@ -4,6 +4,9 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      screens: {
+        xs: '480px',
+      },
       fontFamily: {
         sans: ['Manrope', 'system-ui', 'sans-serif'],
         serif: ['"Source Serif 4"', 'Georgia', 'serif'],

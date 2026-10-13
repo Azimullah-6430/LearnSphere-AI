@@ -44,8 +44,12 @@ class DynamicTeachingPlanner:
         "economics-analytical",
         "historical-source",
         "geographical-spatial",
+        "social-civics",
         "language-grammar",
         "literary-thematic",
+        "science-physics",
+        "chemistry",
+        "biology",
         "practical",
         "procedural",
         "creative",
@@ -55,87 +59,199 @@ class DynamicTeachingPlanner:
 
     # Pedagogical strategy matrix for SCHOOL vs COLLEGE modes per topic nature
     TEACHING_METHODS = {
-        "programming-oriented": {
+        "science-physics": {
             "SCHOOL": {
-                "method": "Age-Appropriate Logic, Pseudocode & Step-by-Step Execution Trace",
-                "explanation_focus": "Teach the actual curriculum topic using age-appropriate logic, algorithms, flowcharts, pseudocode, or simple code when appropriate. Clearly explain inputs, processing steps, outputs, and expected results. Define technical terms ('variable', 'loop', 'condition', 'input', 'output') before using them extensively.",
-                "practice_focus": "Tracing inputs, processing steps, and expected outputs step-by-step using paper trace tables or simple pseudocode, demonstrating one guided example first.",
-                "demonstration_type": "worked_example_and_derivation",
-                "honest_limitation": "Physical lab experiments do not apply to software algorithms. This topic uses simple visual flowcharts, step-by-step logic traces, and paper-based debugging.",
-                "learning_depth": "Introductory control flow logic, pseudocode walkthroughs, input/output tracing, and basic syntax fundamentals.",
+                "method": "Simple Safe Experiment or Observation & Clear Scientific Explanation",
+                "explanation_focus": "Simple experiments or observations using safe, locally available materials. Include materials, a few steps, expected observations, and a clear scientific explanation. Never invent an experiment that cannot work. Define basic physical terms simply.",
+                "practice_focus": "Carrying out a safe observation or hands-on setup with everyday items, logging expected observations, and explaining the physical phenomenon.",
+                "demonstration_type": "safe_demonstration",
+                "honest_limitation": "Dangerous equipment, open flames, and 220V electricity are strictly forbidden. Only safe, locally available everyday items are used.",
+                "learning_depth": "Foundational physical principles, observable cause-and-effect, and safe physical investigations.",
                 "checks": [
-                    "What are the input values provided to this algorithm?",
-                    "What processing step updates the variable inside the loop?",
-                    "What is the final expected output printed at the end?"
+                    "What materials did you use to observe this physical principle?",
+                    "What expected observation did you record?",
+                    "Why does this happen scientifically in your own words?"
                 ]
             },
             "COLLEGE": {
-                "method": "Topic-Appropriate Language Implementation, Execution, Debugging & Complexity Analysis",
-                "explanation_focus": "Explain prerequisites, technical concepts, implementation, execution, expected output, debugging, testing, and performance considerations (Big-O). Use the language and tools appropriate to the topic and curriculum (e.g., C/C++ for systems/pointers/OS, Python/Java for Data Structures/OOP, SQL for Databases, HTML/JS for Web) rather than defaulting to one single language.",
-                "practice_focus": "Providing a clear objective, required tools/setup, small readable code snippet, step-by-step logic breakdown, run instructions, expected output, testing tasks, and debugging guidance. Never force coding onto pure theory/proofs.",
-                "demonstration_type": "code_and_logic_simulation",
-                "honest_limitation": "Physical lab experiments are not applicable to software algorithms. This topic is taught using algorithmic flowcharts, runnable code snippets, execution trace tables, and formal debugging tasks.",
+                "method": "Physical Principle Derivation, Empirical Setup & Error Analysis",
+                "explanation_focus": "Syllabus-aligned physical laws, vector/tensor notation, governing equations, boundary conditions, and error analysis. Simple experiments or observations using safe locally available materials with clear scientific explanations.",
+                "practice_focus": "Deriving governing physical equations, calculating experimental parameters, and completing empirical observations or thought experiments.",
+                "demonstration_type": "safe_demonstration",
+                "honest_limitation": "Hazardous high-voltage or heavy equipment is prohibited. Safe macroscopic physical setups, calculations, and analytical derivations are used.",
+                "learning_depth": "Rigorous physical equations, empirical setup design, error bounds, and theoretical foundations.",
+                "checks": [
+                    "State the governing equation or law for this physical phenomenon.",
+                    "What variables directly control the observed outcome?",
+                    "What real-world conditions create discrepancies between ideal theory and observed data?"
+                ]
+            }
+        },
+        "chemistry": {
+            "SCHOOL": {
+                "method": "Safe Household Chemistry Demonstration or Simulation",
+                "explanation_focus": "Safe household demonstrations only when scientifically valid (e.g. natural indicators, vinegar-baking soda neutralization). Never suggest mixing unknown chemicals, dangerous substances, or unsupervised hazardous procedures. If a suitable experiment is not safe or practical, provide an observation or simulation task.",
+                "practice_focus": "Carrying out a 100% safe household demonstration with kitchen materials (turmeric, lemon, water) or an observational simulation task.",
+                "demonstration_type": "safe_demonstration",
+                "honest_limitation": "Never mix unknown chemicals, hazardous acids/bases, or toxic substances. Unsafe or impractical topics use molecular models or observation tasks.",
+                "learning_depth": "Basic chemical changes, natural indicators, solutions, and safe household observations.",
+                "checks": [
+                    "What safe household materials were used in this demonstration?",
+                    "What observable change (color, effervescence, temperature) occurred?",
+                    "Why must we never mix unknown or unsupervised chemicals?"
+                ]
+            },
+            "COLLEGE": {
+                "method": "Chemical Reaction Mechanism, Equilibrium Analysis & Safe Simulation",
+                "explanation_focus": "Reaction mechanisms, stoichiometry, chemical equilibrium, thermodynamics, and molecular interactions. Safe household demonstrations only when scientifically valid. Never suggest mixing unknown chemicals, dangerous substances, or unsupervised hazardous procedures. If a suitable experiment is not safe or practical, provide an observation or simulation task.",
+                "practice_focus": "Mapping reaction mechanisms, balancing stoichiometric equations, calculating equilibrium constants, or running a safe molecular simulation task.",
+                "demonstration_type": "simulation_task",
+                "honest_limitation": "Hazardous laboratory reagents, toxic chemicals, and concentrated acids cannot be used at home. Safe natural analogs or molecular simulation tasks are used.",
+                "learning_depth": "Reaction kinetics, thermodynamic spontaneity, molecular orbital interactions, and equilibrium calculations.",
+                "checks": [
+                    "Describe the reaction mechanism or equilibrium shift.",
+                    "What thermodynamic or kinetic factors govern this reaction rate?",
+                    "Why does this reaction reach equilibrium rather than proceeding to total completion?"
+                ]
+            }
+        },
+        "biology": {
+            "SCHOOL": {
+                "method": "Respectful Natural Living System Observation",
+                "explanation_focus": "Observe plants, seeds, leaves, soil, or other suitable natural materials where relevant. Include respectful handling of living things and no unnecessary harm. Explain life processes simply.",
+                "practice_focus": "Observing living plants, leaves, seeds, or soil outdoors without causing harm, recording visible structures and changes.",
+                "demonstration_type": "outdoor_observation",
+                "honest_limitation": "No harm to living creatures or plants. Observation is conducted respectfully using natural surroundings.",
+                "learning_depth": "Basic plant anatomy, seed germination, soil life, and respectful natural observation.",
+                "checks": [
+                    "What plant, leaf, seed, or soil feature did you examine?",
+                    "How did you observe this living thing respectfully without harming it?",
+                    "What role does this structure play in keeping the organism alive?"
+                ]
+            },
+            "COLLEGE": {
+                "method": "Cellular Physiology, Ecological Interactions & Non-Invasive Botanical Study",
+                "explanation_focus": "Cellular respiration, physiological transport mechanisms, ecological niche dynamics, and botanical taxonomy. Observe plants, seeds, leaves, soil, or natural materials where relevant. Include respectful handling of living things and no unnecessary harm.",
+                "practice_focus": "Non-invasive observation of botanical specimens, analyzing water potential / gas exchange dynamics, or modeling physiological feedback loops.",
+                "demonstration_type": "outdoor_observation",
+                "honest_limitation": "Invasive animal testing or hazardous pathogen handling is prohibited. Non-invasive botanical and ecological observation is used.",
+                "learning_depth": "Plant physiology, transpiration pull, stomatal regulation, soil microbiology, and ecological adaptations.",
+                "checks": [
+                    "What physiological transport mechanism governs this biological observation?",
+                    "How do environmental parameters (light, humidity, soil pH) modulate this life process?",
+                    "Explain the molecular or cellular feedback loop maintaining homeostasis."
+                ]
+            }
+        },
+        "social-civics": {
+            "SCHOOL": {
+                "method": "Local Civic Observation & Community Example Exploration",
+                "explanation_focus": "Local observation, map-reading, timeline creation, community surveys with permission, comparing historical evidence, and explaining local civic or geographical examples.",
+                "practice_focus": "Exploring how local village or town councils, water systems, public schools, or libraries operate, or conducting a mini survey with permission.",
+                "demonstration_type": "community_civic_observation",
+                "honest_limitation": "Physical laboratory experiments do not apply to social science. This topic uses local civic observations, community interviews with permission, and institutional analysis.",
+                "learning_depth": "Basic civic duties, public utilities, community decision-making, and local governance.",
+                "checks": [
+                    "What local institution or civic service did you observe?",
+                    "Why do community rules and citizen cooperation matter for this service?",
+                    "How does this local example connect to our syllabus topic?"
+                ]
+            },
+            "COLLEGE": {
+                "method": "Comparative Governance, Institutional Field Analysis & Policy Case Study",
+                "explanation_focus": "Constitutional structures, administrative law, public policy analysis, democratic institutions, comparing historical evidence, and explaining local civic or geographical examples.",
+                "practice_focus": "Auditing local civic services, analyzing public policy implementation, or evaluating governance structures through case studies.",
+                "demonstration_type": "community_civic_observation",
+                "honest_limitation": "Physical laboratory experiments do not apply to political science and civics. Field observations, institutional analyses, and policy case studies are used.",
+                "learning_depth": "Constitutional law, democratic institutions, public policy analysis, and civic engagement.",
+                "checks": [
+                    "What constitutional or administrative provision governs this civic institution?",
+                    "Analyze the policy outcomes and stakeholder trade-offs in this case study.",
+                    "How does local community feedback influence institutional accountability?"
+                ]
+            }
+        },
+        "programming-oriented": {
+            "SCHOOL": {
+                "method": "Small Concept Walkthrough, Runnable Example & Short Coding Task",
+                "explanation_focus": "Teach a small concept, show a correct runnable example, explain the code, give expected output, and provide a short coding task. Adapt complexity to school level and the actual syllabus. Explain inputs, processing, and outputs clearly.",
+                "practice_focus": "Reading the runnable code example, understanding what each line does, checking the expected output, and completing a short coding task.",
+                "demonstration_type": "coding_task",
+                "honest_limitation": "Physical science experiments do not apply to software and IT. This topic uses a small concept, runnable code snippet, logic explanation, expected output, and a short coding task.",
+                "learning_depth": "Introductory control flow logic, pseudocode walkthroughs, input/output tracing, and basic syntax fundamentals.",
+                "checks": [
+                    "What is the purpose of the runnable code example?",
+                    "Explain the core code statement in simple words.",
+                    "What is the expected output when the code runs?"
+                ]
+            },
+            "COLLEGE": {
+                "method": "Syllabus-Aligned Technical Concept, Runnable Implementation, Execution Trace & Debugging Task",
+                "explanation_focus": "Teach a small concept, show a correct runnable example, explain the code, give expected output, and provide a short coding task. Adapt complexity to college level and actual syllabus. Include prerequisites, runtime complexity (Big-O), memory layout, and debugging guidance.",
+                "practice_focus": "Compiling/running the code example, verifying the expected stdout output, completing the coding task for an edge case, and diagnosing common debugging pitfalls.",
+                "demonstration_type": "coding_task",
+                "honest_limitation": "Physical lab experiments are not applicable to software and IT. This topic uses runnable code implementations, execution traces, Big-O analysis, and debugging tasks.",
                 "learning_depth": "Advanced technical concepts, topic-appropriate language implementation, Big-O complexity, edge-case testing, and production debugging.",
                 "checks": [
-                    "What is the exact time and space complexity (Big-O) of this algorithm?",
-                    "How does the code handle boundary/edge cases (e.g., empty arrays, null pointers, or integer overflow)?",
-                    "What execution command and tools are required to compile, run, and test this implementation?"
+                    "What is the Big-O time and space complexity of the code implementation?",
+                    "What exact output is produced by the runnable snippet?",
+                    "How does the short coding task handle edge cases (e.g. empty inputs or boundary values)?"
                 ]
             }
         },
         "numerical": {
             "SCHOOL": {
-                "method": "Visual Reasoning, Step-by-Step Calculation & Topic-Relevant Situations",
-                "explanation_focus": "Explain mathematical operations using clear, simple language, visual reasoning, and step-by-step calculations. Use familiar real-world situations (shopping, time, distance, measurement, farming, or everyday quantities) ONLY when directly relevant to the selected topic. Define formulas and symbols before applying them.",
-                "practice_focus": "Solving a step-by-step worked numerical calculation together first, demonstrating the method clearly before asking the student to complete a similar practice problem.",
-                "demonstration_type": "worked_example_and_derivation",
-                "honest_limitation": "Physical science lab experiments do not apply to mathematical calculations. This topic uses visual geometric reasoning and step-by-step worked calculations.",
+                "method": "Real-World Measurements, Shopping Calculations & Gradual Worked Problems",
+                "explanation_focus": "Real-world measurements, shopping calculations, geometry, budgeting, patterns, data collection, and worked problems. Gradually increase difficulty from easy to medium to hard. Begin with clear visual reasoning before introducing abstract formulas.",
+                "practice_focus": "Solving worked problems graduated from easy to medium to hard (Level 1: Easy shopping/measurement, Level 2: Medium geometry/budgeting, Level 3: Hard multi-step problem).",
+                "demonstration_type": "worked_problem_set",
+                "honest_limitation": "Physical science experiments do not apply to mathematics. This topic uses real-world measurements, shopping calculations, geometry, budgeting, patterns, and worked problems.",
                 "learning_depth": "Fundamental arithmetic/algebraic steps, visual reasoning, unit conversions, and topic-relevant problem solving.",
                 "checks": [
-                    "What operation do we perform first in this step-by-step calculation?",
-                    "What units should we write next to our final numerical answer?",
-                    "Why do we check our calculation by plugging the answer back in?"
+                    "Solve Level 1 (Easy): State the basic calculation or formula used.",
+                    "Solve Level 2 (Medium): How do you apply this to the shopping/measurement/budgeting scenario?",
+                    "Solve Level 3 (Hard): How do you verify your multi-step calculation?"
                 ]
             },
             "COLLEGE": {
-                "method": "First-Principles Formal Derivation, Mathematical Reasoning & Domain-Specific Applications",
-                "explanation_focus": "Include prerequisites, appropriate mathematical notation, step-by-step worked examples, mathematical reasoning/proofs, and domain applications in engineering, physics, finance, or computer science.",
-                "practice_focus": "Deriving mathematical theorems from axioms, solving domain-specific quantitative problems, and completing progressively challenging practice exercises.",
-                "demonstration_type": "worked_example_and_derivation",
-                "honest_limitation": "Physical lab experiments are not applicable to pure mathematical derivations. This topic uses formal proofs, vector/calculus notation, and mathematical domain modeling.",
+                "method": "Graduated Analytical Problem Set, Mathematical Derivations & Quantitative Modeling",
+                "explanation_focus": "Real-world measurements, geometry, budgeting, patterns, data collection, and worked problems. Gradually increase difficulty from easy to medium to hard. Prerequisites, formal notation, and domain applications in engineering, physics, finance, or computer science.",
+                "practice_focus": "Solving progressively challenging analytical problems: Tier 1 (Easy baseline calculation), Tier 2 (Medium multi-variable/geometry application), Tier 3 (Hard rigorous derivation or optimization problem).",
+                "demonstration_type": "worked_problem_set",
+                "honest_limitation": "Physical lab experiments are not applicable to pure mathematical derivations. This topic uses formal proofs, graduated worked problems, and quantitative modeling.",
                 "learning_depth": "Rigorous first-principles derivations, formal mathematical notation, multivariable analysis, domain applications, and boundary limits.",
                 "checks": [
-                    "Derive the governing equation from first-principles mathematical axioms.",
-                    "Under what domain constraints or boundary conditions does this theorem hold?",
-                    "How does this mathematical principle apply to real-world problems in engineering, physics, finance, or CS?"
+                    "Verify Tier 1 foundational calculation step.",
+                    "Apply Tier 2 theorem to the geometric or numerical dataset.",
+                    "Derive Tier 3 boundary conditions and prove uniqueness of the solution."
                 ]
             }
         },
         "engineering-design": {
             "SCHOOL": {
-                "method": "Simple Everyday Machines & Structural Toy Analogy",
-                "explanation_focus": "Explain how levers, gears, and structures work using familiar everyday items like scissors, bicycles, or balanced seesaws. Define terms like 'force' and 'load' simply.",
-                "practice_focus": "Observing how a simple tool or machine changes force or direction, with a guided step-by-step demonstration.",
-                "demonstration_type": "system_diagram_and_simulation",
-                "honest_limitation": "Heavy industrial machinery is not accessible at home. This topic uses simple machine diagrams and safe household balances.",
+                "method": "Everyday Simple Machines, Measurements & Safe Design Tasks",
+                "explanation_focus": "Syllabus-aligned calculations, small simulations, design exercises, code, measurements, and safe practical tasks suitable for the student's level. Focus on everyday tools (levers, gears, balances).",
+                "practice_focus": "Measuring dimensions, calculating simple mechanical advantage or balance points, and sketching a safe design improvement.",
+                "demonstration_type": "engineering_design_task",
+                "honest_limitation": "Heavy industrial machinery or high voltages cannot be used at home. Safe everyday measurements and design sketches are used.",
                 "learning_depth": "Basic mechanical advantage, simple structural balance, and everyday physical forces.",
                 "checks": [
-                    "Where is the fulcrum or turning point in this simple machine?",
-                    "Does using this tool make it easier to lift the load?",
-                    "What material would make this simple structure stronger?"
+                    "What physical dimensions did you measure?",
+                    "Calculate the simple force or ratio for this everyday tool.",
+                    "How does your sketch improve the tool's design?"
                 ]
             },
             "COLLEGE": {
-                "method": "System Block Diagram, Mathematical Derivation & Design Constraint Analysis",
-                "explanation_focus": "Transfer functions, stress-strain tensor derivations, circuit transient analysis, component safety margins, efficiency trade-offs, and simulation parameters.",
-                "practice_focus": "Analyzing system block schematics, deriving governing differential equations, and solving engineering design optimization problems under physical constraints.",
-                "demonstration_type": "system_diagram_and_simulation",
-                "honest_limitation": "Heavy industrial machinery cannot be safely operated at home. This topic uses structural block diagrams, mathematical derivations, and design constraint simulations.",
+                "method": "Syllabus-Aligned Technical Calculations, Small Simulations, Design Exercises & Safe Practical Tasks",
+                "explanation_focus": "Syllabus-aligned calculations, small simulations, design exercises, code, measurements, and safe practical tasks suitable for the student's level. Governing engineering formulas, component ratings, and physical constraints.",
+                "practice_focus": "Executing quantitative engineering calculations, sketching a system schematic or state machine, evaluating physical constraints, or running a small simulation/code test.",
+                "demonstration_type": "engineering_design_task",
+                "honest_limitation": "High-voltage or hazardous heavy machinery cannot be operated at home. Syllabus-aligned numerical calculations, circuit/system simulations, and design exercises are used.",
                 "learning_depth": "Engineering system modeling, stress/transient derivations, tolerance margins, and professional design trade-offs.",
                 "checks": [
-                    "What is the primary transfer function of each component in the system block diagram?",
-                    "What engineering safety margin or tolerance limit must be maintained under peak load?",
-                    "How do you optimize system efficiency under competing structural or thermal constraints?"
+                    "Execute the governing engineering calculation for this component/system.",
+                    "What safety margins or design constraints must be satisfied?",
+                    "How does the simulation or schematic demonstrate optimal system performance?"
                 ]
             }
         },
@@ -454,12 +570,50 @@ class DynamicTeachingPlanner:
         Dynamically classifies the nature of the topic based on actual topic text, subject name, and syllabus context.
         Operates universally across any subject without hardcoded subject limits.
         """
+        sub_lower = (subject or "").lower()
+        top_lower = (topic or "").lower()
         combined = f"{subject} {topic}".lower()
         if syllabus_context:
             combined += " " + str(syllabus_context.get("description", "")).lower()
             combined += " " + str(syllabus_context.get("learning_objectives", "")).lower()
             if isinstance(syllabus_context.get("topics"), list):
                 combined += " " + " ".join([str(t) for t in syllabus_context["topics"]]).lower()
+
+        # Subject-first authoritative classification:
+        # A subject name explicitly declared in the validated curriculum anchors the core discipline.
+        if any(w in sub_lower for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab", "linear algebra"]):
+            return "numerical"
+        if any(w in sub_lower for w in ["english", "language", "grammar"]):
+            if any(w in top_lower for w in ["poem", "poetry", "novel", "drama", "prose", "theme", "character", "story", "literature"]):
+                return "literary-thematic"
+            return "language-grammar"
+        if any(w in sub_lower for w in ["literature", "poetry"]):
+            return "literary-thematic"
+        if any(w in sub_lower for w in ["computer", "data structure", "algorithm", "software", "web dev", "programming", "information tech", "coding"]):
+            return "programming-oriented"
+        if any(w in sub_lower for w in ["history", "civilization"]):
+            return "historical-source"
+        if any(w in sub_lower for w in ["civic", "political science", "public admin", "sociolog"]):
+            return "social-civics"
+        if any(w in sub_lower for w in ["geograph"]):
+            return "geographical-spatial"
+        if any(w in sub_lower for w in ["social science", "social studies"]):
+            if any(w in top_lower for w in ["history", "war", "revolt", "empire", "timeline", "ancient", "medieval", "freedom", "movement"]):
+                return "historical-source"
+            elif any(w in top_lower for w in ["map", "climate", "soil", "plateau", "river", "mountain", "spatial", "weather"]):
+                return "geographical-spatial"
+            else:
+                return "social-civics"
+        if any(w in sub_lower for w in ["biology", "botany", "zoology", "life science", "plant"]):
+            return "biology"
+        if any(w in sub_lower for w in ["chemistry", "chemical"]):
+            return "chemistry"
+        if any(w in sub_lower for w in ["physics", "physical science"]):
+            return "science-physics"
+        if any(w in sub_lower for w in ["accounting", "commerce", "finance", "bookkeeping", "auditing"]):
+            return "accounting-financial"
+        if any(w in sub_lower for w in ["economics", "microeconomics", "macroeconomics"]):
+            return "economics-analytical"
 
         # Helper for regex word-boundary or substring match
         def has_kw(kw_list: List[str]) -> bool:
@@ -472,55 +626,71 @@ class DynamicTeachingPlanner:
                         return True
             return False
 
-        # 1. Accounting & Financial Commerce
+        # 1. Computer Science & Software
+        if has_kw(["data structure", "algorithm", "programming", "code", "python", "java", "c++", "c#", "javascript", "sql", "database", "compiler", "recursion", "array pointer", "object oriented", "software", "web dev", "frontend", "backend", "api", "git", "binary tree", "graph algorithm", "sorting algorithm", "searching algorithm", "stack", "queue", "linked list", "hash table", "operating system", "linux", "kernel", "thread", "flowchart"]):
+            return "programming-oriented"
+
+        # 2. Chemistry
+        if has_kw(["chemistry", "chem", "acid", "base", "ph indicator", "protonation", "reaction rate", "chemical kinetics", "periodic table", "element", "compound", "covalent", "ionic", "molecule", "solution", "solubility", "organic chemistry", "inorganic chemistry", "neutralization"]):
+            return "chemistry"
+
+        # 3. Biology & Life Sciences
+        if has_kw(["biology", "botany", "zoology", "plant", "transpiration", "photosynthesis", "leaf", "leaves", "seed", "stomata", "cell biology", "organism", "ecology", "tissue", "anatomy", "crop", "life science", "soil biology"]):
+            return "biology"
+
+        # 4. Mathematics & Computation
+        if has_kw(["calculus", "differential", "integral", "matrix", "algebra", "trigonometry", "statistics", "probability", "equation", "formula", "geometry", "linear algebra", "discrete math", "theorem", "combinatorics", "rate of change", "mathematics", "math", "arithmetic", "mensuration", "linear equations"]):
+            return "numerical"
+
+        # 5. Physics & Physical Sciences
+        if has_kw(["physics", "physical science", "optics", "light", "reflection", "refraction", "sound", "wave", "friction", "inertia", "gravity", "pressure", "fluid mechanics", "capillarity", "surface tension", "density", "electromagnetism", "kinematics"]):
+            return "science-physics"
+
+        # 6. Accounting & Financial Commerce
         if has_kw(["accounting", "ledger", "journal", "debit", "credit", "balance sheet", "t-account", "auditing", "taxation", "costing", "financial statement", "cash flow", "bookkeeping", "depreciation", "trial balance"]):
             return "accounting-financial"
 
-        # 2. Economics
-        if has_kw(["economics", "microeconomics", "macroeconomics", "elasticity", "supply and demand", "demand curve", "market equilibrium", "inflation", "gdp", "monetary policy", "fiscal policy", "utility theory"]):
+        # 7. Economics
+        if has_kw(["economics", "microeconomics", "macroeconomics", "elasticity", "supply and demand", "demand curve", "market equilibrium", "inflation", "gdp", "monetary policy", "fiscal policy", "utility theory", "budgeting", "price comparison"]):
             return "economics-analytical"
 
-        # 3. History
+        # 8. History
         if has_kw(["history", "historical", "revolution", "world war", "civilization", "empire", "treaty", "dynasty", "colonialism", "historical source", "historiography", "archaeology", "nationalism"]):
             return "historical-source"
 
-        # 4. Geography & Earth Sciences
+        # 9. Geography & Earth Sciences
         if has_kw(["geography", "map", "contour", "topographical", "spatial", "weather", "atmosphere", "climate zone", "plate tectonics", "cartography", "gis", "landform", "geomorp"]):
             return "geographical-spatial"
 
-        # 5. Literature & Criticism
+        # 10. Social Sciences & Civics
+        if has_kw(["civics", "political science", "social science", "sociology", "society", "democracy", "government", "constitution", "citizen", "public policy", "community survey"]):
+            return "social-civics"
+
+        # 11. Literature & Criticism
         if has_kw(["literature", "poetry", "poem", "novel", "play", "drama", "prose", "shakespeare", "literary", "tragedy", "fiction", "thematic analysis", "rhetoric", "allegory"]):
             return "literary-thematic"
 
-        # 6. Languages & Linguistics
-        if has_kw(["grammar", "syntax", "vocabulary", "phonetics", "verb conjugation", "french", "spanish", "german", "english grammar", "linguistics", "parts of speech", "tense", "translation", "morphology"]):
+        # 12. Languages & Linguistics
+        if has_kw(["grammar", "syntax", "vocabulary", "phonetics", "verb conjugation", "french", "spanish", "german", "english", "linguistics", "parts of speech", "tense", "translation", "morphology", "reading comprehension", "speaking practice", "summarization"]):
             return "language-grammar"
 
         # Interpretive / Law / Philosophy / Case Studies
         if has_kw(["law", "precedent", "precedents", "statutory", "jurisdiction", "jurisprudence", "constitution", "ethics", "philosophy", "court", "ruling"]):
             return "interpretive"
 
-        # 7. Computer Science & Software
-        if has_kw(["data structure", "algorithm", "programming", "code", "python", "java", "c++", "c#", "javascript", "sql", "database", "compiler", "recursion", "array", "pointer", "function", "class", "object oriented", "software", "web dev", "frontend", "backend", "api", "git", "tree", "graph", "sorting", "searching", "stack", "queue", "linked list", "hash table", "operating system", "linux", "kernel", "thread", "loop"]):
-            return "programming-oriented"
-
-        # 8. Engineering & Physical Systems Design
-        if has_kw(["circuit", "thermodynamics", "kinematics", "mechanics", "fluid mechanics", "heat transfer", "signal processing", "control systems", "cad", "finite element", "electrical engineering", "mechanical engineering", "civil engineering", "aerodynamics"]):
+        # 13. Engineering & Physical Systems Design
+        if has_kw(["circuit", "thermodynamics", "signal processing", "control systems", "cad", "finite element", "electrical engineering", "mechanical engineering", "civil engineering", "aerodynamics"]):
             return "engineering-design"
 
-        # 9. Mathematics & Computation
-        if has_kw(["calculus", "differential", "integral", "matrix", "algebra", "trigonometry", "statistics", "probability", "equation", "formula", "geometry", "linear algebra", "discrete math", "theorem", "combinatorics", "rate of change", "mathematics", "math", "arithmetic"]):
-            return "numerical"
-
-        # 10. Practical / Experimental Science
-        if has_kw(["experiment", "lab", "titration", "dissection", "microscope", "chemical reaction", "osmosis", "botany", "zoology", "electrolysis", "circuit assembly", "field study", "soil testing", "chromatography", "spectroscopy", "bacteriology", "photosynthesis", "transpiration"]):
+        # 14. Practical / Experimental Science
+        if has_kw(["experiment", "lab", "titration", "dissection", "microscope", "chemical reaction", "osmosis", "electrolysis", "circuit assembly", "field study", "soil testing", "chromatography", "spectroscopy"]):
             return "practical"
 
-        # 11. Creative & Fine Arts
+        # 15. Creative & Fine Arts
         if has_kw(["art", "design", "creative writing", "sculpture", "animation", "graphics", "media production", "typography", "sketching", "painting"]):
             return "creative"
 
-        # 12. Procedural & Operational Workflows
+        # 16. Procedural & Operational Workflows
         if has_kw(["procedure", "protocol", "audit workflow", "nursing care", "clinical procedure", "standard operating", "quality control", "operations management", "supply chain", "sop"]):
             return "procedural"
 
@@ -534,6 +704,12 @@ class DynamicTeachingPlanner:
         top_lower = topic.lower()
 
         if student_type == "SCHOOL":
+            if topic_nature == "science-physics":
+                return ["Basic measurement (length, time)", "Everyday observations of light, motion, or water"]
+            if topic_nature == "chemistry":
+                return ["Understanding clean water & household substances", "Basic observations of color and temperature"]
+            if topic_nature == "biology":
+                return ["Parts of a green plant (root, stem, leaf)", "Respectful observation of living nature"]
             if topic_nature == "programming-oriented":
                 return ["Basic counting & numbers", "Understanding 'repeat' instructions", "Paper & pencil writing"]
             if topic_nature == "accounting-financial":
@@ -542,9 +718,22 @@ class DynamicTeachingPlanner:
                 return ["Basic arithmetic (+, -, *, /)", "Reading simple numbers & tables"]
             if topic_nature == "historical-source":
                 return ["Reading simple story timelines", "Understanding past vs present"]
+            if topic_nature == "social-civics":
+                return ["Understanding home, school, and village/town community", "Basic rules of sharing and fairness"]
+            if topic_nature == "language-grammar":
+                return ["Basic alphabet & simple words", "Sentence reading skills"]
             return [f"Basic intro to {subject}", "Reading & writing skills"]
 
         # COLLEGE
+        if topic_nature == "science-physics":
+            return ["Newton's laws of motion", "Differential calculus & vector algebra", "Fundamental SI units & dimensional analysis"]
+
+        if topic_nature == "chemistry":
+            return ["Chemical bonding fundamentals (covalent, ionic)", "Molar concentration & stoichiometry", "Acids and bases (pH scale)"]
+
+        if topic_nature == "biology":
+            return ["Cell biology & membrane permeability", "Basic biochemistry (ATP, carbohydrates)", "Microscopic or macroscopic taxonomy"]
+
         if topic_nature == "programming-oriented":
             if "tree" in top_lower or "graph" in top_lower:
                 return ["Pointers / Node references", "Recursion concepts", "Linear data structures (Arrays/Lists)"]
@@ -560,6 +749,9 @@ class DynamicTeachingPlanner:
 
         if topic_nature == "historical-source":
             return ["Chronological ordering", "Distinction between primary and secondary sources", "Historiographical frameworks"]
+
+        if topic_nature == "social-civics":
+            return ["Democratic governance frameworks", "Public policy and constitutional rights", "Social research methodologies"]
 
         if topic_nature == "literary-thematic":
             return ["Textual annotation skills", "Figurative language terms (metaphor, allegory)", "Critical thesis composition"]
@@ -697,8 +889,8 @@ class DynamicTeachingPlanner:
         understanding_checks = method_meta["checks"]
 
         # Resource Requirements & Material Query Determination
-        useful_material_types = {"physical_demonstration", "outdoor_observation", "household_demonstration"}
-        useful_natures = {"practical", "physical-chemical", "biological-agricultural"}
+        useful_material_types = {"physical_demonstration", "outdoor_observation", "household_demonstration", "safe_demonstration"}
+        useful_natures = {"practical", "science-physics", "chemistry", "biology", "physical-chemical", "biological-agricultural"}
         asks_available_materials = (demonstration_type in useful_material_types) or (topic_nature in useful_natures)
         if asks_available_materials:
             materials_query_rationale = f"This topic ({top_clean}) involves hands-on physical or biological observation. Querying available local materials helps customize the practical activity."
