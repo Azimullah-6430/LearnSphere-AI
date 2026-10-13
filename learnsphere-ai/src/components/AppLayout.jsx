@@ -80,9 +80,10 @@ export default function AppLayout() {
   const [syllabusModalOpen, setSyllabusModalOpen] = useState(false)
   const [classModalOpen, setClassModalOpen] = useState(false)
 
-  // Close mobile drawer on route change
+  // Close mobile drawer and scroll to top on route change
   useEffect(() => {
     setMenuOpen(false)
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
   }, [location.pathname])
 
   // Lock body scroll and listen for Escape key when mobile menu is open
@@ -126,16 +127,18 @@ export default function AppLayout() {
       <div className="min-h-screen flex flex-col bg-[var(--bg)]">
         <FocusHeader />
         <main className="flex-1 px-4 sm:px-6 md:px-8 py-5 sm:py-6 w-full min-w-0">
-          <ErrorBoundary>
-            <Outlet />
-          </ErrorBoundary>
+          <div className="max-w-[1440px] mx-auto w-full min-w-0">
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg)] overflow-x-hidden">
+    <div className="flex min-h-screen bg-[var(--bg)]">
       {/* Skip to Main Content Link for Keyboard and Screen Readers */}
       <a href="#main-content" className="skip-to-content">
         Skip to main content
@@ -167,9 +170,11 @@ export default function AppLayout() {
           tabIndex="-1"
           className="px-4 sm:px-6 md:px-8 pt-5 sm:pt-6 pb-16 safe-bottom w-full min-w-0 outline-none"
         >
-          <ErrorBoundary>
-            <Outlet />
-          </ErrorBoundary>
+          <div className="max-w-[1440px] mx-auto w-full min-w-0">
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
       <SyllabusModal isOpen={syllabusModalOpen} onClose={() => setSyllabusModalOpen(false)} />
