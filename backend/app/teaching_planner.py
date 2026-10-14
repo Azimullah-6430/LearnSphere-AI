@@ -583,7 +583,7 @@ class DynamicTeachingPlanner:
         # A subject name explicitly declared in the validated curriculum anchors the core discipline.
         if any(w in sub_lower for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab", "linear algebra"]):
             return "numerical"
-        if any(w in sub_lower for w in ["english", "language", "grammar"]):
+        if any(w in sub_lower for w in ["english", "language", "grammar", "french", "spanish", "german", "hindi", "tamil", "linguist"]):
             if any(w in top_lower for w in ["poem", "poetry", "novel", "drama", "prose", "theme", "character", "story", "literature"]):
                 return "literary-thematic"
             return "language-grammar"
@@ -610,6 +610,16 @@ class DynamicTeachingPlanner:
             return "chemistry"
         if any(w in sub_lower for w in ["physics", "physical science"]):
             return "science-physics"
+        if any(w in sub_lower for w in ["science", "general science", "environmental science", "integrated science"]):
+            if not any(k in sub_lower for k in ["computer", "social", "political", "data"]):
+                if any(w in top_lower for w in ["light", "sound", "force", "motion", "magnet", "energy", "heat", "electricity", "gravity", "optic", "friction", "pressure"]):
+                    return "science-physics"
+                elif any(w in top_lower for w in ["acid", "base", "solution", "reaction", "matter", "metal", "element", "compound", "indicator", "ph", "salt", "substance"]):
+                    return "chemistry"
+                elif any(w in top_lower for w in ["plant", "animal", "body", "food", "cell", "organ", "seed", "leaf", "leaves", "transpir", "photosyn", "crop", "soil biology"]):
+                    return "biology"
+                else:
+                    return "practical"
         if any(w in sub_lower for w in ["accounting", "commerce", "finance", "bookkeeping", "auditing"]):
             return "accounting-financial"
         if any(w in sub_lower for w in ["economics", "microeconomics", "macroeconomics"]):

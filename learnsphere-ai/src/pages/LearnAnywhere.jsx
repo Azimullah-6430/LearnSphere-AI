@@ -111,6 +111,7 @@ export default function LearnAnywhere() {
   const { curriculum, isValid: hasValidCurriculum, subjects, units: allUnits } = useAuthoritativeCurriculum()
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false)
   const requestIdRef = useRef(0)
+  const abortControllerRef = useRef(null)
 
   const [selectedSubject, setSelectedSubject] = useState(subjects[0] || '')
   const [selectedTopic, setSelectedTopic] = useState('')
@@ -532,12 +533,26 @@ export default function LearnAnywhere() {
     setCustomMaterials(prev => prev.trim() ? `${prev.trim()}, ${tag}` : tag)
   }
 
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
+
   const handleGenerateActivity = useCallback(async () => {
-    if (!selectedSubject) return
+    if (!selectedSubject || loading) return
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setErrorMsg('Internet connection is required to generate new AI activities. Your previously loaded activity remains readable below.')
       return
     }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
 
     requestIdRef.current += 1
     const currentRequestId = requestIdRef.current
@@ -576,9 +591,9 @@ export default function LearnAnywhere() {
         image_data: imageData || undefined,
         syllabus_id: activeSyllabusId || undefined,
         idempotency_key: idempotencyKey
-      })
+      }, { signal: controller.signal })
 
-      if (currentRequestId !== requestIdRef.current) {
+      if (currentRequestId !== requestIdRef.current || controller.signal.aborted) {
         console.warn('Superseded generation request completed; discarding out-of-order response.')
         return
       }
@@ -622,18 +637,21 @@ export default function LearnAnywhere() {
         }
       }
     } catch (err) {
+      if (err?.name === 'AbortError' || controller.signal.aborted) {
+        return
+      }
       if (currentRequestId !== requestIdRef.current) return
       setActivity(null)
       if (err?.response?.data?.profile_incomplete || /profile.*incomplete|complete.*profile/i.test(err?.message || '')) {
         setProfileIncomplete(true)
       }
-      setErrorMsg(err?.message || 'Connection error while contacting the activity generator. Please try again.')
+      setErrorMsg(err?.message || 'Generation timed out or connection was interrupted. Please click Retry.')
     } finally {
       if (currentRequestId === requestIdRef.current) {
         setLoading(false)
       }
     }
-  }, [selectedSubject, activeSubjectId, selectedTopic, validatedSubjectTopics, selectedEnv, difficulty, preferredLanguage, customMaterials, constraintMode, imageData, activeSyllabusId, recordActivity, user])
+  }, [selectedSubject, activeSubjectId, selectedTopic, validatedSubjectTopics, selectedEnv, difficulty, preferredLanguage, customMaterials, constraintMode, imageData, activeSyllabusId, recordActivity, user, loading, learningMethod])
 
   const handleSaveProgress = useCallback(async (currentCompletedSteps = completedSteps, currentEvals = evaluations) => {
     if (!activity) return
@@ -734,7 +752,111 @@ export default function LearnAnywhere() {
     }))
   }
 
-  const totalSteps = activity?.steps?.length || 0
+  const cleanStepPrefix = useCallback((text) => {
+    if (!text || typeof text !== 'string') return ''
+    let s = text.trim()
+    for (let i = 0; i < 5; i++) {
+      const prev = s
+      s = s.replace(/^(?:[-*•]\s*|#{1,6}\s*)+/, '').trim()
+      s = s.replace(/^(?:\*{1,2}|_{1,2})?(?:step|task|phase|instruction)\s*#?\d+\s*[:.)\-–—]?(?:\*{1,2}|_{1,2})?\s*[:.\-–—]?\s*/i, '').trim()
+      s = s.replace(/^(?:\*{1,2}|_{1,2})?\d+\s*[.)](?:\*{1,2}|_{1,2})?\s*[:.\-–—]?\s*/, '').trim()
+      s = s.replace(/^(?:\*{1,2}|_{1,2})?\d+\s*[-–—:]\s*(?=[A-Za-z])(?:\*{1,2}|_{1,2})?\s*/, '').trim()
+      s = s.replace(/^[\[\(]\s*\d+\s*[\]\)]\s*[:.\-–—]?\s*/, '').trim()
+      if (s === prev) break
+    }
+    return s || text.trim()
+  }, [])
+
+  const structuredExperiments = useMemo(() => {
+    if (!activity) return []
+
+    let parsedExps = []
+
+    // 1. Check if structured experiments or tasks array is present
+    const rawExps = activity.experiments || activity.tasks
+    if (Array.isArray(rawExps) && rawExps.length > 0) {
+      parsedExps = rawExps
+        .filter(exp => exp && (Array.isArray(exp.steps) ? exp.steps.length > 0 : Boolean(exp.steps)))
+        .map((exp, expIdx) => {
+          const rawSteps = Array.isArray(exp.steps) ? exp.steps : String(exp.steps).split('\n')
+          const cleanSteps = rawSteps
+            .map(s => cleanStepPrefix(String(s)))
+            .filter(Boolean)
+          return {
+            title: exp.title || exp.name || exp.experiment_title || `Experiment ${expIdx + 1}`,
+            steps: cleanSteps
+          }
+        })
+        .filter(exp => exp.steps.length > 0)
+    }
+
+    // 2. If no valid experiments array, parse activity.steps / procedure / instructions
+    if (parsedExps.length === 0) {
+      const rawSteps = activity.steps || activity.procedure || activity.instructions || []
+      const lines = (Array.isArray(rawSteps) ? rawSteps : [rawSteps])
+        .flatMap(item => typeof item === 'string' && item.includes('\n') ? item.split('\n') : [item])
+        .map(item => String(item).trim())
+        .filter(Boolean)
+
+      let currentExp = { title: '', steps: [] }
+      const detectedExps = []
+      let foundExpHeader = false
+
+      for (const line of lines) {
+        const headerClean = line.replace(/^(?:#{1,6}\s*|[-*•]\s*|\*{1,2}|_{1,2})/, '').trim()
+        const isExpHeader = /^(?:experiment|activity|task|part)\s*(\d+|[A-Z])\s*[:.\-–—]\s*(.*)$/i.test(headerClean) ||
+                            (line.startsWith('#') && /experiment|activity|task|part/i.test(line))
+
+        if (isExpHeader) {
+          foundExpHeader = true
+          if (currentExp.steps.length > 0) {
+            detectedExps.push(currentExp)
+          }
+          currentExp = { title: headerClean, steps: [] }
+          continue
+        }
+
+        // Filter out headings or metadata sections like Materials/Safety/Observations
+        if (/^(?:materials?|safety|expected observations?|observations?|notes?)\s*[:.]/i.test(headerClean) ||
+            /^#{1,6}\s*(?:materials?|safety|observations?)/i.test(line)) {
+          continue
+        }
+
+        const cleaned = cleanStepPrefix(line)
+        if (cleaned) {
+          currentExp.steps.push(cleaned)
+        }
+      }
+
+      if (currentExp.steps.length > 0) {
+        detectedExps.push(currentExp)
+      }
+
+      if (foundExpHeader && detectedExps.length > 1) {
+        parsedExps = detectedExps
+      } else if (detectedExps.length > 0) {
+        const allSteps = detectedExps.flatMap(e => e.steps)
+        parsedExps = [{ title: '', steps: allSteps }]
+      }
+    }
+
+    // Assign startIndex to each experiment for contiguous global indexing
+    let currentStartIndex = 0
+    return parsedExps.map(exp => {
+      const expWithIndex = {
+        ...exp,
+        startIndex: currentStartIndex
+      }
+      currentStartIndex += exp.steps.length
+      return expWithIndex
+    })
+  }, [activity, cleanStepPrefix])
+
+  const stepsList = useMemo(() => {
+    return structuredExperiments.flatMap(exp => exp.steps)
+  }, [structuredExperiments])
+
+  const totalSteps = stepsList.length || activity?.steps?.length || 0
   const completedCount = Object.values(completedSteps).filter(Boolean).length
   const progressPercent = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0
 
@@ -769,15 +891,6 @@ export default function LearnAnywhere() {
     const raw = activity.materials_student_has || activity.local_materials || []
     return (Array.isArray(raw) ? raw : [raw]).filter(Boolean)
   }, [activity, isCodingTask])
-
-  const stepsList = useMemo(() => {
-    if (!activity) return []
-    const raw = activity.steps || []
-    const list = Array.isArray(raw) ? raw : [raw]
-    return list
-      .filter(Boolean)
-      .map(s => String(s).replace(/^(?:step\s*\d+\s*[:.-]?\s*|\d+[\.)]\s*)/i, '').trim())
-  }, [activity])
 
   const learningObjective = useMemo(() => {
     if (!activity) return ''
@@ -1463,45 +1576,61 @@ export default function LearnAnywhere() {
 
             {/* 4. Steps */}
             {stepsList.length > 0 && (
-              <div className="space-y-2.5">
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="text-xs sm:text-sm font-bold text-[var(--text)] uppercase tracking-wider flex items-center gap-2">
                     <Layers size={15} className="text-[var(--accent)]" />
-                    <span>Steps</span>
+                    <span>{structuredExperiments.length > 1 ? 'Activities & Steps' : 'Steps'}</span>
                   </div>
                   <span className="text-xs text-[var(--text-soft)]">
                     {completedCount} / {stepsList.length} completed
                   </span>
                 </div>
-                <div className="space-y-2">
-                  {stepsList.map((stepText, idx) => {
-                    const isDone = Boolean(completedSteps[idx])
+                <div className="space-y-4">
+                  {structuredExperiments.map((exp, expIdx) => {
+                    const expStartIndex = exp.startIndex || 0
                     return (
-                      <div
-                        key={idx}
-                        onClick={() => toggleStep(idx)}
-                        className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
-                          isDone
-                            ? 'bg-[var(--accent-soft)]/40 border-[var(--accent)] text-[var(--text)]'
-                            : 'bg-[var(--surface-alt)]/50 border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)]'
-                        }`}
-                        role="checkbox"
-                        aria-checked={isDone}
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === ' ' || e.key === 'Enter') {
-                            e.preventDefault()
-                            toggleStep(idx)
-                          }
-                        }}
-                      >
-                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold ${
-                          isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)]'
-                        }`}>
-                          {isDone ? '✓' : idx + 1}
-                        </div>
-                        <div className={`text-sm leading-relaxed flex-1 ${isDone ? 'line-through opacity-75' : ''}`}>
-                          {stepText}
+                      <div key={expIdx} className="space-y-2.5">
+                        {exp.title && (
+                          <div className="text-xs font-bold uppercase tracking-wider text-[var(--accent)] pt-1 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"></span>
+                            <span>{exp.title}</span>
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          {exp.steps.map((stepText, localIdx) => {
+                            const globalIdx = expStartIndex + localIdx
+                            const isDone = Boolean(completedSteps[globalIdx])
+                            return (
+                              <div
+                                key={globalIdx}
+                                onClick={() => toggleStep(globalIdx)}
+                                className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                                  isDone
+                                    ? 'bg-[var(--accent-soft)]/40 border-[var(--accent)] text-[var(--text)]'
+                                    : 'bg-[var(--surface-alt)]/50 border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text)]'
+                                }`}
+                                role="checkbox"
+                                aria-checked={isDone}
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === ' ' || e.key === 'Enter') {
+                                    e.preventDefault()
+                                    toggleStep(globalIdx)
+                                  }
+                                }}
+                              >
+                                <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 border text-xs font-bold ${
+                                  isDone ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-soft)]'
+                                }`}>
+                                  {isDone ? '✓' : localIdx + 1}
+                                </div>
+                                <div className={`text-sm leading-relaxed flex-1 whitespace-pre-wrap ${isDone ? 'line-through opacity-75' : ''}`}>
+                                  {stepText}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     )

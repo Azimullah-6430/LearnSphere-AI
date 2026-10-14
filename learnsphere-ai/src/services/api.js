@@ -247,10 +247,11 @@ export const api = {
 
   // ── Learn from Anywhere (Rural & Low-Resource Practical Learning) ──────────
 
-  generateLearnAnywhere: (payload) =>
+  generateLearnAnywhere: (payload, options = {}) =>
     request('/api/learn-anywhere/generate', {
       method: 'POST',
       body: payload,
+      ...options,
     }),
 
   evaluateLearnAnywhereAnswer: (payload) =>

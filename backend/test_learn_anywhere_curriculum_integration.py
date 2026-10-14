@@ -97,7 +97,7 @@ class TestLearnAnywhereCurriculumIntegration(unittest.TestCase):
                 INSERT INTO syllabi (syllabus_id, student_id, file_name, is_active, status, validation_status, analysis_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (s_id, str(student_id), "Official_Mechanical_Curriculum.pdf", 1 if is_active else 0, status, status, json.dumps(doc), now.isoformat(), now.isoformat())
+                (s_id, str(student_id), "Official_Mechanical_Curriculum.pdf", 1 if is_active else 0, status, status, json.dumps(doc, default=str), now.isoformat(), now.isoformat())
             )
             conn.commit()
             conn.close()

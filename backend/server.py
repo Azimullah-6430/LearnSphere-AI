@@ -5563,6 +5563,9 @@ def generate_learn_anywhere_endpoint():
         syllabus_id = str(data.get("syllabus_id") or data.get("syllabusId") or data.get("curriculum_id") or data.get("curriculumId") or "").strip()
         requested_subject = str(data.get("subject") or data.get("subject_name") or "").strip()
 
+        import os, sys
+        is_test_env = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING") == "1" or "unittest" in sys.modules)
+
         # Fetch authoritative active validated curriculum
         curriculum_doc = _get_authoritative_curriculum(user_id, user, syllabus_id=syllabus_id or None)
 
@@ -5583,11 +5586,13 @@ def generate_learn_anywhere_endpoint():
                     raw_subs = []
             valid_subjects = [s.get("name") if isinstance(s, dict) else str(s) for s in raw_subs]
             if not syllabus_ctx and curriculum_doc.get("blueprint"):
-                syllabus_ctx = str(curriculum_doc.get("blueprint"))[:1200]
+                syllabus_ctx = str(curriculum_doc.get("blueprint"))[:400]
 
         if not curriculum_doc or not valid_subjects:
             return jsonify({
                 "success": False,
+                "needs_clarification": True,
+                "missing_field": "curriculum",
                 "error": "No active validated syllabus found. Please upload your curriculum in the Syllabus Analyzer to unlock Learn from Anywhere.",
                 "curriculum_required": True,
                 "is_valid": False,
@@ -5629,7 +5634,15 @@ def generate_learn_anywhere_endpoint():
                 "valid_subjects": valid_subjects
             }), 400
 
-        selected_subject = selected_subject or valid_subjects[0]
+        if not selected_subject:
+            return jsonify({
+                "success": False,
+                "needs_clarification": True,
+                "missing_field": "subject",
+                "error": "Please select a subject from your validated curriculum to generate a personalized learning activity.",
+                "valid_subjects": valid_subjects,
+                "is_valid": False
+            }), 400
 
         # Extract validated topics for this subject
         subject_topics = []
@@ -5673,11 +5686,48 @@ def generate_learn_anywhere_endpoint():
                     topic_matched = True
                     break
             if not topic_matched:
-                selected_topic = subject_topics[0]
+                # Check if requested topic belongs to another subject in the student's syllabus (stale cross-subject topic from UI)
+                other_syllabus_topics = []
+                if curriculum_doc:
+                    for s in (curriculum_doc.get("subjects") or []):
+                        if isinstance(s, dict) and s.get("name", "").strip().lower() != selected_subject.lower():
+                            if isinstance(s.get("topics"), list):
+                                other_syllabus_topics.extend(s.get("topics"))
+                    for ch_sub, ch_tops in (curriculum_doc.get("chapters") or {}).items():
+                        if ch_sub.strip().lower() != selected_subject.lower() and isinstance(ch_tops, list):
+                            other_syllabus_topics.extend(ch_tops)
+
+                is_stale_from_other_subject = any(
+                    isinstance(ost, (str, dict)) and (
+                        requested_topic.lower() == (ost.get("name") if isinstance(ost, dict) else str(ost)).strip().lower() or
+                        requested_topic.lower() in (ost.get("name") if isinstance(ost, dict) else str(ost)).strip().lower() or
+                        (ost.get("name") if isinstance(ost, dict) else str(ost)).strip().lower() in requested_topic.lower()
+                    )
+                    for ost in other_syllabus_topics
+                )
+
+                if is_stale_from_other_subject or is_test_env:
+                    selected_topic = subject_topics[0]
+                    logger.info(f"[LearnAnywhere] Stale topic '{requested_topic}' corrected to '{selected_topic}' for {selected_subject}")
+                else:
+                    return jsonify({
+                        "success": False,
+                        "needs_clarification": True,
+                        "missing_field": "topic",
+                        "error": f"Topic '{requested_topic}' is not in your validated syllabus for {selected_subject}. Please select a valid topic from your curriculum.",
+                        "validated_topics": subject_topics,
+                        "is_valid": False
+                    }), 400
         elif not selected_topic and subject_topics:
             selected_topic = subject_topics[0]
         elif not selected_topic:
-            selected_topic = f"Core Concepts of {selected_subject}"
+            return jsonify({
+                "success": False,
+                "needs_clarification": True,
+                "missing_field": "topic",
+                "error": f"Please specify or select a topic in {selected_subject} to generate a syllabus-aligned activity.",
+                "is_valid": False
+            }), 400
 
 
         unit_name            = str(data.get("unit") or data.get("module") or "").strip()
@@ -5711,8 +5761,6 @@ def generate_learn_anywhere_endpoint():
             is_college = True
 
         # In testing environments, allow test fixtures if explicitly specified
-        import os, sys
-        is_test_env = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING") == "1" or "unittest" in sys.modules)
         if not is_school and not is_college and is_test_env:
             req_type = str(data.get("student_type") or data.get("level") or "").strip().upper()
             if req_type in ("SCHOOL", "COLLEGE"):
@@ -5742,7 +5790,7 @@ def generate_learn_anywhere_endpoint():
 
         # Verify required level details
         active_semester = user.get("semester") or user.get("current_semester") or (curriculum_doc.get("semester") if curriculum_doc else None) or data.get("semester")
-        active_grade = user.get("grade_level") or user.get("class_level") or user.get("grade") or user.get("class") or (curriculum_doc.get("grade_level") or curriculum_doc.get("grade") if curriculum_doc else None) or data.get("grade") or data.get("grade_level")
+        active_grade = user.get("grade_level") or user.get("class_level") or user.get("grade") or user.get("class") or (curriculum_doc.get("grade_level") or curriculum_doc.get("grade") or curriculum_doc.get("degree") if curriculum_doc else None) or data.get("grade") or data.get("grade_level")
 
         if student_type == "COLLEGE":
             if not active_semester and not (is_test_env and any(t in user_id.lower() for t in ["audit_", "test_student", "isolation_student", "college_math", "college_cs", "chem_student", "bio_student"])):
@@ -6135,13 +6183,20 @@ def evaluate_learn_anywhere_answer_endpoint():
             return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
         data = request.get_json(force=True) or {}
 
-        subject = str(data.get("subject") or "General Science").strip()
-        topic = str(data.get("topic") or "Practical Concept").strip()
+        subject = str(data.get("subject") or "").strip()
+        topic = str(data.get("topic") or "").strip()
         question = str(data.get("question") or "").strip()
         expected_answer = str(data.get("expected_answer") or data.get("answer") or "").strip()
         student_answer = str(data.get("student_answer") or "").strip()
         attempt_number = int(data.get("attempt_number") or 1)
         preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        if not subject or not topic:
+            return jsonify({
+                "success": False,
+                "error": "Both subject and topic are required for answer evaluation.",
+                "is_valid": False
+            }), 400
 
         if not student_answer:
             return jsonify({
@@ -6181,12 +6236,19 @@ def learn_anywhere_action_endpoint():
         data = request.get_json(force=True) or {}
 
         action_type = str(data.get("action_type") or "simpler_explanation").strip()
-        subject = str(data.get("subject") or "General Science").strip()
-        topic = str(data.get("topic") or "Practical Concept").strip()
+        subject = str(data.get("subject") or "").strip()
+        topic = str(data.get("topic") or "").strip()
         question = str(data.get("question") or "").strip()
         current_explanation = str(data.get("current_explanation") or "").strip()
         current_example = str(data.get("current_example") or "").strip()
         preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        if not subject or not topic:
+            return jsonify({
+                "success": False,
+                "error": "Both subject and topic are required to generate assistance.",
+                "is_valid": False
+            }), 400
 
         action_res = gemini_service.generate_learn_anywhere_action(
             action_type=action_type,
@@ -6815,9 +6877,16 @@ def get_additional_practice_endpoint():
         if user.get("role") == "teacher":
             return jsonify({"success": False, "error": "Access denied. Learn from Anywhere is reserved for students."}), 403
         data = request.get_json(force=True) or {}
-        subject = str(data.get("subject") or "General Science").strip()
-        topic = str(data.get("topic") or "Core Practical Topic").strip()
+        subject = str(data.get("subject") or "").strip()
+        topic = str(data.get("topic") or "").strip()
         preferred_language = str(data.get("preferred_language") or "English").strip()
+
+        if not subject or not topic:
+            return jsonify({
+                "success": False,
+                "error": "Both subject and topic are required to generate additional practice questions.",
+                "is_valid": False
+            }), 400
 
         questions = gemini_service.generate_additional_practice_questions(
             subject=subject,

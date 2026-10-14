@@ -170,9 +170,11 @@ class GeminiService:
         prompt: str,
         files: Optional[List[Any]] = None,
         json_output: bool = True,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        timeout: Optional[int] = None,
+        max_output_tokens: Optional[int] = None
     ) -> str:
-        """Call gemini-3.6-flash ONLY. No fallback models allowed."""
+        """Call gemini-3.6-flash with optimized token budgets and bounded timeouts."""
         keys = self.api_keys
         if not keys:
             raise RuntimeError("GEMINI_API_KEY is not configured on server.")
@@ -183,9 +185,12 @@ class GeminiService:
             if f_parts:
                 parts.extend(f_parts)
 
+        effective_max_tokens = max_output_tokens or 65536
+        effective_timeout = timeout or self.timeout
+
         generation_config: Dict[str, Any] = {
             "temperature": temperature,
-            "maxOutputTokens": 65536
+            "maxOutputTokens": effective_max_tokens
         }
         try:
             seed_source = prompt[:2000]
@@ -224,7 +229,7 @@ class GeminiService:
 
                 for attempt in range(self.max_retries):
                     try:
-                        response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                        response = requests.post(url, headers=headers, json=payload, timeout=effective_timeout)
                         if response.status_code == 200:
                             data = response.json()
                             candidates = data.get("candidates") or []
@@ -2344,16 +2349,9 @@ Return ONLY a valid JSON object matching this schema:
         student_answer: str,
         attempt_number: int = 1
     ) -> Dict[str, Any]:
-        """Deterministic, offline-resilient semantic evaluation fallback."""
+        """Deterministic, offline-resilient semantic evaluation fallback with numerical and algebraic precision."""
         st_clean = student_answer.strip().lower()
         exp_clean = expected_answer.strip().lower()
-
-        st_words = set(re.findall(r'\w+', st_clean))
-        exp_words = set(re.findall(r'\w+', exp_clean))
-
-        stop_words = {"a", "an", "the", "is", "are", "was", "were", "it", "of", "to", "in", "and", "or", "by", "for", "with", "that", "this", "turns", "turn", "mixed", "when", "using", "shows", "show", "makes", "become", "gives", "gives", "into"}
-        st_filtered = st_words - stop_words
-        exp_filtered = exp_words - stop_words
 
         if not st_clean:
             return {
@@ -2363,44 +2361,111 @@ Return ONLY a valid JSON object matching this schema:
                 "feedback": "Please enter an answer before submitting.",
                 "explanation": f"Key concept for {topic}: {expected_answer}",
                 "suggested_retry": True,
-                "additional_hint": "Think about what physical or mathematical change occurs."
+                "additional_hint": f"Consider the fundamental rule of {topic} requested in the question."
             }
 
+        # Exact and normalized matching
         if st_clean == exp_clean or st_clean in exp_clean or exp_clean in st_clean:
             return {
                 "is_correct": True,
                 "score": 100,
                 "error_type": "none",
                 "feedback": "Excellent! Your answer accurately explains the concept.",
-                "explanation": f"Scientific principle: {expected_answer}",
+                "explanation": f"Core academic principle: {expected_answer}",
                 "suggested_retry": False,
                 "additional_hint": ""
             }
+
+        # Numerical & Algebraic matching for Mathematics, Numerical Physics, and Quantitative Topics
+        st_nums = re.findall(r'[-+]?\d*\.?\d+', st_clean)
+        exp_nums = re.findall(r'[-+]?\d*\.?\d+', exp_clean)
+        if st_nums and exp_nums:
+            primary_exp_num = exp_nums[0]
+            if primary_exp_num in st_nums:
+                return {
+                    "is_correct": True,
+                    "score": 100,
+                    "error_type": "none",
+                    "feedback": "Correct! Your numerical calculation is accurate.",
+                    "explanation": f"Quantitative solution for {topic}: {expected_answer}",
+                    "suggested_retry": False,
+                    "additional_hint": ""
+                }
+
+        # Variable assignment matching e.g. "x=6" vs "x = 6" vs "x is 6"
+        st_compact = re.sub(r'[\s\-_=:\.]+', '', st_clean)
+        exp_compact = re.sub(r'[\s\-_=:\.]+', '', exp_clean)
+        if st_compact in exp_compact or exp_compact in st_compact:
+            return {
+                "is_correct": True,
+                "score": 100,
+                "error_type": "none",
+                "feedback": "Correct! Your solution matches the expected result.",
+                "explanation": f"Concept for {topic}: {expected_answer}",
+                "suggested_retry": False,
+                "additional_hint": ""
+            }
+
+        # Directional and relational semantic groups
+        synonym_groups = [
+            {"increase", "increases", "increased", "increasing", "rise", "rises", "rising", "grow", "grows", "up", "higher", "more"},
+            {"decrease", "decreases", "decreased", "decreasing", "drop", "drops", "dropping", "fall", "falls", "down", "lower", "reduce", "reduces", "less"},
+            {"equal", "equals", "same", "balanced", "identical", "constant", "unchanged", "invariant", "equilibrium"},
+            {"opposite", "inverses", "inverts", "reverse", "contrary", "counter"},
+            {"double", "doubles", "doubled", "twice", "2x"},
+            {"half", "halves", "halved", "50%"}
+        ]
+        has_synonym_match = False
+        for group in synonym_groups:
+            if any(w in st_clean for w in group) and any(w in exp_clean for w in group):
+                has_synonym_match = True
+                break
+
+        st_words = set(re.findall(r'\w+', st_clean))
+        exp_words = set(re.findall(r'\w+', exp_clean))
+        stop_words = {"a", "an", "the", "is", "are", "was", "were", "it", "of", "to", "in", "and", "or", "by", "for", "with", "that", "this", "turns", "turn", "mixed", "when", "using", "shows", "show", "makes", "become", "gives", "into", "at"}
+        st_filtered = st_words - stop_words
+        exp_filtered = exp_words - stop_words
 
         overlap = len(st_filtered & exp_filtered)
         total_exp = len(exp_filtered) or 1
         overlap_ratio = overlap / total_exp
 
-        if overlap_ratio >= 0.40 or (overlap >= 2 and overlap_ratio >= 0.30):
+        if overlap_ratio >= 0.35 or (overlap >= 2 and overlap_ratio >= 0.25) or has_synonym_match or (len(exp_filtered) <= 3 and overlap >= 1):
             return {
                 "is_correct": True,
-                "score": 90,
-                "error_type": "none" if overlap_ratio >= 0.6 else "spelling_grammar_only",
+                "score": 95 if (overlap_ratio >= 0.5 or has_synonym_match) else 90,
+                "error_type": "none" if (overlap_ratio >= 0.5 or has_synonym_match) else "spelling_grammar_only",
                 "feedback": "Correct! Your answer captures the core academic concept.",
                 "explanation": f"Core academic theory for {topic}: {expected_answer}",
                 "suggested_retry": False,
                 "additional_hint": ""
             }
+
+        # Subject-specific constructive hints for retries
+        sub_low = (subject or "").lower()
+        if any(w in sub_low for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab"]):
+            hint = f"Hint (Attempt #{attempt_number}): Review the numerical calculation or equation steps for {topic}."
+        elif any(w in sub_low for w in ["computer", "data structure", "algorithm", "software", "code", "programm"]):
+            hint = f"Hint (Attempt #{attempt_number}): Trace the variable state transformations, loop condition, or boundary index in {topic}."
+        elif any(w in sub_low for w in ["english", "language", "grammar", "literat"]):
+            hint = f"Hint (Attempt #{attempt_number}): Focus on the contextual vocabulary meaning, syntactic structure, or literary device in {topic}."
+        elif any(w in sub_low for w in ["history", "civic", "social", "politic"]):
+            hint = f"Hint (Attempt #{attempt_number}): Consider the institutional cause, chronological catalyst, or civic principle in {topic}."
+        elif any(w in sub_low for w in ["account", "commerce", "finance", "audit", "econom"]):
+            hint = f"Hint (Attempt #{attempt_number}): Consider the dual debit-credit balance or market equilibrium condition in {topic}."
         else:
-            return {
-                "is_correct": False,
-                "score": 30,
-                "error_type": "conceptual_misunderstanding",
-                "feedback": f"Not quite. Focus on how {topic} operates in this activity.",
-                "explanation": f"Expected principle: {expected_answer}",
-                "suggested_retry": True,
-                "additional_hint": f"Hint (Attempt #{attempt_number}): Consider the relation between {topic} and the observed changes."
-            }
+            hint = f"Hint (Attempt #{attempt_number}): Consider how {topic} governs the observable physical or chemical changes."
+
+        return {
+            "is_correct": False,
+            "score": 30,
+            "error_type": "conceptual_misunderstanding",
+            "feedback": f"Not quite. Focus on how {topic} applies to this specific question.",
+            "explanation": f"Expected principle: {expected_answer}",
+            "suggested_retry": True,
+            "additional_hint": hint
+        }
 
     def generate_additional_practice_questions(
         self,
@@ -2432,18 +2497,86 @@ Return ONLY a valid JSON list of question objects:
         except Exception as e:
             logger.warning(f"[GeminiService] generate_additional_practice_questions error: {e}")
 
-        return [
-            {
-                "question": f"How does changing scale or volume affect {topic}?",
-                "answer": "It scales the physical interaction proportionally.",
-                "explanation": f"Proportionality is a fundamental rule in {topic}."
-            },
-            {
-                "question": f"What safety or environmental factor must be controlled during tests of {topic}?",
-                "answer": "Temperature, moisture, or surface cleanliness.",
-                "explanation": f"Environmental parameters directly influence real-world outcomes in {topic}."
-            }
-        ]
+        # Discipline-grounded fallback practice questions
+        sub_low = (subject or "").lower()
+        if any(w in sub_low for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab"]):
+            return [
+                {
+                    "question": f"How do you verify whether a computed solution satisfies the equations in {topic}?",
+                    "answer": "Substitute the calculated value back into the original equation to verify that both sides remain equal.",
+                    "explanation": f"Direct substitution detects extraneous roots and algebraic transcription errors in {topic}."
+                },
+                {
+                    "question": f"In {topic}, what happens when an input variable is doubled while constraints remain constant?",
+                    "answer": "The output scales according to the linear, quadratic, or proportional relationship defined by the governing formula.",
+                    "explanation": f"Proportionality analysis reveals system sensitivity in mathematical models of {topic}."
+                }
+            ]
+        elif any(w in sub_low for w in ["computer", "data structure", "algorithm", "software", "code", "programm"]):
+            return [
+                {
+                    "question": f"What boundary condition or edge case must be tested first when implementing {topic}?",
+                    "answer": "Empty input (null/zero length), single element dataset, and duplicate or reverse-ordered elements.",
+                    "explanation": f"Boundary condition testing prevents index-out-of-bounds errors and infinite loops in {topic}."
+                },
+                {
+                    "question": f"How does space complexity trade off against time complexity in algorithms for {topic}?",
+                    "answer": "Using auxiliary memory often reduces runtime operations at the expense of higher memory usage.",
+                    "explanation": f"Space-time trade-off is a core design principle in computational algorithms for {topic}."
+                }
+            ]
+        elif any(w in sub_low for w in ["english", "language", "grammar", "literat"]):
+            return [
+                {
+                    "question": f"How does identifying context clues help determine meaning or tone in {topic}?",
+                    "answer": "Surrounding words and narrative register reveal nuance, syntax, and connotative meanings beyond literal dictionary definitions.",
+                    "explanation": f"Contextual analysis grounds linguistic interpretation in communicative discourse for {topic}."
+                },
+                {
+                    "question": f"What is the most effective way to eliminate ambiguity in sentences exploring {topic}?",
+                    "answer": "Ensure clear subject-verb agreement, consistent tense usage, and precise placement of modifying clauses.",
+                    "explanation": f"Syntactic precision ensures clear and persuasive communication in {topic}."
+                }
+            ]
+        elif any(w in sub_low for w in ["history", "civic", "social", "politic", "geograph"]):
+            return [
+                {
+                    "question": f"How do short-term catalysts differ from underlying structural causes in {topic}?",
+                    "answer": "Structural conditions build social or economic pressure over time, whereas catalysts trigger the immediate historical event or civic response.",
+                    "explanation": f"Historiographical analysis separates underlying conditions from immediate triggers in {topic}."
+                },
+                {
+                    "question": f"Why is examining primary sources or public records critical when analyzing {topic}?",
+                    "answer": "Primary evidence provides contemporary testimony, allowing researchers to evaluate author provenance, perspective, and factual accuracy.",
+                    "explanation": f"Source criticism distinguishes grounded factual analysis from hearsay in {topic}."
+                }
+            ]
+        elif any(w in sub_low for w in ["account", "commerce", "finance", "audit", "econom"]):
+            return [
+                {
+                    "question": f"How does a change in transaction parameters affect equilibrium or balance in {topic}?",
+                    "answer": "Every debit requires an equal credit to maintain accounting identity, or price shifts to clear quantity demanded and supplied.",
+                    "explanation": f"Dual-entry equilibrium preserves structural balance in financial and economic models of {topic}."
+                },
+                {
+                    "question": f"Why is reconciling accounts or monitoring elasticity essential when managing {topic}?",
+                    "answer": "It identifies variances, prevents unexpected deficits, and measures consumer or firm responsiveness to price adjustments.",
+                    "explanation": f"Reconciliation and elasticity analysis ensure operational sustainability in {topic}."
+                }
+            ]
+        else: # Science / Practical
+            return [
+                {
+                    "question": f"What control variable must be held constant while investigating {topic}?",
+                    "answer": "Environmental parameters like temperature, volume, or initial baseline state must be controlled so that only the independent variable changes.",
+                    "explanation": f"Controlled experimentation isolates the true causal factor in {topic}."
+                },
+                {
+                    "question": f"Why can real-world experimental results for {topic} vary from textbook theoretical predictions?",
+                    "answer": "Ambient variations like humidity, surface friction, air currents, and measurement tolerances cause minor deviations from ideal formulas.",
+                    "explanation": f"Real-world physical experiments inherently reflect ambient environmental factors in {topic}."
+                }
+            ]
 
     def generate_learn_anywhere_action(
         self,
@@ -2519,60 +2652,208 @@ Return ONLY a valid JSON object matching this schema:
         current_explanation: str = "",
         current_example: str = ""
     ) -> Dict[str, Any]:
-        """Offline fallback for student on-demand learning actions."""
+        """Offline fallback for student on-demand learning actions grounded strictly in subject discipline."""
         act_type = (action_type or "simpler_explanation").strip().lower()
+        sub_low = (subject or "").lower()
+        is_math = any(w in sub_low for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab"])
+        is_cs = any(w in sub_low for w in ["computer", "data structure", "algorithm", "software", "code", "programm"])
+        is_lang = any(w in sub_low for w in ["english", "language", "grammar", "literat", "french", "spanish", "german"])
+        is_social = any(w in sub_low for w in ["history", "civic", "social", "politic", "geograph"])
+        is_comm = any(w in sub_low for w in ["account", "commerce", "finance", "audit", "econom"])
 
         if act_type == "simpler_explanation":
+            if is_math:
+                content = f"Think of {topic} like a balanced weighing scale: whatever operation you perform on one side, you must mirror on the other side to keep equality. In simple terms, {current_explanation or 'we undo operations one step at a time until the target unknown is isolated.'}"
+                steps = [
+                    f"1. Identify the unknown mystery value in {topic}.",
+                    "2. Perform opposite operations (subtract to undo addition; divide to undo multiplication) on both sides.",
+                    "3. Check your final number by plugging it back into the original equation."
+                ]
+            elif is_cs:
+                content = f"Think of {topic} like a recipe or step-by-step game rule: the computer inspects items in memory one at a time and follows exact instructions without skipping. In simple terms, {current_explanation or 'the algorithm loops through data and updates state deterministically.'}"
+                steps = [
+                    f"1. Set up your starting list or variables for {topic}.",
+                    "2. Follow the rule for each item in order (the loop).",
+                    "3. Stop when the finish condition is met and output the result."
+                ]
+            elif is_lang:
+                content = f"Think of {topic} like building with blocks: words and grammatical rules fit together in predictable patterns to convey clear meaning. In simple terms, {current_explanation or 'words work in context to show relationships, tone, and action.'}"
+                steps = [
+                    f"1. Look at the surrounding sentence clues for {topic}.",
+                    "2. Notice how words change depending on who is acting and when.",
+                    "3. Practice creating your own simple sentence using the pattern."
+                ]
+            elif is_social:
+                content = f"Think of {topic} like a community rulebook: it explains how people organize public services, resolve disputes, and make collective decisions. In simple terms, {current_explanation or 'rules and public institutions connect citizen needs to government action.'}"
+                steps = [
+                    f"1. Identify the public institution or historical context for {topic}.",
+                    "2. See who participates and what decisions are made.",
+                    "3. Notice how citizen participation ensures accountability."
+                ]
+            elif is_comm:
+                content = f"Think of {topic} like two balancing buckets: whenever value enters one account (Debit), an equal value must leave another account (Credit). In simple terms, {current_explanation or 'dual-aspect recording ensures zero financial discrepancy.'}"
+                steps = [
+                    f"1. Identify which accounts are receiving or giving value in {topic}.",
+                    "2. Record equal debit and credit amounts in T-accounts.",
+                    "3. Verify that total debits match total credits."
+                ]
+            else:
+                content = f"Think of {topic} like everyday cause and effect: when one factor changes, observable results adjust in response. In simple terms, {current_explanation or 'the concept governs how materials and forces interact step-by-step.'}"
+                steps = [
+                    f"1. Observe the starting state of the materials for {topic}.",
+                    "2. Introduce a single controlled change.",
+                    "3. Record the resulting transformation to verify the rule."
+                ]
+
             return {
                 "action_type": "simpler_explanation",
                 "title": f"Simpler Explanation of {topic}",
-                "content": f"Think of {topic} like everyday balance: when one side changes, the other side adjusts to keep everything equal. In simple terms, {current_explanation or 'the concept governs how materials and forces interact step-by-step.'}",
-                "steps": [
-                    f"1. Imagine {topic} as a simple cause and effect.",
-                    "2. Notice what changes first.",
-                    "3. Observe how the final result balances out."
-                ],
+                "content": content,
+                "steps": steps,
                 "follow_up_question": "",
                 "expected_answer": ""
             }
+
         elif act_type == "another_example":
-            return {
-                "action_type": "another_example",
-                "title": f"Alternative Example for {topic}",
-                "content": f"Here is another clear example of {topic}: Consider how water moves through a clay sponge or how sunlight creates shadows at different times of day.",
-                "steps": [
-                    f"Step 1: Set up the initial observation for {topic}.",
-                    "Step 2: Measure the initial state.",
-                    "Step 3: Compare with the final state to verify the principle."
-                ],
-                "follow_up_question": f"How would doubling the input volume affect this alternative example of {topic}?",
-                "expected_answer": "It doubles the observed rate of change proportionally."
-            }
+            if is_math:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Worked Calculation for {topic}",
+                    "content": f"Here is another clear worked calculation for {topic}: Suppose you purchase 3 notebooks at 15 rupees each and pay with a 100 rupee note. Total cost: 3 * 15 = 45 rupees. Change received: 100 - 45 = 55 rupees.",
+                    "steps": [
+                        f"Step 1: Write down known numbers and the governing equation for {topic}.",
+                        "Step 2: Multiply quantity by unit cost: 3 * 15 = 45.",
+                        "Step 3: Subtract from total tendered: 100 - 45 = 55 rupees change."
+                    ],
+                    "follow_up_question": f"If you purchase 4 notebooks instead at the same price, what is your change from 100 rupees?",
+                    "expected_answer": "40 rupees change (4 * 15 = 60; 100 - 60 = 40)."
+                }
+            elif is_cs:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Execution Trace for {topic}",
+                    "content": f"Here is another clear execution trace for {topic}: Consider finding the maximum number in a list [7, 23, 4, 19]. Initialize max_val = 7. Loop through indices 1 to 3: comparing 23 > 7 updates max_val = 23; 4 < 23 (no change); 19 < 23 (no change). Final result: 23.",
+                    "steps": [
+                        f"Step 1: Set max_val to the first element (7) for {topic}.",
+                        "Step 2: Compare each subsequent element against max_val in a loop.",
+                        "Step 3: Return max_val after inspecting all elements."
+                    ],
+                    "follow_up_question": f"How many total comparisons were executed in this trace of {topic} on a 4-element list?",
+                    "expected_answer": "3 comparisons (comparing against indices 1, 2, and 3)."
+                }
+            elif is_lang:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Textual Example for {topic}",
+                    "content": f"Here is another clear language example for {topic}: In the sentence 'The students completed their assignment before the bell rang,' the past perfect relationship shows which action happened first.",
+                    "steps": [
+                        f"Step 1: Identify the main clause and subordinate clause for {topic}.",
+                        "Step 2: Check subject-verb agreement and tense alignment.",
+                        "Step 3: Rewrite the sentence using a synonymous conjunction."
+                    ],
+                    "follow_up_question": f"What is the subject performing the action in the main clause?",
+                    "expected_answer": "The students."
+                }
+            elif is_social:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Civic/Community Example for {topic}",
+                    "content": f"Here is another clear community example for {topic}: Consider how a village health sub-center maintains a maternal health register. Periodic public audits verify that medical supplies reach beneficiaries equitably.",
+                    "steps": [
+                        f"Step 1: Identify the public institution and citizen beneficiaries for {topic}.",
+                        "Step 2: Trace how service records and supplies are audited.",
+                        "Step 3: Document how institutional transparency protects community welfare."
+                    ],
+                    "follow_up_question": f"Why is public auditing essential in public service administration for {topic}?",
+                    "expected_answer": "It ensures accountability, transparency, and equitable resource delivery."
+                }
+            elif is_comm:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Transaction Example for {topic}",
+                    "content": f"Here is another clear financial example for {topic}: An enterprise purchases inventory worth 5,000 rupees on credit. Inventory (Asset) increases by 5,000 (Debit), and Accounts Payable (Liability) increases by 5,000 (Credit).",
+                    "steps": [
+                        f"Step 1: Identify affected accounts (Inventory and Accounts Payable) for {topic}.",
+                        "Step 2: Apply double-entry rules: Debit Asset increase, Credit Liability increase.",
+                        "Step 3: Confirm equation balance: Assets (+5000) = Liabilities (+5000) + Equity (0)."
+                    ],
+                    "follow_up_question": f"When the enterprise later pays the 5,000 rupees in cash, what accounts are debited and credited?",
+                    "expected_answer": "Debit Accounts Payable (Liability decrease) and Credit Cash (Asset decrease)."
+                }
+            else:
+                return {
+                    "action_type": "another_example",
+                    "title": f"Alternative Practical Observation for {topic}",
+                    "content": f"Here is another safe physical observation for {topic}: Place a drop of clean water and a drop of cooking oil on a tilted smooth plate. Observe how water flows rapidly while oil flows slowly due to differences in fluid viscosity.",
+                    "steps": [
+                        f"Step 1: Place equal small drops of water and oil side-by-side on a clean tilted plate for {topic}.",
+                        "Step 2: Measure the time each drop takes to travel 10 cm down the incline.",
+                        "Step 3: Compare flow velocities with fluid cohesion theory."
+                    ],
+                    "follow_up_question": f"Why does water travel faster down the plate than cooking oil in this demonstration of {topic}?",
+                    "expected_answer": "Water has lower internal fluid viscosity and less resistance to shear flow than oil."
+                }
+
         elif act_type == "worked_solution":
+            if is_math:
+                content = f"Complete Step-by-Step Worked Solution for: '{question or topic}':\n1. State given numerical values and constraints.\n2. Apply the primary governing formula: isolate unknown algebraically.\n3. Compute intermediate arithmetic.\n4. Verify answer by inverse substitution."
+            elif is_cs:
+                content = f"Complete Step-by-Step Logic Solution for: '{question or topic}':\n1. Define input parameters and return data structure.\n2. Write algorithm logic with explicit loop invariant.\n3. Trace variable memory state line-by-line.\n4. Verify time complexity O(N) and boundary condition."
+            elif is_lang:
+                content = f"Complete Step-by-Step Solution for: '{question or topic}':\n1. Analyze passage syntax and vocabulary context.\n2. Apply formal grammatical rules (agreement, tense, punctuation).\n3. Draft concise, accurate response.\n4. Confirm clarity and absence of ambiguity."
+            else:
+                content = f"Complete Step-by-Step Solution for: '{question or topic}':\n1. State the academic principle governing {topic}.\n2. Connect given conditions directly to observable evidence.\n3. Detail the causal mechanism and intermediate steps.\n4. Formulate verified conclusion."
+
             return {
                 "action_type": "worked_solution",
                 "title": f"Complete Worked Solution for '{question or topic}'",
-                "content": f"Step-by-step solution for: {question or topic}.\nFirst, identify given values. Second, apply governing formula. Third, compute final output.",
+                "content": content,
                 "steps": [
-                    "Step 1: Identify given variables and target output.",
-                    f"Step 2: Apply governing principles of {topic}.",
-                    "Step 3: Verify output against theoretical expectations."
+                    "Step 1: Identify given variables, context, and target question.",
+                    f"Step 2: Apply governing principles of {topic} systematically.",
+                    "Step 3: Verify the output against academic standards."
                 ],
                 "follow_up_question": "",
                 "expected_answer": ""
             }
+
         else: # more_challenging_task
+            if is_math:
+                content = f"Higher-Order Math Challenge for {topic}: Formulate a two-variable linear system modeling a market seller's daily sales where 2 apples and 3 bananas cost 35 rupees, and 3 apples and 2 bananas cost 40 rupees. Solve for individual unit prices using substitution or elimination."
+                q = f"In this system for {topic}, what is the individual cost of one apple and one banana?"
+                ans = "Apple = 10 rupees, Banana = 5 rupees (2*10 + 3*5 = 35; 3*10 + 2*5 = 40)."
+            elif is_cs:
+                content = f"Higher-Order Computing Challenge for {topic}: Trace how binary search operates on an array of 8 elements [2, 5, 8, 12, 16, 23, 38, 56] when searching for key 23. Show the low, high, and mid index calculations at each comparison iteration."
+                q = f"How many total comparisons does binary search require to locate 23 in this 8-element list?"
+                ans = "2 comparisons (first mid is index 3 (value 12); second mid is index 5 (value 23))."
+            elif is_lang:
+                content = f"Higher-Order Language Challenge for {topic}: Rewrite a 3-sentence descriptive paragraph about a stormy evening, transforming all passive voice constructions into active voice with vivid sensory imagery."
+                q = f"Why does active voice create more engaging writing in descriptive texts exploring {topic}?"
+                ans = "Active voice places the agent performing the action first, making sentences dynamic, direct, and concise."
+            elif is_social:
+                content = f"Higher-Order Civic Challenge for {topic}: Compare the constitutional distribution of powers between local village governance (panchayats) and central authorities. Formulate two criteria for evaluating public policy efficiency."
+                q = f"What constitutional principle delegates local community decisions to the closest competent authority?"
+                ans = "The principle of subsidiarity and democratic decentralization."
+            elif is_comm:
+                content = f"Higher-Order Commerce Challenge for {topic}: Calculate the net working capital (Current Assets - Current Liabilities) and Current Ratio for a firm with 45,000 cash, 30,000 inventory, and 50,000 short-term payables."
+                q = f"What is the Current Ratio (Current Assets / Current Liabilities) for this firm?"
+                ans = "1.5 (Total Current Assets = 75,000; 75,000 / 50,000 = 1.5)."
+            else:
+                content = f"Higher-Order Science Challenge for {topic}: Design a controlled experiment to test how varying ambient liquid temperature (10 deg C vs 40 deg C) influences the rate of observable change in {topic}, identifying all independent, dependent, and control variables."
+                q = f"What is the single independent variable in this temperature investigation of {topic}?"
+                ans = "The ambient liquid temperature."
+
             return {
                 "action_type": "more_challenging_task",
                 "title": f"Advanced Challenge Task for {topic}",
-                "content": f"Advanced Practice: Calculate the boundary conditions or multi-step variance when extreme inputs are applied to {topic}.",
+                "content": content,
                 "steps": [
-                    "Step 1: Set up equations for boundary conditions.",
-                    "Step 2: Calculate worst-case or extreme parameters.",
-                    "Step 3: Analyze sensitivity and system trade-offs."
+                    f"Step 1: State theoretical boundary conditions and governing principles of {topic}.",
+                    "Step 2: Carry out analytical decomposition or variable isolation.",
+                    "Step 3: Evaluate trade-offs and verify solution validity."
                 ],
-                "follow_up_question": f"For an advanced system implementing {topic}, what happens if boundary constraints are exceeded by 50%?",
-                "expected_answer": "The system reaches saturation or exhibits non-linear behavior outside linear bounds."
+                "follow_up_question": q,
+                "expected_answer": ans
             }
 
     def generate_learn_anywhere(
@@ -2657,6 +2938,40 @@ Return ONLY a valid JSON object matching this schema:
         image_notice = "- Student attached a photo of their available physical surroundings / materials for multimodal visual grounding." if image_data else ""
         accessibility_section = f"- Accessibility / Resource Constraints: {accessibility_notes}" if accessibility_notes else ""
 
+        # Dynamically inject only the discipline guideline relevant to this subject/topic
+        topic_nat = str(teaching_plan.get('topic_nature') or "").lower()
+        if "programming" in topic_nat or "coding" in topic_nat:
+            discipline_guideline = "- Computer Science / IT: Teach core logic, show a correct runnable code snippet, explain execution step-by-step, provide expected output, and a short coding or debugging task. Set 'coding_task' with is_coding_topic=True."
+        elif "numerical" in topic_nat or "math" in topic_nat:
+            discipline_guideline = "- Mathematics: Real-world practical measurements, shopping/geometry calculations, worked solution, and progressive practice (Easy, Medium, Hard in 'math_progressive_practice')."
+        elif "chemistry" in topic_nat:
+            discipline_guideline = "- Chemistry: Safe household demonstrations or molecular simulations using safe kitchen materials (turmeric indicator, water, salt). Never suggest hazardous chemicals."
+        elif "biology" in topic_nat:
+            discipline_guideline = "- Biology: Safe observation of plants, leaves, transpiration, soil, seeds, or natural items. Respectful handling without harm."
+        elif any(k in topic_nat for k in ["language", "literary", "grammar"]):
+            discipline_guideline = "- Languages & Literature: Reading comprehension, vocabulary, grammar correction, sentence drills, or literary theme analysis. No forced physical experiments."
+        elif any(k in topic_nat for k in ["historical", "social", "geographical", "civic"]):
+            discipline_guideline = "- Social Studies / History / Geography: Local observation, map/timeline interpretation, or civic analysis. No forced physical experiments."
+        elif any(k in topic_nat for k in ["accounting", "economics"]):
+            discipline_guideline = "- Economics / Commerce: Ledger calculations, budgeting scenarios, elasticity/equilibrium calculations, or market observations."
+        elif "engineering" in topic_nat:
+            discipline_guideline = "- Engineering: Syllabus-aligned calculations, system derivations, safe measurements, or design exercises."
+        else:
+            discipline_guideline = "- Science / Practical: Safe physical experiment or observation using low/zero-cost everyday materials. Clear steps, safety notes, and scientific explanation."
+
+        if student_type == "SCHOOL":
+            level_directive = f"""- AUTHENTIC SCHOOL LEVEL ({sem_str or 'School'}):
+  * Use age-appropriate, clear language. Explain ONE concept at a time; do not overload.
+  * Prefer safe hands-on activities or observations using common, zero-cost everyday items.
+  * Include 'unfamiliar_words' glossary defining any new or technical terms simply.
+  * Avoid college-level differential equations, heavy technical jargon, or complex code unless explicitly in the school curriculum."""
+        else:
+            level_directive = f"""- AUTHENTIC COLLEGE LEVEL ({sem_str}, {program}, {department}):
+  * Ground strictly in the student's actual semester and domain.
+  * Provide realistic technical examples, derivations, practical code, or analytical calculations.
+  * Include explicit assumptions in 'assumptions_and_reasoning'.
+  * Do not reduce college concepts to childish household toys; use applied technical models or code traces."""
+
         lang_instruction = f"Provide all explanations, steps, and questions in {preferred_language}, while preserving rigorous scientific/mathematical accuracy for technical terms." if preferred_language and preferred_language.lower() != "english" else "Provide explanations in simple, clear, accessible English before introducing formal academic terms."
         method_directive = f"- Selected Learning Method Preference: {learning_method} (Generate an activity strictly adopting this approach)" if learning_method and learning_method != "auto" else "- Selected Learning Method Preference: Auto (Dynamically pick optimal pedagogical approach)"
 
@@ -2695,77 +3010,25 @@ DYNAMIC TEACHING PLANNER BLUEPRINT:
 - Explanation Strategy: {teaching_plan.get('explanation_strategy')}
 - Practice Method: {teaching_plan.get('practice_method')}
 - Understanding Checks: {", ".join(teaching_plan.get('understanding_checks', []))}
-- Asks Available Materials: {teaching_plan.get('asks_available_materials')}
-- Materials Query Rationale: {teaching_plan.get('materials_query_rationale')}
 
-DECISION GUIDELINES FOR TEACHING APPROACHES (Select dynamically based on actual subject, topic, and level):
-These are decision guidelines, not fixed activities. Generate a new activity based on the selected syllabus topic:
+SUBJECT-SPECIFIC PEDAGOGICAL DIRECTIVE:
+{discipline_guideline}
 
-1. Science and Physics:
-   - Simple experiments or observations using safe, locally available materials.
-   - Include materials, a few steps, expected observations, and a clear scientific explanation.
-   - Never invent an experiment that cannot work.
+LEVEL ADAPTATION DIRECTIVE:
+{level_directive}
 
-2. Chemistry:
-   - Safe household demonstrations only when scientifically valid.
-   - Never suggest mixing unknown chemicals, dangerous substances, or unsupervised hazardous procedures.
-   - If a suitable experiment is not safe or practical, provide an observation or simulation task.
-
-3. Biology:
-   - Observe plants, seeds, leaves, soil, or other suitable natural materials where relevant.
-   - Include respectful handling of living things and no unnecessary harm.
-
-4. Mathematics:
-   - Real-world measurements, shopping calculations, geometry, budgeting, patterns, data collection, and worked problems.
-   - Gradually increase difficulty from easy to medium to hard (e.g. Level 1: Easy, Level 2: Medium, Level 3: Hard).
-   - For SCHOOL students: familiar shopping, budgeting, geometry, measurements, and gradual worked problems.
-   - For COLLEGE students: advanced calculus/algebra, formal derivations, coordinate geometry, data analysis, and domain problems.
-
-5. Computer Science and IT:
-   - Teach a small concept, show a correct runnable example, explain the code, give expected output, and provide a short coding task.
-   - Adapt complexity to school or college level and the actual syllabus.
-   - Set 'coding_task' with is_coding_topic=True, language, runnable snippet, explanation, expected output, and testing task.
-
-6. English and languages:
-   - Reading comprehension, vocabulary, grammar correction, paragraph writing, speaking practice, summarization, and real-life communication tasks.
-   - No forced physical experiments. Use texts, sentences, grammar rules, speech drills, and composition exercises.
-
-7. Social Science and History:
-   - Local observation, map-reading, timeline creation, community surveys with permission, comparing historical evidence, and explaining local civic or geographical examples.
-   - No forced lab experiments. Use chronological timeline mapping, primary vs secondary evidence evaluation, and civic institutional observation.
-
-8. Economics and Commerce:
-   - Household budgeting with fictional or voluntarily supplied figures, price comparison, simple accounting, market observation, and practical case studies.
-   - Use ledger balancing, supply/demand equilibrium, elasticity calculation, or budgeting scenarios.
-
-9. Engineering and college technical subjects:
-   - Syllabus-aligned calculations, small simulations, design exercises, code, measurements, and safe practical tasks suitable for the student's level.
-
-Strict Directives:
-1. AUTHENTIC STUDENT LEVEL ADAPTATION ({student_type}):
-   - FOR SCHOOL STUDENTS (student_type == "SCHOOL"):
-     * Use age-appropriate, simple, and friendly language.
-     * Explain ONE concept at a time; never overload or combine multiple advanced concepts.
-     * Prefer safe, short hands-on activities or observations using common, zero-cost everyday materials.
-     * Explain unfamiliar words clearly: include 'unfamiliar_words' glossary defining any new or technical terms simply.
-     * Use small numbers (e.g. single/double-digit arithmetic, 2, 5, 10) and beginner-friendly examples.
-     * STRICTLY AVOID college-level equations, differential calculus, complex engineering notation, advanced technical jargon, and complex programming unless the school curriculum explicitly supports them.
-   - FOR COLLEGE STUDENTS (student_type == "COLLEGE"):
-     * Ground strictly in the actual semester ({sem_str}), program ({program}), and department ({department}) from the authenticated profile and validated syllabus.
-     * Provide realistic technical examples, calculations, practical coding, data analysis, engineering applications, or domain-specific case studies as appropriate.
-     * Include explicit assumptions and reasoning in 'assumptions_and_reasoning'.
-     * DO NOT reduce every college task to a school-level household experiment. If the topic is analytical, theoretical, coding, or mathematical, formulate an applied technical model, derivation, code trace, or design exercise rather than a childish household experiment.
-2. STRICT TOPIC & SUBJECT ISOLATION:
+STRICT QUALITY RULES:
+1. STRICT TOPIC & SUBJECT ISOLATION:
    - The activity MUST be created specifically and exclusively for the selected subject ({subject}) and syllabus topic ({active_topic}).
    - Do NOT introduce concepts or laws from unrelated subjects (e.g. do not inject physics into literature, or biology into calculus).
-3. NEVER COMBINE UNRELATED CONCEPTS:
+2. NEVER COMBINE UNRELATED CONCEPTS:
    - NEVER combine unrelated concepts such as bicycle gear ratios and siphon fluid mechanics in one activity unless the student's syllabus topic explicitly and genuinely connects them and the connection is scientifically explained.
    - If the topic is about Computer Science/Algorithms, focus 100% on software, logic, flowcharts, code execution traces, or debugging. NEVER introduce bicycle gears, siphons, or soil runoff!
    - If the topic is about Mechanics/Gears/Levers, focus specifically on mechanical advantage and moment equilibrium. Do NOT force fluid siphons!
    - If the topic is about Fluid Mechanics/Pressure/Siphons, focus specifically on fluid dynamics and pressure. Do NOT force bicycle gear ratios!
-4. NO FIXED TEMPLATES:
-   - Remove fixed physics, bicycle, siphon, farming, or engineering templates that appear regardless of the selected subject. Generate fresh, context-specific content tailored directly to {active_topic}.
-5. MATERIAL ACCESSIBILITY & PREFERENCE (NO-PURCHASE GUARANTEE):
+3. NO FIXED TEMPLATES:
+   - Generate fresh, context-specific content tailored directly to {active_topic}.
+4. MATERIAL ACCESSIBILITY & PREFERENCE (NO-PURCHASE GUARANTEE):
    - Prefer materials the student already has, such as paper, a pencil, a ruler, everyday household objects, locally observable surroundings, or existing free software, only when appropriate to the task.
    - NEVER assume that every student has a bicycle, farmland, a smartphone camera, a printer, laboratory equipment, or a specific household item.
    - Do NOT require the student to purchase materials. All activities must be 100% achievable with zero financial expenditure.
@@ -2946,7 +3209,7 @@ Return ONLY a valid JSON object matching this exact schema:
             return normalized
 
         try:
-            raw = self.generate_content(prompt, files=files_payload, json_output=True)
+            raw = self.generate_content(prompt, files=files_payload, json_output=True, timeout=28, max_output_tokens=4096)
             res = self.parse_json_response(raw)
             if isinstance(res, dict) and (res.get("title") or res.get("activity_title") or res.get("academic_theory") or res.get("scientific_principle")):
                 normalized = self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
@@ -2954,7 +3217,14 @@ Return ONLY a valid JSON object matching this exact schema:
                 if is_valid:
                     return normalized
                 else:
-                    logger.warning(f"[LearnAnywhere] AI response failed coherence validation ({reason}). Regenerating with syllabus-grounded fallback.")
+                    logger.warning(f"[LearnAnywhere] AI response failed coherence validation ({reason}).")
+                    if not is_test_env:
+                        return {
+                            "error": f"Generated activity for '{subject}' - '{active_topic}' did not meet subject accuracy checks ({reason}). Please retry or choose a specific syllabus topic.",
+                            "can_retry": True,
+                            "is_supported": False,
+                            "coherence_failure": reason
+                        }
                     fallback = self._build_deterministic_learn_anywhere(
                         subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department,
                         student_type=student_type, learning_method=learning_method
@@ -2970,15 +3240,16 @@ Return ONLY a valid JSON object matching this exact schema:
                     "can_retry": True
                 }
 
-        # Fallback to deterministic curriculum-grounded activity
-        try:
-            fallback = self._build_deterministic_learn_anywhere(
-                subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department,
-                student_type=student_type, learning_method=learning_method
-            )
-            return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
-        except Exception as fb_err:
-            logger.warning(f"[LearnAnywhere] Deterministic fallback error: {fb_err}")
+        # In testing environments, provide deterministic curriculum-grounded activity
+        if is_test_env:
+            try:
+                fallback = self._build_deterministic_learn_anywhere(
+                    subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department,
+                    student_type=student_type, learning_method=learning_method
+                )
+                return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
+            except Exception as fb_err:
+                logger.warning(f"[LearnAnywhere] Deterministic fallback error: {fb_err}")
 
         return {
             "error": f"AI service could not generate a validated activity for '{subject}' - '{active_topic}'. Please click Retry.",
@@ -3036,33 +3307,46 @@ Return ONLY a valid JSON object matching this exact schema:
         # Discipline Mismatch Check between requested subject and returned activity subject
         act_sub = str(activity.get("subject") or (activity.get("academic_grounding") or {}).get("subject") or "").strip().lower()
         if sub_req and act_sub:
-            is_math_req = any(w in sub_req for w in ["math", "algebra", "calculus", "geometr", "arithmetic"])
+            is_math_req = any(w in sub_req for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab"])
             is_phy_act = any(w in act_sub for w in ["physic", "mechanic", "optic"])
-            if is_math_req and is_phy_act:
-                return CoherenceResult(False, "Discipline mismatch: Requested Mathematics but received Physics experiment.")
+            is_chem_act = any(w in act_sub for w in ["chem", "titrat"])
+            is_bio_act = any(w in act_sub for w in ["bio", "botan", "zoolog", "dissect"])
+            if is_math_req and (is_phy_act or is_chem_act or is_bio_act):
+                return CoherenceResult(False, f"Discipline mismatch: Requested Mathematics but received {act_sub.title()} activity.")
 
-        # Mathematics Coherence: Must not be unrelated physics, engineering, or chemical experiment
+            is_lang_req = any(w in sub_req for w in ["english", "language", "grammar", "linguist", "literature", "reading", "hindi", "french", "spanish", "german", "tamil"])
+            is_stem_act = any(w in act_sub for w in ["physic", "chem", "bio", "circuit", "mechanic"])
+            if is_lang_req and is_stem_act:
+                return CoherenceResult(False, f"Discipline mismatch: Requested Language ({sub_req.title()}) but received STEM {act_sub.title()} activity.")
+
+            is_cs_req = any(w in sub_req for w in ["computer", "data structure", "algorithm", "software", "web dev", "programm", "coding", "python", "java", "c++"])
+            if is_cs_req and (is_chem_act or is_bio_act):
+                return CoherenceResult(False, f"Discipline mismatch: Requested Computer Science but received {act_sub.title()} activity.")
+
+        # Mathematics Coherence: Must not be unrelated physics, biology, or chemistry laboratory experiment
         if any(w in sub_req for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab", "linear algebra"]):
-            hardware_hazard_terms = ["siphon", "battery", "circuit", "bulb", "transpiration", "panchayat", "dissection"]
-            has_math_core = any(m in all_text for m in ["calculate", "solve", "formula", "equation", "ratio", "step 1", "math", "graph", "triangle", "pebble", "algebra", "number"])
-            if any(ht in all_text for ht in hardware_hazard_terms) and not has_math_core:
-                return CoherenceResult(False, "Mathematics activity contained unrelated physical/biological experiment content.")
+            math_hazard_terms = [
+                "siphon", "battery", "circuit", "bulb", "transpiration", "panchayat", "dissection",
+                "titration", "beaker", "voltmeter", "ammeter", "copper wire", "clay pot transpiration", "chemical reaction"
+            ]
+            if any(ht in all_text for ht in math_hazard_terms):
+                return CoherenceResult(False, "Mathematics activity contained unrelated physical/biological/chemical experiment content.")
 
         # English / Language Coherence: Must be textual, reading, writing, grammar, vocabulary
-        elif any(w in sub_req for w in ["english", "language", "grammar", "linguist"]):
-            stem_lab_terms = ["beaker", "transpiration", "gear ratio", "voltage", "circuit", "siphon"]
+        elif any(w in sub_req for w in ["english", "language", "grammar", "linguist", "literature", "reading", "hindi", "french", "spanish", "german", "tamil"]):
+            stem_lab_terms = ["beaker", "transpiration", "gear ratio", "voltage", "circuit", "siphon", "chemical reaction", "titration", "test tube"]
             if any(st in all_text for st in stem_lab_terms):
                 return CoherenceResult(False, "Language activity contained unrelated STEM lab experiment content.")
 
         # Social Science / Civics / History: Must be social observation, maps, timelines, source criticism
         elif any(w in sub_req for w in ["social", "history", "civic", "geograph", "politic"]):
-            lab_terms = ["circuit", "dry cell", "titration", "siphon tube"]
+            lab_terms = ["circuit", "dry cell", "titration", "siphon tube", "test tube", "beaker", "voltage"]
             if any(lt in all_text for lt in lab_terms):
-                return CoherenceResult(False, "Social Science activity contained unrelated computing/circuit content.")
+                return CoherenceResult(False, "Social Science activity contained unrelated computing/circuit/chemical content.")
 
         # Computer Science: Must be computational, logic, coding, algorithmic
-        elif any(w in sub_req for w in ["computer", "data structure", "algorithm", "software", "web dev", "programm", "coding"]):
-            non_cs_terms = ["clay pot transpiration", "wood ash indicator", "soil erosion slope"]
+        elif any(w in sub_req for w in ["computer", "data structure", "algorithm", "software", "web dev", "programm", "coding", "python", "java", "c++"]):
+            non_cs_terms = ["clay pot transpiration", "wood ash indicator", "soil erosion slope", "titration", "dissection", "siphon tube", "copper sulfate", "litmus"]
             if any(ncs in all_text for ncs in non_cs_terms):
                 return CoherenceResult(False, "Computer Science activity contained unrelated biology/chemistry experiment content.")
 
@@ -3087,14 +3371,14 @@ Return ONLY a valid JSON object matching this exact schema:
         res: Dict[str, Any],
         subject: str,
         topic: str,
-        unit: str,
-        curriculum_ref: str,
-        resource_env: str,
-        difficulty: str,
-        semester: str,
-        program: str,
-        department: str,
-        constraint_mode: str,
+        unit: str = "Standard Unit",
+        curriculum_ref: str = "Active Validated Syllabus",
+        resource_env: str = "Everyday Environment",
+        difficulty: str = "Medium",
+        semester: str = "4",
+        program: str = "Standard Curriculum",
+        department: str = "General",
+        constraint_mode: str = "flexible",
         teaching_plan: Optional[Dict[str, Any]] = None,
         student_type: Optional[str] = None,
         custom_materials: Any = None,
@@ -3160,24 +3444,55 @@ Return ONLY a valid JSON object matching this exact schema:
         res["learning_objectives"] = objs or [f"Understand the fundamental practical principles of {topic}"]
         res["learning_objective"] = res["learning_objectives"][0]
 
-        # Ensure software/resources for coding or writing tasks instead of physical farm materials
+        # Determine discipline for tailored normalization
+        sub_low = str(subject).lower()
         is_coding = (
             (isinstance(res.get("coding_task"), dict) and res.get("coding_task").get("is_coding_topic")) or
             bool(res.get("code_snippet")) or
             res.get("demonstration_type") in ("code_and_logic_simulation", "coding_task") or
-            any(w in str(subject).lower() for w in ["computer", "code", "software", "programming", "python", "algorithm", "data structure"])
+            any(w in sub_low for w in ["computer", "code", "software", "programming", "python", "algorithm", "data structure", "web dev"])
         )
+        is_math = any(w in sub_low for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab", "trig", "number"])
+        is_lang = any(w in sub_low for w in ["english", "language", "grammar", "linguist", "literature", "reading", "hindi", "french", "spanish", "german", "tamil"])
+        is_social = any(w in sub_low for w in ["social", "history", "civic", "geograph", "politic", "sociolog", "community"])
+        is_comm = any(w in sub_low for w in ["account", "commerce", "finance", "audit", "tax", "econom", "business"])
+        is_science = any(w in sub_low for w in ["physic", "chem", "bio", "science", "botany", "zoolog", "mechanic", "fluid", "optic", "electric", "ecolog", "environ"])
+
         mats = res.get("materials_student_has") or res.get("local_materials") or []
         if isinstance(mats, str):
             mats = [mats]
         if is_coding:
-            software_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "pebbles", "charcoal"])]
+            software_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "pebbles", "charcoal", "measuring stick", "clean water"])]
             if not software_mats:
                 software_mats = ["Python 3 or browser IDE", "Text editor or terminal", "Paper & pen for trace tables"]
             res["materials_student_has"] = software_mats
             res["local_materials"] = software_mats
+        elif is_math:
+            math_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "clean water", "beaker", "test tube", "turmeric", "lemon"])]
+            if not math_mats:
+                math_mats = ["Notebook or scratch paper", "Pen or pencil", "Ruler or straightedge"]
+            res["materials_student_has"] = math_mats
+            res["local_materials"] = math_mats
+        elif is_lang:
+            lang_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "clean water", "beaker", "measuring stick"])]
+            if not lang_mats:
+                lang_mats = ["Notebook or lined paper", "Pen or pencil", "Reading passage or textbook chapter"]
+            res["materials_student_has"] = lang_mats
+            res["local_materials"] = lang_mats
+        elif is_social:
+            soc_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "clean water", "beaker", "measuring stick"])]
+            if not soc_mats:
+                soc_mats = ["Notebook and pen", "Atlas or reference timeline sheet", "Observation or interview note sheet"]
+            res["materials_student_has"] = soc_mats
+            res["local_materials"] = soc_mats
+        elif is_comm:
+            comm_mats = [m for m in mats if not any(w in str(m).lower() for w in ["soil", "sand", "matka", "leaf", "bicycle", "clay", "water & glass", "clean water", "beaker"])]
+            if not comm_mats:
+                comm_mats = ["Ledger notebook or lined paper", "Calculator or scratch sheet", "Pen and ruler"]
+            res["materials_student_has"] = comm_mats
+            res["local_materials"] = comm_mats
         else:
-            res["materials_student_has"] = mats or ["Locally sourceable items", "Clean water", "Measuring stick"]
+            res["materials_student_has"] = mats or ["Locally sourceable items", "Clean containers or ruler", "Household materials"]
             res["local_materials"] = res["materials_student_has"]
 
         subs = res.get("safe_substitutions") or []
@@ -3188,28 +3503,220 @@ Return ONLY a valid JSON object matching this exact schema:
         res.setdefault("no_purchase_alternative", "All required items can be gathered for free from natural surroundings, clean recycled containers, or standard tools.")
 
         import re
-        raw_steps = res.get("steps") or []
-        if isinstance(raw_steps, str):
-            raw_steps = [raw_steps]
-        cleaned_steps = []
-        for st in raw_steps:
-            st_str = str(st).strip()
-            clean_st = re.sub(r'^(?:step\s*\d+\s*[:.-]?\s*|\d+[\.)]\s*)', '', st_str, flags=re.IGNORECASE).strip()
-            if clean_st:
-                cleaned_steps.append(clean_st)
-        res["steps"] = cleaned_steps or [
-            "Gather genuine required resources in a clean, quiet area.",
-            "Carry out the procedure step-by-step observing each state change.",
-            "Record the final result or output to verify the concept."
-        ]
 
-        res.setdefault("simple_explanation", res.get("scientific_principle") or f"This activity demonstrates the physical behavior of {topic} through direct observable changes.")
+        def _clean_single_step_prefix(text: str) -> str:
+            if not text or not isinstance(text, str):
+                return ""
+            s = text.strip()
+            for _ in range(5):
+                prev = s
+                # Strip leading markdown bullets and heading markers
+                s = re.sub(r'^(?:[-*•]\s*|#{1,6}\s*)+', '', s).strip()
+                # Strip bold/italic step prefixes e.g. **Step 1:**, *Step 1:*, Step 1:
+                s = re.sub(r'^(?:\*{1,2}|_{1,2})?(?:step|task|phase|instruction)\s*#?\d+\s*[:.)\-–—]?(?:\*{1,2}|_{1,2})?\s*[:.\-–—]?\s*', '', s, flags=re.IGNORECASE).strip()
+                # Strip bare numbers with dot or paren or hyphen followed by letter e.g. '1. ', '1) ', '1 - A'
+                s = re.sub(r'^(?:\*{1,2}|_{1,2})?\d+\s*[.)](?:\*{1,2}|_{1,2})?\s*[:.\-–—]?\s*', '', s).strip()
+                s = re.sub(r'^(?:\*{1,2}|_{1,2})?\d+\s*[-–—:]\s*(?=[A-Za-z])(?:\*{1,2}|_{1,2})?\s*', '', s).strip()
+                # Strip bracketed/parenthesized numbers e.g. [1] or (1)
+                s = re.sub(r'^[\[\(]\s*\d+\s*[\]\)]\s*[:.\-–—]?\s*', '', s).strip()
+                if s == prev:
+                    break
+            return s or text.strip()
+
+        # Check existing structured experiments or tasks
+        raw_steps = res.get("steps") or res.get("procedure") or res.get("instructions") or res.get("step_by_step") or res.get("step_by_step_instructions") or []
+        existing_exps = res.get("experiments") or res.get("tasks")
+        normalized_experiments = []
+        all_flattened_steps = []
+
+        if isinstance(existing_exps, list) and len(existing_exps) > 0:
+            for idx, exp in enumerate(existing_exps):
+                if not isinstance(exp, dict):
+                    continue
+                exp_title = exp.get("title") or exp.get("name") or exp.get("experiment_title") or f"Experiment {idx + 1}"
+                exp_raw = exp.get("steps") or exp.get("procedure") or []
+                if isinstance(exp_raw, str):
+                    exp_raw = exp_raw.splitlines()
+                elif not isinstance(exp_raw, list):
+                    exp_raw = [str(exp_raw)]
+                exp_steps = []
+                for st in exp_raw:
+                    c = _clean_single_step_prefix(str(st))
+                    if c and not re.match(r'^(?:materials?|safety|observations?)\s*[:.]', c, re.IGNORECASE):
+                        exp_steps.append(c)
+                if exp_steps:
+                    normalized_experiments.append({"title": exp_title, "steps": exp_steps})
+                    all_flattened_steps.extend(exp_steps)
+
+        if not normalized_experiments:
+            candidate_items = []
+            if isinstance(raw_steps, list):
+                for item in raw_steps:
+                    if isinstance(item, str):
+                        candidate_items.append(item)
+                    elif isinstance(item, dict):
+                        candidate_items.append(str(item.get("text") or item.get("step") or item))
+                    else:
+                        candidate_items.append(str(item))
+            elif isinstance(raw_steps, str):
+                candidate_items = [raw_steps]
+            else:
+                candidate_items = []
+
+            # Group blocks respecting code fences
+            blocks = []
+            in_code_fence = False
+
+            for item in candidate_items:
+                item_lines = str(item).splitlines()
+                current_block = []
+                for line in item_lines:
+                    stripped = line.strip()
+                    if stripped.startswith("```"):
+                        in_code_fence = not in_code_fence
+                        current_block.append(line)
+                        continue
+                    if in_code_fence:
+                        current_block.append(line)
+                        continue
+                    if not stripped:
+                        if current_block:
+                            blocks.append("\n".join(current_block))
+                            current_block = []
+                        continue
+
+                    is_step_or_heading = bool(
+                        re.match(r'^(?:[-*•]\s*|#{1,6}\s*)?(?:\*{1,2}|_{1,2})?(?:step|task|experiment|part|phase)\s*#?\d+', stripped, re.IGNORECASE) or
+                        re.match(r'^(?:[-*•]\s*)?(?:\*{1,2}|_{1,2})?\d+\s*[.)]', stripped) or
+                        re.match(r'^(?:[-*•]\s*)?(?:\*{1,2}|_{1,2})?\d+\s*[-–—:]\s*(?=[A-Za-z])', stripped) or
+                        re.match(r'^(?:[-*•]\s*)?[\[\(]\s*\d+\s*[\]\)]', stripped) or
+                        re.match(r'^#{1,6}\s+', stripped) or
+                        re.match(r'^(?:expected\s+observations?|observations?|materials?|required\s+materials|items\s+needed|safety\s+precautions|safety\s+notes|safety|precautions?|warning|notes?)\s*[:.]', stripped, re.IGNORECASE)
+                    )
+                    is_continuation = bool(current_block and re.match(r'^[a-z]', stripped) and not re.match(r'^(?:and|or|then|where|such that)\b', stripped))
+                    if current_block and (is_step_or_heading or not is_continuation):
+                        blocks.append("\n".join(current_block))
+                        current_block = [line]
+                    else:
+                        current_block.append(line)
+
+                if current_block:
+                    blocks.append("\n".join(current_block))
+
+            parsed_exps = []
+            cur_exp = {"title": "", "steps": []}
+            found_exp_headers = False
+            current_section = "step"
+
+            for block in blocks:
+                stripped = block.strip()
+                header_clean = re.sub(r'^(?:#{1,6}\s*|[-*•]\s*|\*{1,2}|_{1,2})', '', stripped).strip()
+
+                is_exp = bool(re.match(r'^(?:experiment|activity|task|part)\s*(\d+|[A-Z])\s*[:.\-–—]\s*(.*)$', header_clean, re.IGNORECASE) or
+                              (stripped.startswith("#") and any(w in stripped.lower() for w in ["experiment", "activity", "task", "part"])))
+                if is_exp:
+                    found_exp_headers = True
+                    current_section = "step"
+                    if cur_exp["steps"]:
+                        parsed_exps.append(cur_exp)
+                    cur_exp = {"title": header_clean, "steps": []}
+                    continue
+
+                # Section switch: materials
+                if re.match(r'^(?:materials?|required\s+materials|items\s+needed)\b', header_clean, re.IGNORECASE) or re.match(r'^#{1,6}\s*(?:materials?|required\s+materials|items\s+needed)\b', stripped, re.IGNORECASE):
+                    current_section = "materials"
+                    content = re.sub(r'^(?:materials?|required\s+materials|items\s+needed)\s*[:.\-–—]?\s*', '', header_clean, flags=re.IGNORECASE).strip()
+                    if content and isinstance(res.get("materials_student_has"), list):
+                        res["materials_student_has"].append(content)
+                    continue
+
+                # Section switch: safety
+                if re.match(r'^(?:safety\s+precautions|safety\s+notes|safety|precautions?|warning)\b', header_clean, re.IGNORECASE) or re.match(r'^#{1,6}\s*(?:safety\s+precautions|safety\s+notes|safety|precautions?|warning)\b', stripped, re.IGNORECASE):
+                    current_section = "safety"
+                    content = re.sub(r'^(?:safety\s+precautions|safety\s+notes|safety|precautions?|warning)\s*[:.\-–—]?\s*', '', header_clean, flags=re.IGNORECASE).strip()
+                    if content and not res.get("safety_precautions"):
+                        res["safety_precautions"] = content
+                    continue
+
+                # Section switch: observations
+                if re.match(r'^(?:expected\s+observations?|observations?|result)\b', header_clean, re.IGNORECASE) or re.match(r'^#{1,6}\s*(?:expected\s+observations?|observations?|result)\b', stripped, re.IGNORECASE):
+                    current_section = "observations"
+                    content = re.sub(r'^(?:expected\s+observations?|observations?|result)\s*[:.\-–—]?\s*', '', header_clean, flags=re.IGNORECASE).strip()
+                    if content and not res.get("expected_observations"):
+                        res["expected_observations"] = content
+                    continue
+
+                is_numbered_step = bool(
+                    re.match(r'^(?:[-*•]\s*|#{1,6}\s*)?(?:\*{1,2}|_{1,2})?(?:step|task|phase|instruction)\s*#?\d+', stripped, re.IGNORECASE) or
+                    re.match(r'^(?:[-*•]\s*)?(?:\*{1,2}|_{1,2})?\d+\s*[.)]', stripped) or
+                    re.match(r'^(?:[-*•]\s*)?(?:\*{1,2}|_{1,2})?\d+\s*[-–—:]\s*(?=[A-Za-z])', stripped) or
+                    re.match(r'^(?:[-*•]\s*)?[\[\(]\s*\d+\s*[\]\)]', stripped)
+                )
+                if is_numbered_step:
+                    current_section = "step"
+
+                if current_section == "materials":
+                    if isinstance(res.get("materials_student_has"), list):
+                        res["materials_student_has"].append(stripped)
+                    continue
+                elif current_section == "safety":
+                    if not res.get("safety_precautions"):
+                        res["safety_precautions"] = stripped
+                    continue
+                elif current_section == "observations":
+                    if not res.get("expected_observations"):
+                        res["expected_observations"] = stripped
+                    continue
+
+                # Clean procedural instruction step
+                clean_text = _clean_single_step_prefix(block)
+                if clean_text:
+                    cur_exp["steps"].append(clean_text)
+
+            if cur_exp["steps"]:
+                parsed_exps.append(cur_exp)
+
+            if found_exp_headers and len(parsed_exps) > 1:
+                normalized_experiments = parsed_exps
+                for exp in parsed_exps:
+                    all_flattened_steps.extend(exp["steps"])
+            elif parsed_exps:
+                all_flattened_steps = parsed_exps[0]["steps"]
+                normalized_experiments = [{"title": res.get("title") or f"{topic} Practical Activity", "steps": all_flattened_steps}]
+
+        if not all_flattened_steps:
+            all_flattened_steps = [
+                f"Gather genuine required resources in a clean, quiet area for {topic}.",
+                f"Carry out the practical procedure step-by-step observing each state change.",
+                f"Record the final result or output to verify the concept."
+            ]
+            normalized_experiments = [{"title": res.get("title") or f"{topic} Practical Activity", "steps": all_flattened_steps}]
+
+        res["steps"] = all_flattened_steps
+        if normalized_experiments:
+            res["experiments"] = normalized_experiments
+
+        res.setdefault("simple_explanation", res.get("scientific_principle") or f"This activity demonstrates the core principles of {topic} through direct observable changes and applications.")
         res.setdefault("academic_theory", res.get("scientific_principle") or f"Governed by fundamental laws of {subject} related to {topic}.")
         res["scientific_principle"] = res["academic_theory"]
 
-        res.setdefault("real_world_concept", f"Physical verification of {topic} in everyday environments.")
+        res.setdefault("real_world_concept", f"Direct practical verification of {topic} in everyday environments.")
 
-        res.setdefault("everyday_applications", res.get("village_application") or "Directly applicable in agricultural crop management, irrigation, mechanics, sustainability, and local tools.")
+        if not res.get("everyday_applications") and not res.get("village_application"):
+            if is_math:
+                res["everyday_applications"] = "Directly applicable in financial budgeting, architectural scale measurements, data analysis, and quantitative problem solving."
+            elif is_coding:
+                res["everyday_applications"] = "Directly applicable in software automation, data processing, web development, and digital tools."
+            elif is_lang:
+                res["everyday_applications"] = "Directly applicable in professional communication, persuasive writing, reading comprehension, and documentation."
+            elif is_social:
+                res["everyday_applications"] = "Directly applicable in community governance, civic engagement, local policy analysis, and historical inquiry."
+            elif is_comm:
+                res["everyday_applications"] = "Directly applicable in personal finance, business bookkeeping, commercial trade, and market budgeting."
+            else:
+                res["everyday_applications"] = "Directly applicable in agricultural management, environmental monitoring, mechanics, and local tools."
+        else:
+            res.setdefault("everyday_applications", res.get("village_application"))
         res["village_application"] = res["everyday_applications"]
 
         # Why it matters - clear, encouraging explanation of educational & practical relevance
@@ -3219,42 +3726,142 @@ Return ONLY a valid JSON object matching this exact schema:
         res["why_it_matters"] = wim
 
         # For science subjects, distinguish expected results from guaranteed results
-        exp_obs = res.get("expected_observations") or res.get("expected_observation") or f"Observable physical change matching theoretical expectations of {topic}."
-        is_science = any(w in str(subject).lower() for w in ["physic", "chem", "bio", "science", "botany", "zoolog", "mechanic", "fluid", "optic", "electric", "ecolog", "environ"])
+        exp_obs = res.get("expected_observations") or res.get("expected_observation") or f"Observable result matching theoretical expectations of {topic}."
         if is_science and not any(w in str(exp_obs).lower() for w in ["vary", "variance", "conditional", "real-world", "ambient", "factors", "guaranteed"]):
             exp_obs = f"{exp_obs.rstrip('.')} Note: Expected results reflect ideal theoretical conditions; actual observations may vary slightly due to ambient factors like temperature, humidity, and measurement precision."
         res["expected_observations"] = exp_obs
         res["expected_observation"] = exp_obs
 
-        res.setdefault("limitations_and_misconceptions", "Environmental parameters such as temperature and humidity may cause minor measurement variance.")
+        res.setdefault("limitations_and_misconceptions", "Environmental parameters or numerical rounding may cause minor observation variance.")
 
-        res.setdefault("safety_precautions", res.get("safety_notes") or "Work with clean tools on flat ground. Wash hands thoroughly with soap after the experiment.")
+        if not res.get("safety_precautions") and not res.get("safety_notes"):
+            if is_math:
+                res["safety_precautions"] = "Work in a well-lit, comfortable study space; take regular breaks and double check each calculation step."
+            elif is_coding:
+                res["safety_precautions"] = "Keep electrical cables neatly arranged; follow ergonomic posture and take short screen breaks."
+            elif is_lang or is_social or is_comm:
+                res["safety_precautions"] = "Work in a quiet, well-lit study environment with organized reference materials."
+            else:
+                res["safety_precautions"] = "Work on a stable, flat surface away from food. Handle containers with care and wash hands with soap after the experiment."
+        else:
+            res.setdefault("safety_precautions", res.get("safety_notes"))
         res["safety_notes"] = res["safety_precautions"]
 
         questions = res.get("understanding_questions") or []
         if not isinstance(questions, list) or len(questions) == 0:
-            questions = [
-                {
-                    "question": f"What is the primary governing factor in {topic}?",
-                    "answer": "The physical balance of applied forces and material properties.",
-                    "explanation": "This directly confirms the academic theory."
-                },
-                {
-                    "question": f"How does changing particle size or quantity impact the result?",
-                    "answer": "It alters the rate of physical interaction proportionally.",
-                    "explanation": "Rate of interaction depends directly on exposed surface area."
-                },
-                {
-                    "question": f"Why is this concept important in rural applications?",
-                    "answer": "It allows efficient resource utilization without expensive instruments.",
-                    "explanation": "Understanding basic physics/chemistry enables low-cost optimization."
-                }
-            ]
+            if is_math:
+                questions = [
+                    {
+                        "question": f"What mathematical property or rule is directly applied in this problem for {topic}?",
+                        "answer": f"The fundamental algebraic or geometric operation governing {topic}.",
+                        "explanation": "This directly confirms the mathematical rule."
+                    },
+                    {
+                        "question": "How would the final calculation change if the input value doubled?",
+                        "answer": "It scales proportionally according to the formula.",
+                        "explanation": "Formulas dictate predictable scaling behavior."
+                    },
+                    {
+                        "question": "Why is verifying intermediate calculation steps important?",
+                        "answer": "It catches algebraic arithmetic errors early before concluding.",
+                        "explanation": "Step-by-step checks guarantee accurate mathematical solutions."
+                    }
+                ]
+            elif is_coding:
+                questions = [
+                    {
+                        "question": f"What is the primary objective of the algorithm or code logic for {topic}?",
+                        "answer": "To process input data through deterministic steps to produce the correct output.",
+                        "explanation": "Algorithms ensure deterministic, repeatable execution."
+                    },
+                    {
+                        "question": "What occurs if an edge case or boundary condition is passed to this logic?",
+                        "answer": "The condition must be handled explicitly to prevent runtime errors or incorrect results.",
+                        "explanation": "Robust software handles edge conditions gracefully."
+                    },
+                    {
+                        "question": "Why is tracking variable state through each iteration essential?",
+                        "answer": "It allows tracing and verifying correct program execution.",
+                        "explanation": "State inspection enables effective code debugging."
+                    }
+                ]
+            elif is_lang:
+                questions = [
+                    {
+                        "question": f"What is the central grammatical or literary rule governing {topic}?",
+                        "answer": "Standard grammatical conventions and syntactic coherence.",
+                        "explanation": "Grammatical precision ensures clarity and expressive power."
+                    },
+                    {
+                        "question": "How does word choice or structure alter the tone and clarity of the expression?",
+                        "answer": "It changes how effectively meaning and emotion are conveyed to the reader.",
+                        "explanation": "Vocabulary and syntax shape reader interpretation."
+                    },
+                    {
+                        "question": "Why is context critical when interpreting or constructing sentences?",
+                        "answer": "Context dictates appropriate meaning and prevents ambiguity.",
+                        "explanation": "Contextual grounding clarifies linguistic nuance."
+                    }
+                ]
+            elif is_social:
+                questions = [
+                    {
+                        "question": f"What historical or societal factor directly influenced {topic}?",
+                        "answer": "The socio-economic conditions and institutional structures of the period.",
+                        "explanation": "Historical events are shaped by underlying structural factors."
+                    },
+                    {
+                        "question": "How does this concept connect to present-day civic and community systems?",
+                        "answer": "It provides the foundational precedent for contemporary governance and society.",
+                        "explanation": "Civic understanding bridges historical precedents and modern life."
+                    },
+                    {
+                        "question": "Why is evaluating primary evidence or multiple perspectives essential?",
+                        "answer": "It ensures a balanced, fact-based understanding of events and policies.",
+                        "explanation": "Critical inquiry distinguishes evidence from bias."
+                    }
+                ]
+            elif is_comm:
+                questions = [
+                    {
+                        "question": f"What is the fundamental accounting or economic relationship in {topic}?",
+                        "answer": "The balance between income, expenditure, and resource allocation.",
+                        "explanation": "Financial models require balanced inflows and outflows."
+                    },
+                    {
+                        "question": "How does an unrecorded transaction or error impact the financial outcome?",
+                        "answer": "It leads to discrepancies between actual resources and ledger balances.",
+                        "explanation": "Double-entry rigor ensures complete financial integrity."
+                    },
+                    {
+                        "question": "Why is budgeting or cost forecasting essential before making purchases?",
+                        "answer": "It prevents deficit spending and allocates capital to highest priorities.",
+                        "explanation": "Financial planning protects against liquidity shortages."
+                    }
+                ]
+            else:
+                questions = [
+                    {
+                        "question": f"What is the primary governing factor in {topic}?",
+                        "answer": "The physical balance of applied forces and material properties.",
+                        "explanation": "This directly confirms the academic theory."
+                    },
+                    {
+                        "question": f"How does changing particle size or quantity impact the result?",
+                        "answer": "It alters the rate of physical interaction proportionally.",
+                        "explanation": "Rate of interaction depends directly on exposed surface area."
+                    },
+                    {
+                        "question": f"Why is this concept important in practical applications?",
+                        "answer": "It allows efficient resource utilization without expensive instruments.",
+                        "explanation": "Understanding basic science enables low-cost optimization."
+                    }
+                ]
 
         norm_questions = []
         for q in questions:
             if isinstance(q, dict):
-                exp = q.get("explanation") or q.get("answer_explanation") or "Scientific explanation of the answer."
+                exp = q.get("explanation") or q.get("answer_explanation") or f"Discipline explanation for {subject} concept."
                 ans = q.get("answer") or q.get("expected_answer") or ""
                 ques = q.get("question") or ""
                 norm_q = {
@@ -3275,8 +3882,8 @@ Return ONLY a valid JSON object matching this exact schema:
                 {
                     "question": "Why is careful systematic observation important for this concept?",
                     "answer": "Systematic observation isolates variables and verifies repeatable outcomes.",
-                    "explanation": "Scientific methodology relies on reproducible observations.",
-                    "answer_explanation": "Scientific methodology relies on reproducible observations."
+                    "explanation": "Academic methodology relies on reproducible observations.",
+                    "answer_explanation": "Academic methodology relies on reproducible observations."
                 },
                 {
                     "question": "How does this concept connect to practical applications?",
@@ -3289,10 +3896,36 @@ Return ONLY a valid JSON object matching this exact schema:
                     norm_questions.append(fallback_q)
         res["understanding_questions"] = norm_questions
 
-        res.setdefault("reflection_task", res.get("reflection_question") or f"How would you explain the principle of {topic} to a local farmer or artisan?")
+        if not res.get("reflection_task") and not res.get("reflection_question"):
+            if is_math:
+                res["reflection_task"] = f"How does understanding {topic} help you verify calculations or measurements in daily life?"
+            elif is_coding:
+                res["reflection_task"] = f"How would you optimize this code or logic for {topic} to make it clearer and more efficient?"
+            elif is_lang:
+                res["reflection_task"] = f"How does mastering {topic} improve your ability to communicate complex ideas clearly?"
+            elif is_social:
+                res["reflection_task"] = f"Why is understanding the historical or social context of {topic} essential for active citizenship?"
+            elif is_comm:
+                res["reflection_task"] = f"How can applying the principles of {topic} lead to better financial decision-making?"
+            else:
+                res["reflection_task"] = f"How would you explain the principle of {topic} using simple everyday analogies?"
+        else:
+            res.setdefault("reflection_task", res.get("reflection_question"))
         res["reflection_question"] = res["reflection_task"]
 
-        res.setdefault("follow_up_practice", f"Calculate the expected quantitative variance if temperature or material volume is doubled for {topic}.")
+        if not res.get("follow_up_practice"):
+            if is_math:
+                res["follow_up_practice"] = f"Try solving a related problem for {topic} with doubled values to verify how the solution scales."
+            elif is_coding:
+                res["follow_up_practice"] = f"Modify the loop or input condition for {topic} to handle edge cases like zero or negative inputs."
+            elif is_lang:
+                res["follow_up_practice"] = f"Write 3 original sentences or a short paragraph demonstrating your understanding of {topic}."
+            elif is_social:
+                res["follow_up_practice"] = f"Identify one contemporary community or national example that reflects the core ideas of {topic}."
+            elif is_comm:
+                res["follow_up_practice"] = f"Construct a simple scenario or balance calculation illustrating {topic} with hypothetical financial numbers."
+            else:
+                res["follow_up_practice"] = f"Calculate the expected quantitative variance if temperature or material volume is doubled for {topic}."
 
         coding_task = res.get("coding_task")
         if isinstance(coding_task, dict):
@@ -3481,6 +4114,17 @@ Return ONLY a valid JSON object matching this exact schema:
                         st_str = re.sub(rf'\b{re.escape(ht)}\b', 'safe room-temperature alternative', st_str, flags=re.IGNORECASE)
                 cleaned_steps.append(st_str)
             res["steps"] = cleaned_steps
+            if isinstance(res.get("experiments"), list):
+                for exp in res["experiments"]:
+                    if isinstance(exp, dict) and isinstance(exp.get("steps"), list):
+                        exp_clean = []
+                        for s in exp["steps"]:
+                            s_str = str(s)
+                            for ht in hazard_terms:
+                                if ht in s_str.lower():
+                                    s_str = re.sub(rf'\b{re.escape(ht)}\b', 'safe room-temperature alternative', s_str, flags=re.IGNORECASE)
+                            exp_clean.append(s_str)
+                        exp["steps"] = exp_clean
 
         # Student Type & Academic Level Grounding
         raw_st = student_type or res.get("student_type") or (teaching_plan.get("student_type") if teaching_plan else "") or ""
