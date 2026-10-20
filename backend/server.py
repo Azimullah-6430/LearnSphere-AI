@@ -146,25 +146,29 @@ app.config["MAX_CONTENT_LENGTH"]         = 300 * 1024 * 1024   # 300 MB
 
 # ── CORS & Cross-Origin Cookies ───────────────────────────────────────────────
 _frontend_url = os.getenv("FRONTEND_URL", "").strip()
-if _frontend_url and not _frontend_url.startswith("your_"):
-    # When frontend is on a different domain (e.g. Vercel) and backend is on Render:
-    # 1. Browsers require SameSite='None' and Secure=True to persist credentials cross-domain
+
+# In production (e.g. Render backend with separate Vercel frontend), browsers require
+# SameSite='None' and Secure=True to persist credentials across domains.
+if ENV != "development":
     app.config["SESSION_COOKIE_SAMESITE"] = "None"
     app.config["SESSION_COOKIE_SECURE"]   = True
 
-    # Parse comma-separated origins, strip whitespace & trailing slashes
-    raw_origins = [o.strip() for o in _frontend_url.split(",") if o.strip()]
-    origins_set = set()
-    for o in raw_origins:
-        clean = o.rstrip("/")
-        origins_set.add(clean)
-        origins_set.add(f"{clean}/")
+cors_origins = [
+    r"^https://.*\.vercel\.app$",
+    r"^https://.*\.onrender\.com$",
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+]
 
-    CORS(app, resources={r"/api/*": {"origins": list(origins_set)}},
-         supports_credentials=True)
-else:
-    # Single-service Render deployment: frontend served from same origin
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+if _frontend_url and not _frontend_url.startswith("your_"):
+    for o in _frontend_url.split(","):
+        clean = o.strip().rstrip("/")
+        if clean:
+            cors_origins.append(clean)
+            cors_origins.append(f"{clean}/")
+
+CORS(app, resources={r"/api/*": {"origins": cors_origins}},
+     supports_credentials=True)
 
 # ── Upload folder ─────────────────────────────────────────────────────────────
 try:

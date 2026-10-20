@@ -16,8 +16,15 @@ const isLocalhost = typeof window !== 'undefined' &&
 // In production on Render or any cloud host, frontend and backend share the same origin,
 // so relative paths work automatically with cookies and zero CORS issues.
 // In local development, the backend runs on :5000 while Vite dev server runs on :5173.
+const FALLBACK_BACKEND_URL = 'https://learnsphere-ai-backend-dd84.onrender.com'
+
 const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
-const API_BASE_URL = rawBase || ''
+
+// In localhost dev, proxy through Vite dev server ('')
+// In production on Vercel or cloud hosts, use VITE_API_BASE_URL if set, or FALLBACK_BACKEND_URL
+const API_BASE_URL = isLocalhost
+  ? (rawBase || '')
+  : (rawBase || FALLBACK_BACKEND_URL)
 
 async function request(endpoint, options = {}) {
   try {
