@@ -16,7 +16,7 @@ const isLocalhost = typeof window !== 'undefined' &&
 // In production on Render or any cloud host, frontend and backend share the same origin,
 // so relative paths work automatically with cookies and zero CORS issues.
 // In local development, the backend runs on :5000 while Vite dev server runs on :5173.
-const rawBase = import.meta.env.VITE_API_BASE_URL || ''
+const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
 const API_BASE_URL = rawBase || ''
 
 async function request(endpoint, options = {}) {
@@ -46,6 +46,13 @@ async function request(endpoint, options = {}) {
         let msg = `Server error (${res.status}).`
         if (res.status === 401) msg = data.error || 'Not authenticated. Please sign in.'
         else if (res.status === 403) msg = data.error || 'Access denied.'
+        else if (res.status === 404) {
+          if (!API_BASE_URL || (text && text.includes('NOT_FOUND'))) {
+            msg = 'Backend not reached (404). Please ensure VITE_API_BASE_URL is set to your Render backend URL in Vercel settings.'
+          } else {
+            msg = data.error || 'Requested endpoint not found.'
+          }
+        }
         else if (res.status === 413) msg = 'Files exceed server size limit. Please upload smaller files.'
         else if (res.status === 409) msg = data.error || 'Conflict — record already exists.'
         else if ([502, 503, 504, 520].includes(res.status)) msg = `Server temporarily unavailable (${res.status}). Please try again.`
