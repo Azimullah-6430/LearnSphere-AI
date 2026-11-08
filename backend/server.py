@@ -475,27 +475,27 @@ def _normalize_user_doc(doc: dict) -> dict:
 
 def _lookup_user_by_id(user_id: str):
     """Fetch user document from MongoDB or SQLite by their stored id."""
+    if not user_id:
+        return None
     if has_request_context():
         sess_user = session.get("user")
         if isinstance(sess_user, dict) and (str(sess_user.get("id")) == str(user_id) or str(sess_user.get("_id")) == str(user_id) or str(sess_user.get("user_id")) == str(user_id)):
             return sess_user
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        doc = None
-        if ObjectId and len(str(user_id)) == 24:
-            try:
-                doc = mongo_db["users"].find_one({"_id": ObjectId(user_id)})
-            except Exception:
-                pass
-        if not doc:
-            doc = mongo_db["users"].find_one({"_id": str(user_id)})
-        if not doc:
-            doc = mongo_db["users"].find_one({"id": str(user_id)})
-        if not doc:
-            doc = mongo_db["users"].find_one({"user_id": str(user_id)})
-        if doc:
-            return _normalize_user_doc(mongo_serialize(doc))
-        return sess_user if isinstance(sess_user, dict) else None
+        try:
+            or_conditions = [{"user_id": str(user_id)}, {"id": str(user_id)}, {"_id": str(user_id)}]
+            if ObjectId and len(str(user_id)) == 24:
+                try:
+                    or_conditions.insert(0, {"_id": ObjectId(user_id)})
+                except Exception:
+                    pass
+            doc = mongo_db["users"].find_one({"$or": or_conditions})
+            if doc:
+                return _normalize_user_doc(mongo_serialize(doc))
+        except Exception as exc:
+            logger.warning("[DB] Error looking up user in MongoDB: %s", exc)
+        return sess_user if (has_request_context() and isinstance(sess_user, dict)) else None
 
     conn = get_sqlite_db()
     cursor = conn.cursor()
@@ -1247,23 +1247,31 @@ def auth_login():
 
     mongo_db = get_mongodb()
     if mongo_db is not None:
-        doc = mongo_db["users"].find_one({"email": email})
-        if doc:
-            stored_id = str(doc["_id"])
-            user = mongo_serialize(doc)
-            # keep hash for verification (mongo_serialize strips it)
-            user["_password_hash"] = doc.get("password_hash") or doc.get("password") or ""
-    else:
-        conn = get_sqlite_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            d = dict(row)
-            stored_id = str(d["id"])
-            user = {k: v for k, v in d.items() if k not in ("password", "password_hash")}
-            user["_password_hash"] = d.get("password_hash") or d.get("password") or ""
+        try:
+            doc = mongo_db["users"].find_one({"email": email})
+            if doc:
+                stored_id = str(doc["_id"])
+                user = mongo_serialize(doc)
+                # keep hash for verification (mongo_serialize strips it)
+                user["_password_hash"] = doc.get("password_hash") or doc.get("password") or ""
+        except Exception as exc:
+            logger.warning("[Auth] MongoDB query failed during login: %s. Attempting SQLite fallback.", exc)
+            user = None
+
+    if user is None:
+        try:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                d = dict(row)
+                stored_id = str(d["id"])
+                user = {k: v for k, v in d.items() if k not in ("password", "password_hash")}
+                user["_password_hash"] = d.get("password_hash") or d.get("password") or ""
+        except Exception as exc:
+            logger.error("[Auth] SQLite lookup error: %s", exc)
 
     if not user:
         return jsonify({"success": False, "error": "Account not found. Please create an account first."}), 401

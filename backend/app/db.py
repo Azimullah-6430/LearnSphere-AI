@@ -12,6 +12,7 @@ import sys
 import time
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -50,6 +51,7 @@ _mongo_client: "MongoClient | None" = None
 _mongo_db     = None
 _last_mongo_attempt_time: float = 0.0
 _MONGO_RETRY_INTERVAL: float = 30.0  # Retry Atlas connection at most once every 30 seconds
+_indexes_initialized: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -86,23 +88,29 @@ def get_mongodb():
         logger.warning("[DB] MONGODB_URI not configured. Using SQLite.")
         return None
 
-    # Fast connection attempts with TLS certificate
+    # Optimized connection options with connection pooling and fast failover
+    pool_options = {
+        "maxPoolSize": 50,
+        "minPoolSize": 2,
+        "maxIdleTimeMS": 45000,
+        "waitQueueTimeoutMS": 5000,
+        "serverSelectionTimeoutMS": 3000,
+        "connectTimeoutMS": 3000,
+        "socketTimeoutMS": 10000,
+    }
+
     tls_options: list[dict] = []
     try:
         import certifi  # type: ignore
         tls_options.append({
-            "serverSelectionTimeoutMS": 2500,
-            "connectTimeoutMS": 2500,
-            "socketTimeoutMS": 20000,
+            **pool_options,
             "tlsCAFile": certifi.where(),
         })
     except ImportError:
         pass
 
     tls_options.append({
-        "serverSelectionTimeoutMS": 2500,
-        "connectTimeoutMS": 2500,
-        "socketTimeoutMS": 20000,
+        **pool_options,
         "tlsAllowInvalidCertificates": True,
     })
 
@@ -186,22 +194,26 @@ get_db = get_sqlite_db
 def init_db():
     """
     Initialise the database layer.
-    For MongoDB: create all required indexes.
+    For MongoDB: verify and create required indexes in the background so startup is non-blocking.
     For SQLite: migrate schema.
     """
+    global _indexes_initialized
     try:
         mongo_db = get_mongodb()
     except Exception as exc:
         logger.warning("[DB] Initial Mongo connection deferred: %s", exc)
         mongo_db = None
 
-    if mongo_db is not None:
-        _init_mongodb_indexes(mongo_db)
+    if mongo_db is not None and not _indexes_initialized:
+        _indexes_initialized = True
+        # Run index creation in background thread to avoid blocking Gunicorn worker startup
+        t = threading.Thread(target=_init_mongodb_indexes, args=(mongo_db,), daemon=True, name="MongoIndexInit")
+        t.start()
     _init_sqlite_schema()
 
 
 def _init_mongodb_indexes(db) -> None:
-    """Idempotent index creation.  Runs at every startup."""
+    """Idempotent index creation."""
     try:
         # users
         db["users"].create_index("email", unique=True, background=True)
@@ -274,9 +286,6 @@ def _init_mongodb_indexes(db) -> None:
         db["class_memberships"].create_index([("teacher_id", 1), ("class_id", 1)], background=True)
         db["class_memberships"].create_index("student_user_id", sparse=True, background=True)
         db["plagiarism_records"].create_index([("teacher_id", 1), ("class_id", 1)], background=True)
-
-        # Legacy data migration for provenance
-        _migrate_mongo_legacy_provenance(db)
 
         logger.info("[DB] MongoDB indexes verified.")
     except Exception as exc:
@@ -791,13 +800,6 @@ def _init_sqlite_schema() -> None:
             cursor.execute("ALTER TABLE notifications ADD COLUMN target_id TEXT;")
         except Exception as exc:
             logger.debug("[DB] SQLite notifications migration notice: %s", exc)
-
-    # Safe data migration for SQLite legacy evaluations
-    try:
-        from .evaluation.repair import run_safe_evaluation_repair
-        run_safe_evaluation_repair(dry_run=False, backup=True)
-    except Exception as exc:
-        logger.debug("[DB] SQLite legacy data repair notice: %s", exc)
 
     cursor.execute("PRAGMA table_info(knowledge_challenges);")
     existing_kc_cols = {row[1] for row in cursor.fetchall()}

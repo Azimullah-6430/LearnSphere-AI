@@ -37,12 +37,28 @@ async function request(endpoint, options = {}) {
       headers['Content-Type'] = 'application/json'
     }
 
-    const res = await fetch(url, {
-      ...options,
-      headers,
-      body,
-      credentials: 'include',   // always send session cookie
-    })
+    // Default timeout: 15s for auth requests to prevent infinite loading, 30s for general requests
+    const defaultTimeout = endpoint.startsWith('/api/auth') ? 15000 : 30000
+    const timeoutMs = options.timeout ?? defaultTimeout
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => controller.abort())
+    }
+
+    let res
+    try {
+      res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers,
+        body,
+        credentials: 'include',   // always send session cookie
+      })
+    } finally {
+      clearTimeout(timer)
+    }
 
     const text = await res.text()
     let data = {}
@@ -70,8 +86,17 @@ async function request(endpoint, options = {}) {
 
     return data
   } catch (err) {
-    console.warn(`[API] ${endpoint}:`, err.message)
-    return { success: false, error: err.message, isOffline: true }
+    if (err.name === 'AbortError') {
+      const msg = 'Request timed out. The server is taking longer than usual to respond. Please try again.'
+      console.warn(`[API Timeout] ${endpoint}:`, msg)
+      return { success: false, error: msg, isTimeout: true }
+    }
+    const isNetwork = err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))
+    const msg = isNetwork
+      ? 'Unable to connect to the server. Please check your network connection.'
+      : (err.message || 'Network request failed.')
+    console.warn(`[API Error] ${endpoint}:`, err.message)
+    return { success: false, error: msg, isOffline: true }
   }
 }
 
