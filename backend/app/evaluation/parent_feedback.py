@@ -448,3 +448,4 @@ RULES:
     except Exception as exc:
         logger.warning("[ParentFeedback] Gemini synthesis notice: %s. Falling back to deterministic engine.", exc)
     return None
+

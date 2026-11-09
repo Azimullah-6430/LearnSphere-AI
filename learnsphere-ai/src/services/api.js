@@ -30,14 +30,14 @@ const API_BASE_URL = isLocalhost
 if (typeof window !== 'undefined') {
   setInterval(() => {
     try {
-      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => {})
-    } catch {}
+      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => { })
+    } catch { }
   }, 8 * 60 * 1000)
 }
 
 async function request(endpoint, options = {}) {
   try {
-    const url     = `${API_BASE_URL}${endpoint}`
+    const url = `${API_BASE_URL}${endpoint}`
     const headers = { ...(options.headers || {}) }
 
     let body = options.body
@@ -117,8 +117,8 @@ export const api = {
   /** Non-blocking backend pre-warming ping */
   warmup: () => {
     try {
-      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => {})
-    } catch {}
+      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => { })
+    } catch { }
   },
 
   /** Validate current session. Called by AppContext on every app load. */
@@ -212,8 +212,8 @@ export const api = {
       })
       if (!res.ok) throw new Error('PDF generation failed.')
       const blob = await res.blob()
-      const url  = window.URL.createObjectURL(blob)
-      const a    = document.createElement('a')
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
       a.href = url
       a.download = `Evaluation_Report_${(evalData?.subject || 'Paper').replace(/\s+/g, '_')}.pdf`
       document.body.appendChild(a)
@@ -265,8 +265,8 @@ export const api = {
 
   // ── Plagiarism ────────────────────────────────────────────────────────────
 
-  getPlagiarismMatches:  () => request('/api/plagiarism/matches'),
-  getPlagiarismSummary:  () => request('/api/plagiarism/summary'),
+  getPlagiarismMatches: () => request('/api/plagiarism/matches'),
+  getPlagiarismSummary: () => request('/api/plagiarism/summary'),
 
   // ── Students ──────────────────────────────────────────────────────────────
 
@@ -388,7 +388,7 @@ export const api = {
 
   // ── Memory Cards ──────────────────────────────────────────────────────────
 
-  getMemoryCards:   (studentName = '') =>
+  getMemoryCards: (studentName = '') =>
     request(`/api/memory/cards?student_name=${encodeURIComponent(studentName)}`),
   createMemoryCard: (payload) =>
     request('/api/memory/cards', { method: 'POST', body: payload }),
