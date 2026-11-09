@@ -3,7 +3,7 @@ import { Card, PageHead, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { BOARDS, CLASSES, STREAMS, COLLEGE_SEMESTERS, COLLEGE_STREAMS, COLLEGE_DOMAINS } from '../data/syllabusData.js'
 import { api } from '../services/api.js'
-import { UploadCloud, FileText, CheckCircle2, AlertCircle, Sparkles, GraduationCap, BookOpen, Building } from 'lucide-react'
+import { UploadCloud, FileText, CheckCircle2, AlertCircle, Sparkles, GraduationCap, BookOpen, Building, Headphones, Volume2, Mic, Sliders, ShieldCheck, Keyboard } from 'lucide-react'
 
 export default function Settings() {
   const { user, studentProfile, updateProfile, setSyllabusData } = useApp()
@@ -46,6 +46,21 @@ export default function Settings() {
   const [savedMsg, setSavedMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
+  // Blind Learning Companion States
+  const [isDisabledStudent, setIsDisabledStudent] = useState(Boolean(user?.is_disabled_student))
+  const [blindCompanionEnabled, setBlindCompanionEnabled] = useState(Boolean(user?.blind_companion_enabled || user?.is_disabled_student))
+  const [blindSettings, setBlindSettings] = useState({
+    audio_first: true,
+    text_to_speech: true,
+    voice_questions: true,
+    voice_navigation: true,
+    audio_speed: 1.0,
+    explanation_mode: 'detailed',
+    spoken_diagrams: true,
+    keyboard_nav: true,
+    ...(user?.blind_companion_settings || {})
+  })
+
   useEffect(() => {
     if (user) {
       setName(user.name || '')
@@ -65,6 +80,12 @@ export default function Settings() {
       setSchoolStream(user.stream || 'Science')
       setSection(user.section || '')
       setRollNumber(user.roll_number || '')
+
+      setIsDisabledStudent(Boolean(user.is_disabled_student))
+      setBlindCompanionEnabled(Boolean(user.blind_companion_enabled || user.is_disabled_student))
+      if (user.blind_companion_settings && typeof user.blind_companion_settings === 'object') {
+        setBlindSettings(prev => ({ ...prev, ...user.blind_companion_settings }))
+      }
     }
   }, [user])
 
@@ -115,6 +136,10 @@ export default function Settings() {
           // clear school fields
           board: null,
           grade_level: null,
+          is_disabled_student: Boolean(isDisabledStudent),
+          disability_type: isDisabledStudent ? 'blind_or_low_vision' : null,
+          blind_companion_enabled: Boolean(blindCompanionEnabled),
+          blind_companion_settings: blindSettings,
         } : {
           name,
           level: 'school',
@@ -131,6 +156,10 @@ export default function Settings() {
           currentSemester: null,
           degree: null,
           program: null,
+          is_disabled_student: Boolean(isDisabledStudent),
+          disability_type: isDisabledStudent ? 'blind_or_low_vision' : null,
+          blind_companion_enabled: Boolean(blindCompanionEnabled),
+          blind_companion_settings: blindSettings,
         }
       ) : {
         name,
@@ -529,6 +558,276 @@ export default function Settings() {
           </Button>
         </Card>
       </div>
+
+      {/* Dedicated Blind Learning Companion Settings Section for Students */}
+      {isStudent && (
+        <Card className="mt-6 p-6 border-2 border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/40 via-white to-sky-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border)] pb-4 mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20">
+                <Headphones size={22} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Blind Learning Companion Settings
+                  </h3>
+                  <Badge variant={blindCompanionEnabled ? 'default' : 'secondary'} className={blindCompanionEnabled ? 'bg-indigo-600 text-white' : ''}>
+                    {blindCompanionEnabled ? 'Active' : 'Off by Default'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                  Exclusively designed for blind and low-vision learners. Master toggle remains OFF by default.
+                </p>
+              </div>
+            </div>
+
+            {/* Master Toggle */}
+            <div className="flex items-center gap-3 self-start sm:self-center bg-white dark:bg-slate-800 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
+              <label htmlFor="master-blind-toggle" className="text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                Enable Companion
+              </label>
+              <input
+                id="master-blind-toggle"
+                type="checkbox"
+                checked={blindCompanionEnabled}
+                onChange={(e) => {
+                  const val = e.target.checked
+                  setBlindCompanionEnabled(val)
+                  if (val && !isDisabledStudent) setIsDisabledStudent(true)
+                }}
+                className="w-5 h-5 accent-indigo-600 cursor-pointer"
+                aria-label="Master Enable Blind Learning Companion Toggle"
+              />
+            </div>
+          </div>
+
+          {/* Student Disability Confirmation */}
+          <div className="mb-5 p-3.5 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isDisabledStudent}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  setIsDisabledStudent(checked)
+                  if (checked && !blindCompanionEnabled) setBlindCompanionEnabled(true)
+                }}
+                className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+              />
+              <div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  I am a blind or low-vision student
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                  Your preferences are stored securely against your authenticated student account. Non-disabled student accounts do not display this interface.
+                </span>
+              </div>
+            </label>
+          </div>
+
+          {/* Detailed Preferences Grid */}
+          <div className={`space-y-5 transition-opacity ${blindCompanionEnabled ? 'opacity-100' : 'opacity-60 pointer-events-none'}`}>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {/* Audio-First Learning */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Volume2 size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Audio-First Learning</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Prioritizes spoken explanations and audio summaries across your syllabus.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.audio_first}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, audio_first: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Audio-First Learning"
+                />
+              </div>
+
+              {/* Text-to-Speech (TTS) */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Text-to-Speech</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Browser speech synthesis reads all curriculum concepts and notes aloud.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.text_to_speech}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, text_to_speech: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Text-to-Speech"
+                />
+              </div>
+
+              {/* Voice Questions */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Mic size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Voice Questions</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Practice questions and checkpoints are announced verbally with audio replay.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.voice_questions}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, voice_questions: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Voice Questions"
+                />
+              </div>
+
+              {/* Voice Navigation */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sliders size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Voice Navigation</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Spoken notifications and announcements when switching units or topics.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.voice_navigation}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, voice_navigation: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Voice Navigation"
+                />
+              </div>
+
+              {/* Spoken Diagram Descriptions */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <FileText size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Spoken Diagrams</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Provides detailed verbal descriptions for visual charts, schemas, and figures.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.spoken_diagrams}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, spoken_diagrams: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Spoken Diagram Descriptions"
+                />
+              </div>
+
+              {/* Keyboard Navigation */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/90 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Keyboard size={16} className="text-indigo-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Keyboard Shortcuts</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Hotkeys: <kbd className="px-1 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px]">P</kbd> Play/Pause, <kbd className="px-1 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px]">N</kbd> Next, <kbd className="px-1 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px]">R</kbd> Repeat.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={blindSettings.keyboard_nav}
+                  onChange={(e) => setBlindSettings(prev => ({ ...prev, keyboard_nav: e.target.checked }))}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 cursor-pointer"
+                  aria-label="Toggle Keyboard Navigation"
+                />
+              </div>
+            </div>
+
+            {/* Audio Speed & Explanation Mode Controls */}
+            <div className="grid sm:grid-cols-2 gap-4 pt-2">
+              <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+                  Adjustable Audio Speed ({blindSettings.audio_speed || 1.0}x)
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+                  Adjust audio synthesis pacing according to your listening preference.
+                </p>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => setBlindSettings(prev => ({ ...prev, audio_speed: rate }))}
+                      className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all ${
+                        (blindSettings.audio_speed || 1.0) === rate
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                      }`}
+                    >
+                      {rate}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+                  Explanation Depth Mode
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+                  Choose between quick high-yield essence or detailed syllabus explanations.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBlindSettings(prev => ({ ...prev, explanation_mode: 'simple' }))}
+                    className={`py-2.5 px-3 rounded-lg border text-left text-xs transition-all ${
+                      blindSettings.explanation_mode === 'simple'
+                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 font-bold text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <div className="font-bold">Simple Mode</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Concise, everyday words</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBlindSettings(prev => ({ ...prev, explanation_mode: 'detailed' }))}
+                    className={`py-2.5 px-3 rounded-lg border text-left text-xs transition-all ${
+                      blindSettings.explanation_mode === 'detailed'
+                        ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 font-bold text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <div className="font-bold">Detailed Mode</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Comprehensive depth</div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Save Preferences Action */}
+            <div className="pt-2 flex justify-end">
+              <Button
+                type="button"
+                disabled={saving}
+                onClick={handleSaveProfile}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs"
+              >
+                {saving ? 'Saving...' : 'Save Accessibility Preferences'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
     </>
   )
 }

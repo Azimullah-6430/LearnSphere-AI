@@ -534,6 +534,45 @@ def _normalize_user_doc(doc: dict) -> dict:
         d["class"] = cls_val
         d["grade_level"] = cls_val
 
+    # Blind Learning Companion normalization
+    is_disabled = bool(d.get("is_disabled_student") or d.get("isDisabledStudent") or False)
+    d["is_disabled_student"] = is_disabled
+    d["isDisabledStudent"] = is_disabled
+    d["disability_type"] = d.get("disability_type") or d.get("disabilityType") or (
+        "blind_or_low_vision" if is_disabled else None
+    )
+
+    raw_bc_enabled = d.get("blind_companion_enabled")
+    if raw_bc_enabled is None:
+        raw_bc_enabled = d.get("blindCompanionEnabled")
+    if raw_bc_enabled is not None:
+        bc_enabled = bool(raw_bc_enabled)
+    else:
+        bc_enabled = is_disabled
+
+    d["blind_companion_enabled"] = bc_enabled
+    d["blindCompanionEnabled"] = bc_enabled
+
+    settings_raw = d.get("blind_companion_settings") or d.get("blindCompanionSettings")
+    if isinstance(settings_raw, str):
+        try:
+            settings_raw = json.loads(settings_raw)
+        except Exception:
+            settings_raw = None
+    if not isinstance(settings_raw, dict):
+        settings_raw = {
+            "audio_first": True,
+            "text_to_speech": True,
+            "voice_questions": True,
+            "voice_navigation": True,
+            "audio_speed": 1.0,
+            "explanation_mode": "detailed",
+            "spoken_diagrams": True,
+            "keyboard_nav": True,
+        }
+    d["blind_companion_settings"] = settings_raw
+    d["blindCompanionSettings"] = settings_raw
+
     return d
 
 
@@ -1204,6 +1243,30 @@ def auth_register():
         stable_user_id = str(uuid.uuid4())
         now = datetime.utcnow()
 
+        # Accessibility / Blind Learning Companion options
+        is_disabled_student = bool(g("is_disabled_student") or g("isDisabledStudent") or False)
+        disability_type = str(g("disability_type") or g("disabilityType") or "").strip() or None
+        if is_disabled_student and not disability_type:
+            disability_type = "blind_or_low_vision"
+        raw_bc = g("blind_companion_enabled") if g("blind_companion_enabled") is not None else g("blindCompanionEnabled")
+        blind_companion_enabled = bool(raw_bc) if raw_bc is not None else is_disabled_student
+
+        bc_settings = g("blind_companion_settings") or g("blindCompanionSettings") or {
+            "audio_first": True,
+            "text_to_speech": True,
+            "voice_questions": True,
+            "voice_navigation": True,
+            "audio_speed": 1.0,
+            "explanation_mode": "detailed",
+            "spoken_diagrams": True,
+            "keyboard_nav": True,
+        }
+        if isinstance(bc_settings, str):
+            try:
+                bc_settings = json.loads(bc_settings)
+            except Exception:
+                pass
+
         user_doc = {
             "user_id":          stable_user_id,
             "name":             name,
@@ -1232,6 +1295,10 @@ def auth_register():
             "semester":         semester,
             "current_semester": current_semester,
             "subjects":         subjects,
+            "is_disabled_student": is_disabled_student,
+            "disability_type":  disability_type,
+            "blind_companion_enabled": blind_companion_enabled,
+            "blind_companion_settings": bc_settings,
             "created_at":       now,
             "updated_at":       now,
             "status":           "active",
@@ -1255,13 +1322,15 @@ def auth_register():
                 (user_id, name, email, password_hash, role, level, teacher_level,
                  institution_name, degree, program, department, branch, domain,
                  current_year, academic_year, regulation, batch, board, roll_number,
-                 section, grade_level, stream, semester, current_semester, subjects_json)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 section, grade_level, stream, semester, current_semester, subjects_json,
+                 is_disabled_student, disability_type, blind_companion_enabled, blind_companion_settings)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (stable_user_id, name, email, password_hash, role, level,
                   teacher_level, institution_name, degree, program, department, branch, domain,
                   current_year, academic_year, regulation, batch, board,
                   roll_number, section, grade_level, stream, semester, current_semester,
-                  json.dumps(subjects)))
+                  json.dumps(subjects), 1 if is_disabled_student else 0, disability_type,
+                  1 if blind_companion_enabled else 0, json.dumps(bc_settings) if isinstance(bc_settings, (dict, list)) else str(bc_settings)))
             stored_id = str(cursor.lastrowid)
             conn.commit()
             conn.close()
@@ -1447,7 +1516,9 @@ def update_user_profile():
             "academic_year", "academicYear", "regulation", "batch", "regulationBatch",
             "institution_name", "institutionName", "institution", "college", "school",
             "section", "roll_number", "rollNumber", "subjects", "city", "state",
-            "country", "phone", "bio", "teacher_level", "teacherLevel"
+            "country", "phone", "bio", "teacher_level", "teacherLevel",
+            "is_disabled_student", "isDisabledStudent", "disability_type", "disabilityType",
+            "blind_companion_enabled", "blindCompanionEnabled", "blind_companion_settings", "blindCompanionSettings"
         }
 
         update_fields = {}
@@ -1484,6 +1555,14 @@ def update_user_profile():
                     update_fields["current_semester"] = sem_int
                 elif k == "teacherLevel":
                     update_fields["teacher_level"] = str(v) if v is not None else None
+                elif k in ("is_disabled_student", "isDisabledStudent"):
+                    update_fields["is_disabled_student"] = bool(v)
+                elif k in ("disability_type", "disabilityType"):
+                    update_fields["disability_type"] = str(v) if v is not None else None
+                elif k in ("blind_companion_enabled", "blindCompanionEnabled"):
+                    update_fields["blind_companion_enabled"] = bool(v)
+                elif k in ("blind_companion_settings", "blindCompanionSettings"):
+                    update_fields["blind_companion_settings"] = v
                 else:
                     update_fields[k] = v
 
@@ -1505,7 +1584,11 @@ def update_user_profile():
             conn = get_sqlite_db()
             cursor = conn.cursor()
             set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys() if k != "updated_at"])
-            params = [json.dumps(v) if isinstance(v, list) else str(v) if v is not None else None for k, v in update_fields.items() if k != "updated_at"]
+            params = [
+                json.dumps(v) if isinstance(v, (list, dict))
+                else (1 if isinstance(v, bool) and v else 0 if isinstance(v, bool) else (str(v) if v is not None else None))
+                for k, v in update_fields.items() if k != "updated_at"
+            ]
             params.extend([user_id, str(user_id)])
             if set_clause:
                 cursor.execute(f"UPDATE users SET {set_clause} WHERE id = ? OR user_id = ?", params)

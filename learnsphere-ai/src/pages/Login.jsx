@@ -119,6 +119,7 @@ export default function Login() {
   const [semester, setSemester] = useState(5)
   const [regulation, setRegulation] = useState('')
   const [academicYear, setAcademicYear] = useState('2024-2025')
+  const [isDisabledStudent, setIsDisabledStudent] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [slowLoading, setSlowLoading] = useState(false)
@@ -226,6 +227,9 @@ export default function Login() {
           grade_level: level === 'school' ? classLevel : null,
           section: level === 'school' ? (schoolSection.trim() || null) : null,
           roll_number: level === 'school' ? (schoolRoll.trim() || null) : null,
+          is_disabled_student: Boolean(isDisabledStudent),
+          disability_type: isDisabledStudent ? 'blind_or_low_vision' : null,
+          blind_companion_enabled: Boolean(isDisabledStudent),
         }
 
         const res = await api.register(payload)
@@ -656,6 +660,26 @@ export default function Login() {
                         </div>
                       </div>
                     )}
+
+                    {/* Accessibility Option for Disabled Students */}
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                      <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isDisabledStudent}
+                          onChange={(e) => setIsDisabledStudent(e.target.checked)}
+                          className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                        />
+                        <div className="text-left">
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block">
+                            I am a blind or low-vision student
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 block leading-tight">
+                            Enables the audio-first Blind Learning Companion with speech synthesis and voice navigation.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
                 )}
 

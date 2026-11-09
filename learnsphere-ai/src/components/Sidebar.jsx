@@ -26,7 +26,8 @@ import {
   LogOut,
   GraduationCap,
   Building2,
-  ChevronRight
+  ChevronRight,
+  Headphones
 } from 'lucide-react'
 import { useApp } from '../context/AppContext.jsx'
 
@@ -195,6 +196,15 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
             <Item to="/app/parent" icon={HeartHandshake}>
               Parent Agent
             </Item>
+
+            {Boolean(user?.is_disabled_student || user?.blind_companion_enabled) && (
+              <>
+                <NavLabel>Accessibility</NavLabel>
+                <Item to="/app/blind-companion" icon={Headphones} badge="Audio">
+                  Blind Companion
+                </Item>
+              </>
+            )}
           </>
         )}
 

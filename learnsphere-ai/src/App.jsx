@@ -28,6 +28,7 @@ const CurrentOpportunities = lazy(() => import('./pages/CurrentOpportunities.jsx
 const CreateClassPage = lazy(() => import('./pages/CreateClassPage.jsx'))
 const SelectClass = lazy(() => import('./pages/SelectClass.jsx'))
 const LearnAnywhere = lazy(() => import('./pages/LearnAnywhere.jsx'))
+const BlindCompanion = lazy(() => import('./pages/BlindCompanion.jsx'))
 
 function Lazy({ children }) {
   return <Suspense fallback={<RouteLoader />}>{children}</Suspense>
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="reality-lab" element={<Lazy><RealityLab /></Lazy>} />
         <Route path="opportunities" element={<Lazy><CurrentOpportunities /></Lazy>} />
         <Route path="learn-anywhere" element={<Lazy><LearnAnywhere /></Lazy>} />
+        <Route path="blind-companion" element={<Lazy><BlindCompanion /></Lazy>} />
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="*" element={<Lazy><NotFound /></Lazy>} />
       </Route>

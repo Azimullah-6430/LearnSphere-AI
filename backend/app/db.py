@@ -341,6 +341,10 @@ def _init_sqlite_schema() -> None:
         current_semester INTEGER,
         subjects_json TEXT,
         syllabus_path TEXT,
+        is_disabled_student INTEGER DEFAULT 0,
+        disability_type TEXT,
+        blind_companion_enabled INTEGER DEFAULT 0,
+        blind_companion_settings TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -622,6 +626,10 @@ def _init_sqlite_schema() -> None:
         "last_active_date": "TEXT",
         "longest_streak": "INTEGER DEFAULT 1",
         "active_days_json": "TEXT",
+        "is_disabled_student": "INTEGER DEFAULT 0",
+        "disability_type": "TEXT",
+        "blind_companion_enabled": "INTEGER DEFAULT 0",
+        "blind_companion_settings": "TEXT",
     }
     for col, defn in needed_cols.items():
         if col not in existing_cols:
