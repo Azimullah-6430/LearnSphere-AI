@@ -94,6 +94,14 @@ def narrate_math_expression(text: str) -> str:
     out = text
 
     # Standard LaTeX replacements
+    # 0. Strip LaTeX formatting and parentheses sizing macros
+    out = re.sub(r"\\left\b", "", out)
+    out = re.sub(r"\\right\b", "", out)
+    out = re.sub(r"\\[,;! ]", " ", out)
+    out = re.sub(r"\\sin\b", "sine", out)
+    out = re.sub(r"\\cos\b", "cosine", out)
+    out = re.sub(r"\\tan\b", "tangent", out)
+
     # 1. Derivatives first (before general fractions)
     out = re.sub(r"\\frac\{d([a-zA-Z])\}\{d([a-zA-Z])\}", r"d \1 by d \2", out)
     out = re.sub(r"\\frac\{d\}\{d([a-zA-Z])\}", r"derivative with respect to \1", out)
@@ -165,8 +173,10 @@ def narrate_math_expression(text: str) -> str:
         (r"=", " equals "),
         (r"\\approx", " approximately equals "),
         (r"\\neq", " does not equal "),
-        (r"\\le", " less than or equal to "),
-        (r"\\ge", " greater than or equal to "),
+        (r"\\le\b", " less than or equal to "),
+        (r"\\leq\b", " less than or equal to "),
+        (r"\\ge\b", " greater than or equal to "),
+        (r"\\geq\b", " greater than or equal to "),
         (r"\\Omega", " Ohms "),
         (r"\\mu F", " microfarads "),
         (r"\\mu A", " microamperes "),
@@ -248,6 +258,23 @@ def normalize_voice_transcript(raw_text: str, subject: str = "", topic: str = ""
 
     t = raw_text.strip()
 
+    # Number words to digits
+    number_words = [
+        (r"\bzero\b", "0"),
+        (r"\bone\b", "1"),
+        (r"\btwo\b", "2"),
+        (r"\bthree\b", "3"),
+        (r"\bfour\b", "4"),
+        (r"\bfive\b", "5"),
+        (r"\bsix\b", "6"),
+        (r"\bseven\b", "7"),
+        (r"\beight\b", "8"),
+        (r"\bnine\b", "9"),
+        (r"\bten\b", "10")
+    ]
+    for pat, rep in number_words:
+        t = re.sub(pat, rep, t, flags=re.IGNORECASE)
+
     # Phonetic corrections for common academic dictation slips
     phonetic_fixes = [
         (r"\bv thevenin\b", "V_th (Thevenin Voltage)"),
@@ -261,10 +288,24 @@ def normalize_voice_transcript(raw_text: str, subject: str = "", topic: str = ""
         (r"\bohms?\b", "Ohms"),
         (r"\bvolts?\b", "V"),
         (r"\bmicro farads?\b", "microfarads"),
-        (r"\bdy dx\b", "dy/dx"),
-        (r"\bdu dx\b", "du/dx"),
-        (r"\bx squared\b", "x^2"),
-        (r"\bx cubed\b", "x^3"),
+        (r"\bdy\s+by\s+dx\b", "dy/dx"),
+        (r"\bdy\s+dx\b", "dy/dx"),
+        (r"\bdu\s+by\s+dx\b", "du/dx"),
+        (r"\bdu\s+dx\b", "du/dx"),
+        (r"\bopen\s+parenthesis\b", "("),
+        (r"\bclose\s+parenthesis\b", ")"),
+        (r"\bopen\s+bracket\b", "["),
+        (r"\bclose\s+bracket\b", "]"),
+        (r"\bmultiplied\s+by\b", "*"),
+        (r"\bdivided\s+by\b", "/"),
+        (r"\bplus\b", "+"),
+        (r"\bminus\b", "-"),
+        (r"\bequals?\b", "="),
+        (r"\bx\s+squared\b", "x^2"),
+        (r"\bx\s+cubed\b", "x^3"),
+        (r"\bsquared\b", "^2"),
+        (r"\bcubed\b", "^3"),
+        (r"(\d+)\s+([a-zA-Z])\b", r"\1\2"),
         (r"\bsine\b", "sin"),
         (r"\bcosine\b", "cos"),
         (r"\btangent\b", "tan")

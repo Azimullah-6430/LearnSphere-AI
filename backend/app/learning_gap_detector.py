@@ -146,7 +146,7 @@ def classify_mistake_nature(
         )
 
     # 8. Incomplete Answers
-    if any(w in m_lower for w in ["incomplete", "partially answered", "second part omitted", "addressed only part"]):
+    if any(w in m_lower for w in ["incomplete", "omitted", "missing part", "partially answered", "second part omitted", "addressed only part"]):
         return (
             MISTAKE_TYPES["INCOMPLETE_ANSWERS"],
             "Only a portion of the multi-part question was addressed, leaving key required components unanswered.",

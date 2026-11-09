@@ -43,8 +43,11 @@ logger = logging.getLogger(__name__)
 # Domain-specific foundational prerequisite rules (lowered key -> list of prerequisite terms)
 ACADEMIC_PREREQUISITES: Dict[str, List[str]] = {
     # Mathematics / Calculus
-    "chain rule": ["differentiation", "composite functions", "limits", "derivatives"],
+    "chain rule": ["differentiation", "composite functions", "limits", "power rule"],
     "composite functions": ["functions", "domain and range"],
+    "partial derivatives": ["chain rule", "derivatives", "multivariable functions"],
+    "directional derivative": ["partial derivatives", "gradient", "vectors"],
+    "gradient": ["partial derivatives", "vectors"],
     "product rule": ["derivatives", "limits"],
     "quotient rule": ["product rule", "derivatives"],
     "implicit differentiation": ["chain rule", "derivatives"],
@@ -102,8 +105,20 @@ def find_prerequisite_topics(
             for req in reqs:
                 for cand in available_topics:
                     cand_lower = cand.lower().strip()
-                    if req in cand_lower and cand_lower != target_lower and cand not in prereqs:
-                        prereqs.append(cand)
+                    if cand_lower == target_lower:
+                        continue
+                    # Candidate cannot be a prerequisite if target_topic is candidate's prerequisite
+                    cand_prereqs = ACADEMIC_PREREQUISITES.get(cand_lower, [])
+                    if any(target_lower in cpr or cpr in target_lower for cpr in cand_prereqs):
+                        continue
+
+                    # Whole-word / phrase match to avoid 'derivatives' matching 'partial derivatives'
+                    if re.search(r'\b' + re.escape(req) + r'\b', cand_lower):
+                        # Ensure candidate doesn't have higher-order qualifiers when req is basic
+                        if req in ("derivatives", "differentiation") and ("partial" in cand_lower or "directional" in cand_lower):
+                            continue
+                        if cand not in prereqs:
+                            prereqs.append(cand)
 
     # 2. Sequential syllabus heuristic: if target topic is in the list, earlier topics in that list
     # may be foundational
