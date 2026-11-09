@@ -93,6 +93,19 @@ export default function BlindCompanion() {
   const [practiceFeedback, setPracticeFeedback] = useState('')
   const [assessingPractice, setAssessingPractice] = useState(false)
 
+  // Accessible Mastery Assessment State (Prompt 5)
+  const [masteryQuestions, setMasteryQuestions] = useState([])
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
+  const [masteryAnswer, setMasteryAnswer] = useState('')
+  const [submissionMode, setSubmissionMode] = useState('keyboard')
+  const [isDictating, setIsDictating] = useState(false)
+  const [transcriptReviewed, setTranscriptReviewed] = useState(false)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
+  const [evaluatingMastery, setEvaluatingMastery] = useState(false)
+  const [masteryResult, setMasteryResult] = useState(null)
+  const [selectedTier, setSelectedTier] = useState('adaptive')
+
   // Accessible Display States
   const [showHelpModal, setShowHelpModal] = useState(false)
   const [highContrast, setHighContrast] = useState(false)
@@ -650,6 +663,151 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
       speakText('Could not save step progress.', 'Error')
     }
   }, [fetchLearningPath, speakText])
+
+  // ── Accessible Mastery Assessment Handlers (Prompt 5) ────────────────────
+  const fetchMasteryQuestions = useCallback(async (tier = selectedTier) => {
+    if (!selectedTopic || !selectedSubject) return
+    setLoadingQuestions(true)
+    try {
+      const res = await api.generateBlindMasteryQuestions({
+        subject: selectedSubject,
+        unit: selectedUnit?.title || selectedUnit?.name || 'Unit',
+        topic: selectedTopic.title,
+        subtopic: selectedTopic.title,
+        tier
+      })
+      if (res && res.success && Array.isArray(res.questions) && res.questions.length > 0) {
+        setMasteryQuestions(res.questions)
+        setCurrentQuestionIndex(0)
+        setMasteryAnswer('')
+        setMasteryResult(null)
+        setTranscriptReviewed(false)
+        const firstQ = res.questions[0]
+        const announcement = `Loaded ${res.questions.length} syllabus mastery questions for ${selectedTopic.title}. Question 1: ${firstQ.spoken_prompt || firstQ.question_text}`
+        speakText(announcement, `Assessment: Question 1`)
+      }
+    } catch (err) {
+      console.warn('Failed to generate mastery questions', err)
+      speakText('Could not generate assessment questions. Please try again.', 'Error')
+    } finally {
+      setLoadingQuestions(false)
+    }
+  }, [selectedTopic, selectedSubject, selectedUnit, selectedTier, speakText])
+
+  useEffect(() => {
+    if (selectedTopic && selectedSubject) {
+      fetchMasteryQuestions(selectedTier)
+    }
+  }, [selectedTopic, selectedSubject, selectedTier, fetchMasteryQuestions])
+
+  const currentMasteryQuestion = useMemo(() => {
+    if (!masteryQuestions || masteryQuestions.length === 0) return null
+    return masteryQuestions[currentQuestionIndex] || masteryQuestions[0]
+  }, [masteryQuestions, currentQuestionIndex])
+
+  const handleRepeatQuestion = useCallback(() => {
+    if (!currentMasteryQuestion) return
+    const msg = `Question ${currentQuestionIndex + 1}: ${currentMasteryQuestion.spoken_prompt || currentMasteryQuestion.question_text}`
+    speakText(msg, `Question ${currentQuestionIndex + 1}`)
+  }, [currentMasteryQuestion, currentQuestionIndex, speakText])
+
+  const handleNarrateMath = useCallback(() => {
+    if (!currentMasteryQuestion) return
+    const mathText = currentMasteryQuestion.math_narration || currentMasteryQuestion.spoken_prompt
+    speakText(`Mathematical Expression Narration: ${mathText}`, 'Math Narration')
+  }, [currentMasteryQuestion, speakText])
+
+  const handleNarrateDiagram = useCallback(() => {
+    if (!currentMasteryQuestion) return
+    const diagText = currentMasteryQuestion.diagram_description || 'No visual diagram associated with this question.'
+    speakText(`Diagram Topology Description: ${diagText}`, 'Diagram Description')
+  }, [currentMasteryQuestion, speakText])
+
+  const toggleAssessmentDictation = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      speakText('Voice dictation is not supported in this browser. Please use keyboard typing.', 'Notice')
+      return
+    }
+
+    if (isDictating) {
+      setIsDictating(false)
+      return
+    }
+
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = 'en-US'
+      recognition.interimResults = false
+      recognition.maxAlternatives = 1
+
+      recognition.onstart = () => {
+        setIsDictating(true)
+        speakText('Dictation active. Please speak your answer clearly. When done, you can review and edit before submitting.', 'Dictating')
+      }
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript
+        setIsDictating(false)
+        setSubmissionMode('voice')
+        setMasteryAnswer(prev => (prev ? `${prev} ${transcript}` : transcript))
+        setTranscriptReviewed(false)
+        speakText(`Captured text: ${transcript}. Use the Review Answer button to hear the full text or edit in the answer box.`, 'Dictation Captured')
+      }
+
+      recognition.onerror = () => {
+        setIsDictating(false)
+      }
+
+      recognition.onend = () => {
+        setIsDictating(false)
+      }
+
+      recognition.start()
+    } catch (err) {
+      console.warn('Dictation start error', err)
+      setIsDictating(false)
+    }
+  }, [isDictating, speakText])
+
+  const handleReviewAnswer = useCallback(() => {
+    if (!masteryAnswer.trim()) {
+      speakText('Your answer box is currently empty. Please type or dictate your answer first.', 'Notice')
+      return
+    }
+    setTranscriptReviewed(true)
+    const reviewMsg = `Reviewing your answer: ${masteryAnswer}. If this is accurate, confirm submission. You can also edit text directly in the box.`
+    speakText(reviewMsg, 'Answer Review')
+  }, [masteryAnswer, speakText])
+
+  const handleEvaluateMastery = useCallback(async () => {
+    if (!masteryAnswer.trim() || !currentMasteryQuestion) return
+    setEvaluatingMastery(true)
+    setShowConfirmModal(false)
+
+    try {
+      const res = await api.evaluateBlindMasteryAssessment({
+        question: currentMasteryQuestion,
+        student_answer: masteryAnswer.trim(),
+        submission_mode: submissionMode,
+        transcript_reviewed: transcriptReviewed
+      })
+
+      if (res && res.success) {
+        setMasteryResult(res)
+        speakText(res.spoken_feedback, `Mastery Result: ${res.evaluation_result}`)
+        fetchLearningGaps()
+        fetchLearningPath()
+      } else {
+        speakText('Evaluation could not be completed. Please try again.', 'Error')
+      }
+    } catch (err) {
+      console.error('Mastery evaluation error', err)
+      speakText('Network error during evaluation.', 'Connection Error')
+    } finally {
+      setEvaluatingMastery(false)
+    }
+  }, [masteryAnswer, currentMasteryQuestion, submissionMode, transcriptReviewed, speakText, fetchLearningGaps, fetchLearningPath])
 
   // Welcome Announcement
   const handleAnnounceWelcome = () => {
@@ -1697,71 +1855,347 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
         )}
       </section>
 
-      {/* ── Section: Practice & Audio Assessment Checkpoint ───────────────── */}
-      <section aria-labelledby="practice-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* ── Section: Accessible Mastery Assessment & Continuous Improvement (Prompt 5) ── */}
+      <section aria-labelledby="assessment-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
           <div className="flex items-center gap-2">
-            <Award size={18} className="text-indigo-600" />
-            <h2 id="practice-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Practice & Assess (AI Audio Checkpoint)
+            <Award size={18} className="text-indigo-600 dark:text-indigo-400" />
+            <h2 id="assessment-heading" className="text-base font-bold text-slate-900 dark:text-white">
+              Accessible Mastery Assessment & Continuous Learning Improvement
             </h2>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              const qText = `Checkpoint question on ${selectedTopic?.title || 'this topic'}: In your own words, explain the fundamental definition and one real world application of this concept.`
-              speakText(qText, 'Checkpoint Question')
-            }}
-            className="text-xs font-bold flex items-center gap-1.5 self-start sm:self-center"
-            aria-label="Listen to practice question spoken aloud"
-          >
-            <Volume2 size={15} />
-            <span>Spoken Question</span>
-          </Button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedTier}
+              onChange={(e) => {
+                setSelectedTier(e.target.value)
+                fetchMasteryQuestions(e.target.value)
+              }}
+              className="text-xs font-semibold p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              aria-label="Filter assessment question difficulty tier"
+            >
+              <option value="adaptive">Tier: Adaptive (Syllabus Grounded)</option>
+              <option value="basic_understanding">Tier: Basic Understanding</option>
+              <option value="conceptual_reasoning">Tier: Conceptual Reasoning</option>
+              <option value="problem_solving">Tier: Problem Solving & Calculation</option>
+              <option value="application">Tier: Application</option>
+              <option value="advanced">Tier: Advanced Boundary Conditions</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => fetchMasteryQuestions(selectedTier)}
+              disabled={loadingQuestions || !selectedTopic}
+              className="text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              aria-label="Refresh assessment questions for current syllabus topic"
+            >
+              <RefreshCw size={13} className={loadingQuestions ? 'animate-spin' : ''} />
+              <span>Generate Questions</span>
+            </button>
+          </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-2">
-          <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold leading-relaxed">
-            <strong>Question:</strong> State the core principle of <span className="text-indigo-600 dark:text-indigo-400">{selectedTopic?.title || 'your selected topic'}</span> and explain how it solves an everyday engineering or theoretical problem.
-          </p>
+        {loadingQuestions ? (
+          <div className="p-8 text-center text-xs text-slate-500">
+            Generating syllabus-grounded mastery assessment questions for {selectedTopic?.title || 'selected topic'}...
+          </div>
+        ) : !currentMasteryQuestion ? (
+          <div className="p-8 text-center text-xs text-slate-500">
+            Please select a syllabus topic above and click "Generate Questions" to begin accessible mastery assessment.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Question Navigation & Narration Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                  Question {currentQuestionIndex + 1} of {masteryQuestions.length}
+                </span>
+                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                  {currentMasteryQuestion.tier_label || 'Syllabus Tier'} · {currentMasteryQuestion.points || 5} Points
+                </span>
+              </div>
 
-          <form onSubmit={handlePracticeSubmit} className="space-y-3 pt-2">
-            <label htmlFor="checkpoint-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-              Type or dictate your response:
-            </label>
-            <textarea
-              id="checkpoint-input"
-              rows={3}
-              value={practiceAnswer}
-              onChange={(e) => setPracticeAnswer(e.target.value)}
-              placeholder="Enter your synthesized answer here..."
-              className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus-visible:ring-4 focus-visible:ring-indigo-500 outline-none"
-            />
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] text-slate-500">
-                Spoken evaluation will play automatically upon submission.
-              </span>
-              <Button
-                type="submit"
-                disabled={!practiceAnswer.trim() || assessingPractice}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl disabled:opacity-50"
-              >
-                {assessingPractice ? 'Evaluating...' : 'Submit Answer'}
-              </Button>
-            </div>
-          </form>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleRepeatQuestion}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1 p-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800"
+                  aria-label="Listen to question prompt read aloud"
+                >
+                  <Volume2 size={13} />
+                  <span>Listen Prompt</span>
+                </button>
 
-          {practiceSubmitted && practiceFeedback && (
-            <div className="mt-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-start gap-3">
-              <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-bold mb-0.5">Assessment Evaluation:</strong>
-                <p className="leading-relaxed whitespace-pre-wrap">{practiceFeedback}</p>
+                {currentMasteryQuestion.math_narration && (
+                  <button
+                    type="button"
+                    onClick={handleNarrateMath}
+                    className="text-xs font-bold text-purple-700 dark:text-purple-300 hover:text-purple-800 flex items-center gap-1 p-1.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/50"
+                    aria-label="Listen to mathematical expression narrated in words"
+                  >
+                    <BookOpen size={13} />
+                    <span>Math Narration</span>
+                  </button>
+                )}
+
+                {currentMasteryQuestion.diagram_description && (
+                  <button
+                    type="button"
+                    onClick={handleNarrateDiagram}
+                    className="text-xs font-bold text-blue-700 dark:text-blue-300 hover:text-blue-800 flex items-center gap-1 p-1.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50"
+                    aria-label="Listen to diagram topology description"
+                  >
+                    <Activity size={13} />
+                    <span>Diagram Description</span>
+                  </button>
+                )}
+
+                {masteryQuestions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextIdx = (currentQuestionIndex + 1) % masteryQuestions.length
+                      setCurrentQuestionIndex(nextIdx)
+                      setMasteryAnswer('')
+                      setMasteryResult(null)
+                      setTranscriptReviewed(false)
+                      const q = masteryQuestions[nextIdx]
+                      speakText(`Moving to Question ${nextIdx + 1}: ${q.spoken_prompt || q.question_text}`, `Question ${nextIdx + 1}`)
+                    }}
+                    className="text-xs font-bold text-slate-700 dark:text-slate-300 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 flex items-center gap-1"
+                    aria-label="Next question in assessment set"
+                  >
+                    <span>Next Q</span>
+                    <ArrowRight size={13} />
+                  </button>
+                )}
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Question Text */}
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+              <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white leading-relaxed">
+                {currentMasteryQuestion.question_text}
+              </p>
+              {currentMasteryQuestion.math_narration && (
+                <div className="text-[11px] text-purple-700 dark:text-purple-300 italic pt-1">
+                  <strong>Math Audio Translation:</strong> "{currentMasteryQuestion.math_narration}"
+                </div>
+              )}
+            </div>
+
+            {/* Multi-Modal Answer Input with Transcript Review */}
+            <div className="space-y-3 pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="mastery-answer-input" className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Your Answer (Keyboard or Voice Dictation):
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleAssessmentDictation}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isDictating
+                        ? 'bg-red-600 text-white animate-pulse'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs'
+                    }`}
+                    aria-label={isDictating ? 'Stop Voice Dictation' : 'Activate Voice Dictation for Answer'}
+                  >
+                    <Mic size={14} />
+                    <span>{isDictating ? 'Dictating...' : 'Voice Dictate'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReviewAnswer}
+                    disabled={!masteryAnswer.trim()}
+                    className="text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 flex items-center gap-1 disabled:opacity-40 cursor-pointer"
+                    aria-label="Review dictated or typed answer read aloud before submitting"
+                  >
+                    <Volume2 size={14} />
+                    <span>Review Answer Aloud</span>
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                id="mastery-answer-input"
+                rows={4}
+                value={masteryAnswer}
+                onChange={(e) => {
+                  setMasteryAnswer(e.target.value)
+                  setTranscriptReviewed(false)
+                }}
+                placeholder="Type or dictate your answer. You can freely edit the text before submitting..."
+                className="w-full p-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus-visible:ring-4 focus-visible:ring-indigo-500 outline-none leading-relaxed"
+                aria-label="Mastery assessment answer input"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {submissionMode === 'voice' ? 'Voice transcribed. ' : 'Keyboard input. '}
+                  {transcriptReviewed ? '✓ Answer transcript reviewed.' : 'Click "Review Answer Aloud" to verify before submission.'}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(true)}
+                  disabled={!masteryAnswer.trim() || evaluatingMastery}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50 shadow-xs cursor-pointer"
+                  aria-label="Submit answer for mastery assessment evaluation"
+                >
+                  <CheckCircle2 size={14} />
+                  <span>{evaluatingMastery ? 'Evaluating Understanding...' : 'Submit for Mastery Assessment'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Accessible Submission Confirmation Dialog */}
+            {showConfirmModal && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirm-modal-title"
+                className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-3"
+              >
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                  <h3 id="confirm-modal-title" className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                    Confirm Submission for Mastery Evaluation
+                  </h3>
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  You are about to submit your answer for <strong>{selectedTopic?.title}</strong>.
+                  Speech recognition requires student confirmation to prevent accidental submission.
+                </p>
+                <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 text-xs font-mono text-slate-800 dark:text-slate-200">
+                  "{masteryAnswer}"
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleEvaluateMastery}
+                    className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer shadow-xs"
+                    aria-label="Confirm submission and evaluate"
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Confirm & Evaluate</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmModal(false)}
+                    className="text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-300 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 cursor-pointer"
+                    aria-label="Cancel and continue editing answer"
+                  >
+                    <span>Keep Editing</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Continuous Improvement Feedback Panel (Prompt 5 Requirement 5) */}
+            {masteryResult && (
+              <div className="mt-4 p-5 rounded-2xl bg-gradient-to-r from-indigo-50/70 via-purple-50/70 to-emerald-50/70 dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-3.5 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 dark:border-indigo-900/60 pb-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                      masteryResult.evaluation_result?.includes('Correct understanding')
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                        : (masteryResult.evaluation_result?.includes('Calculation')
+                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200')
+                    }`}>
+                      {masteryResult.evaluation_result}
+                    </span>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">
+                      Mastery State: {masteryResult.mastery_state}
+                    </span>
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Score: {masteryResult.score} / {masteryResult.max_score} ({masteryResult.percentage}%)
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => speakText(masteryResult.spoken_feedback, 'Assessment Diagnosis')}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
+                    aria-label="Replay spoken assessment feedback aloud"
+                  >
+                    <Volume2 size={14} />
+                    <span>Replay Audio</span>
+                  </button>
+                </div>
+
+                {/* Strengths */}
+                <div className="space-y-1 text-xs">
+                  <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                    <CheckCircle2 size={14} />
+                    <span>What You Understood Correctly:</span>
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-5">
+                    {masteryResult.strengths_explanation}
+                  </p>
+                </div>
+
+                {/* Mistake Diagnosis in Plain Language */}
+                {masteryResult.mistake_explanation && masteryResult.mistake_explanation !== 'No conceptual errors were detected in your solution.' && (
+                  <div className="space-y-1 text-xs">
+                    <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                      <AlertTriangle size={14} />
+                      <span>Mistake Diagnosis (In Simple Language):</span>
+                    </div>
+                    <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-5">
+                      {masteryResult.mistake_explanation}
+                    </p>
+                  </div>
+                )}
+
+                {/* Related Concept & Recommended Next Steps */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+                  <div className="text-slate-500 dark:text-slate-400">
+                    <strong>Related Syllabus Concept:</strong> {masteryResult.related_concept}
+                  </div>
+                  <div className="text-indigo-700 dark:text-indigo-300">
+                    <strong>Recommended Next Activity:</strong> {masteryResult.recommended_activity}
+                  </div>
+                  <div className="text-slate-700 dark:text-slate-300">
+                    <strong>Targeted Practice Checkpoint:</strong> {masteryResult.targeted_practice_question}
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        requestAITeaching('simple', `Teach me ${selectedTopic?.title} focusing on ${masteryResult.recommended_activity}`)
+                      }}
+                      className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                      aria-label="Start recommended learning activity"
+                    >
+                      <Play size={12} />
+                      <span>Start Recommended Activity</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMasteryAnswer('')
+                        setMasteryResult(null)
+                        setTranscriptReviewed(false)
+                        fetchMasteryQuestions('problem_solving')
+                      }}
+                      className="text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer"
+                      aria-label="Attempt targeted practice question"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Attempt Next Question</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── Accessible Keyboard Help Modal ────────────────────────────────── */}

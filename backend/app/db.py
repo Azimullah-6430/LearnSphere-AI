@@ -297,6 +297,7 @@ def _init_mongodb_indexes(db) -> None:
         db["blind_practice_attempts"].create_index([("student_id", 1), ("subject", 1)], background=True)
         db["blind_topic_progress"].create_index([("student_id", 1), ("subject", 1), ("topic", 1)], unique=True, background=True)
         db["blind_learning_paths"].create_index("student_id", unique=True, background=True)
+        db["blind_mastery_assessments"].create_index([("student_id", 1), ("subject", 1), ("topic", 1)], background=True)
 
         logger.info("[DB] MongoDB indexes verified.")
     except Exception as exc:
@@ -653,6 +654,34 @@ def _init_sqlite_schema() -> None:
         student_id TEXT NOT NULL UNIQUE,
         path_json TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS blind_mastery_assessments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assessment_id TEXT UNIQUE,
+        student_id TEXT NOT NULL,
+        student_name TEXT,
+        subject TEXT NOT NULL,
+        unit TEXT,
+        topic TEXT NOT NULL,
+        subtopic TEXT,
+        question_type TEXT,
+        question_text TEXT NOT NULL,
+        math_narration TEXT,
+        diagram_description TEXT,
+        student_answer TEXT,
+        submission_mode TEXT DEFAULT 'keyboard',
+        transcript_reviewed INTEGER DEFAULT 1,
+        expected_criteria TEXT,
+        evaluation_result TEXT,
+        score REAL DEFAULT 0.0,
+        max_score REAL DEFAULT 5.0,
+        strengths_explanation TEXT,
+        mistake_explanation TEXT,
+        mastery_state TEXT DEFAULT 'learning',
+        recommended_activity TEXT,
+        targeted_practice_question TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 

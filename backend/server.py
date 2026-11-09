@@ -6333,6 +6333,131 @@ def get_blind_topic_progress_endpoint():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/blind-companion/assessment/generate", methods=["POST"])
+@require_auth
+def generate_blind_mastery_questions_endpoint():
+    """Generate adaptive mastery questions grounded in syllabus, topic, and prior learning gaps."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+        data = request.get_json(force=True) or {}
+
+        subject = str(data.get("subject") or "General Academic").strip()
+        unit = str(data.get("unit") or "Unit 1").strip()
+        topic = str(data.get("topic") or "General Topic").strip()
+        subtopic = str(data.get("subtopic") or topic).strip()
+        tier = str(data.get("tier") or "adaptive").strip()
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.learning_gap_detector import analyze_student_learning_gaps
+        gap_analysis = analyze_student_learning_gaps(
+            student_id=user_id,
+            student_name=student_name,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        active_gaps = gap_analysis.get("learning_gaps", [])
+
+        from app.mastery_assessment import generate_mastery_questions
+        questions = generate_mastery_questions(
+            student_id=user_id,
+            student_name=student_name,
+            subject=subject,
+            unit=unit,
+            topic=topic,
+            subtopic=subtopic,
+            syllabus_doc=active_syllabus or {},
+            active_gaps=active_gaps,
+            tier=tier
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            "subject": subject,
+            "unit": unit,
+            "topic": topic,
+            "questions": mongo_serialize(questions),
+            "count": len(questions)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Assessment generate error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/assessment/evaluate", methods=["POST"])
+@require_auth
+def evaluate_blind_mastery_assessment_endpoint():
+    """Evaluate student's mastery answer, verify multi-attempt mastery, and provide continuous improvement."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        data = request.get_json(force=True) or {}
+
+        question = data.get("question") or {}
+        student_answer = str(data.get("student_answer") or "").strip()
+        submission_mode = str(data.get("submission_mode") or "keyboard").strip()
+        transcript_reviewed = bool(data.get("transcript_reviewed", True))
+
+        if not student_answer:
+            return jsonify({"success": False, "error": "student_answer is required"}), 400
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.mastery_assessment import evaluate_mastery_submission
+        evaluation_data = evaluate_mastery_submission(
+            student_id=user_id,
+            student_name=student_name,
+            question=question,
+            student_answer=student_answer,
+            submission_mode=submission_mode,
+            transcript_reviewed=transcript_reviewed,
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            **mongo_serialize(evaluation_data)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Assessment evaluate error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/assessment/history", methods=["GET"])
+@require_auth
+def get_blind_mastery_history_endpoint():
+    """Retrieve verified mastery assessment records for the authenticated student."""
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.mastery_assessment import get_student_mastery_history
+        history = get_student_mastery_history(user_id, mongo_db, sqlite_conn)
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            "history": mongo_serialize(history)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Assessment history error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SELF-EVALUATION (uses same engine as teacher portal)
 # ══════════════════════════════════════════════════════════════════════════════

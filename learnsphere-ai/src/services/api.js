@@ -395,6 +395,12 @@ export const api = {
     request('/api/blind-companion/learning-path/complete-step', { method: 'POST', body: payload }),
   getBlindTopicProgress: () =>
     request('/api/blind-companion/learning-path/progress'),
+  generateBlindMasteryQuestions: (payload) =>
+    request('/api/blind-companion/assessment/generate', { method: 'POST', body: payload }),
+  evaluateBlindMasteryAssessment: (payload) =>
+    request('/api/blind-companion/assessment/evaluate', { method: 'POST', body: payload }),
+  getBlindMasteryHistory: () =>
+    request('/api/blind-companion/assessment/history'),
 
   // ── Streak ────────────────────────────────────────────────────────────────
   getStreak: () => request('/api/user/streak'),
