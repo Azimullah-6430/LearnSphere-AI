@@ -5892,7 +5892,35 @@ def trainer_chat():
         unit         = str(data.get("unit") or data.get("module") or "")
         chapter      = str(data.get("chapter") or "")
         topic        = str(data.get("topic") or concept or "")
+        subtopic     = str(data.get("subtopic") or "").strip()
+        learning_objectives = data.get("learning_objectives") or data.get("objectives") or []
+        teaching_mode = str(data.get("teaching_mode") or "").strip().lower()
+        visual_content = str(data.get("visual_content") or data.get("diagram") or "").strip()
+        diagram_type = str(data.get("diagram_type") or "").strip().lower()
+        audio_friendly = bool(
+            data.get("audio_friendly") or
+            (user or {}).get("blind_companion_enabled") or
+            (user or {}).get("is_disabled_student") or
+            teaching_mode in ("concept_to_sense", "structured_10_step", "audio_lesson")
+        )
+        explanation_mode = str(
+            data.get("explanation_mode") or
+            ((user or {}).get("blind_companion_settings") or {}).get("explanation_mode") or
+            "detailed"
+        ).strip().lower()
+
         study_method = str(data.get("study_method") or data.get("method") or "")
+        if teaching_mode == "structured_10_step" and not study_method:
+            study_method = "structured_10_step"
+        elif teaching_mode == "concept_to_sense" and not study_method:
+            study_method = "concept_to_sense"
+        elif teaching_mode == "simple" and not study_method:
+            study_method = "simple"
+        elif teaching_mode == "detailed" and not study_method:
+            study_method = "detailed"
+        elif teaching_mode == "quick_revision" and not study_method:
+            study_method = "quick_revision"
+
         level        = str(data.get("level") or (user or {}).get("level") or "").strip().lower()
         stored_sem   = (user or {}).get("semester") if (user or {}).get("semester") is not None else (user or {}).get("current_semester")
         semester     = str(data.get("semester") or stored_sem or "").strip()
@@ -6013,7 +6041,14 @@ def trainer_chat():
             "board": board,
             "subject_id": subject_id,
             "curriculum_id": syllabus_id or str((active_syllabus or {}).get("syllabus_id") or ""),
-            "validated_topics": validated_topics
+            "validated_topics": validated_topics,
+            "subtopic": subtopic,
+            "learning_objectives": learning_objectives,
+            "teaching_mode": teaching_mode,
+            "visual_content": visual_content,
+            "diagram_type": diagram_type,
+            "audio_friendly": audio_friendly,
+            "explanation_mode": explanation_mode,
         }
 
         ai_reply = gemini_service.generate_trainer_response(

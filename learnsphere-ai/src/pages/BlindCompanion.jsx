@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   Headphones,
   Volume2,
@@ -21,20 +21,26 @@ import {
   X,
   ChevronRight,
   Bookmark,
-  GraduationCap,
   Award,
+  Mic,
+  MicOff,
+  Send,
+  RefreshCw,
+  Sliders,
+  Cpu,
+  Zap,
+  Activity,
   Settings as SettingsIcon
 } from 'lucide-react'
-import { Card, PageHead, Button, Badge } from '../components/ui/Primitives.jsx'
+import { Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
 
 export default function BlindCompanion() {
   const { user, onOpenSyllabusModal } = useApp()
-  const navigate = useNavigate()
   const { curriculum, isValid: hasValidCurriculum, subjects, subjectObjects, units: allUnits } = useAuthoritativeCurriculum()
 
-  // Companion Settings (read from user profile or sensible defaults)
+  // Companion Settings
   const userSettings = user?.blind_companion_settings || {}
   const [audioSpeed, setAudioSpeed] = useState(userSettings.audio_speed || 1.0)
   const [explanationMode, setExplanationMode] = useState(userSettings.explanation_mode || 'detailed')
@@ -42,17 +48,33 @@ export default function BlindCompanion() {
   const [voiceQuestions] = useState(userSettings.voice_questions !== false)
   const [spokenDiagrams] = useState(userSettings.spoken_diagrams !== false)
 
-  // Speech State
+  // Speech Synthesis State
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentSpeechText, setCurrentSpeechText] = useState('')
   const [speechLabel, setSpeechLabel] = useState('Ready to assist')
   const synthRef = useRef(window.speechSynthesis || null)
 
+  // Speech Recognition (Voice Input) State
+  const [isListening, setIsListening] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [voiceSupported, setVoiceSupported] = useState(false)
+  const recognitionRef = useRef(null)
+
   // Curriculum Navigation State
   const [selectedSubject, setSelectedSubject] = useState('')
   const [selectedUnit, setSelectedUnit] = useState(null)
   const [selectedTopic, setSelectedTopic] = useState(null)
+
+  // AI Tutor Teaching Intelligence State (Integrated with Personal Trainer)
+  const [teachingMode, setTeachingMode] = useState('structured_10_step') // 'structured_10_step' | 'concept_to_sense' | 'simple' | 'detailed' | 'quick_revision'
+  const [activeLesson, setActiveLesson] = useState(null)
+  const [loadingLesson, setLoadingLesson] = useState(false)
+  const [conversationHistory, setConversationHistory] = useState([])
+  const [studentQuestion, setStudentQuestion] = useState('')
+
+  // Concept-to-Sense Component Explorer State
+  const [activeComponent, setActiveComponent] = useState(null)
 
   // Misconceptions / Improvement Areas State
   const [misconceptions, setMisconceptions] = useState([])
@@ -62,8 +84,9 @@ export default function BlindCompanion() {
   const [practiceAnswer, setPracticeAnswer] = useState('')
   const [practiceSubmitted, setPracticeSubmitted] = useState(false)
   const [practiceFeedback, setPracticeFeedback] = useState('')
+  const [assessingPractice, setAssessingPractice] = useState(false)
 
-  // Keyboard Shortcuts Help Modal
+  // Accessible Display States
   const [showHelpModal, setShowHelpModal] = useState(false)
   const [highContrast, setHighContrast] = useState(false)
 
@@ -74,15 +97,20 @@ export default function BlindCompanion() {
   const speakText = useCallback((text, label = 'Audio Reader') => {
     if (!synthRef.current) return
     const synth = synthRef.current
-
-    // Cancel any ongoing speech
     synth.cancel()
 
     if (!text || typeof text !== 'string') return
 
-    // Clean markdown/special characters for clear speech
+    // Clean formatting while verbalizing equations and punctuation pauses
     const cleanText = text
-      .replace(/[#*_`~[\]()]/g, ' ')
+      .replace(/###/g, '')
+      .replace(/##/g, '')
+      .replace(/#/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
+      .replace(/```mermaid[\s\S]*?```/g, ' Diagram workflow is narrated below. ')
+      .replace(/```[\s\S]*?```/g, ' Code snippet. ')
+      .replace(/\$([^\$]+)\$/g, '$1')
       .replace(/\s+/g, ' ')
       .trim()
 
@@ -92,7 +120,6 @@ export default function BlindCompanion() {
     utterance.rate = audioSpeed
     utterance.pitch = 1.0
 
-    // Choose preferred English voice if available
     const voices = synth.getVoices ? synth.getVoices() : []
     const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha')))
     if (preferredVoice) utterance.voice = preferredVoice
@@ -153,11 +180,67 @@ export default function BlindCompanion() {
     }
   }, [])
 
+  // ── Speech Recognition Engine (Voice Questions) ───────────────────────────
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (SpeechRecognition) {
+      setVoiceSupported(true)
+      const recognizer = new SpeechRecognition()
+      recognizer.continuous = false
+      recognizer.interimResults = true
+      recognizer.lang = 'en-US'
+
+      recognizer.onstart = () => {
+        setIsListening(true)
+        setSpeechLabel('Listening to your spoken question...')
+      }
+
+      recognizer.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map(r => r[0].transcript)
+          .join('')
+        setVoiceTranscript(transcript)
+        setStudentQuestion(transcript)
+      }
+
+      recognizer.onerror = () => {
+        setIsListening(false)
+      }
+
+      recognizer.onend = () => {
+        setIsListening(false)
+      }
+
+      recognitionRef.current = recognizer
+    }
+  }, [])
+
+  const toggleVoiceInput = useCallback(() => {
+    if (!recognitionRef.current) {
+      speakText('Speech recognition is not supported in this browser. You can type your question in the text box.', 'Voice Notice')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop()
+      setIsListening(false)
+    } else {
+      // Pause TTS before listening
+      if (synthRef.current) synthRef.current.cancel()
+      setIsSpeaking(false)
+      setVoiceTranscript('')
+      try {
+        recognitionRef.current.start()
+      } catch (err) {
+        console.warn('Recognition start error', err)
+      }
+    }
+  }, [isListening, speakText])
+
   // ── Keyboard Shortcuts Listener ───────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Don't trigger if user is typing in an input or textarea
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return
 
       const key = e.key.toLowerCase()
 
@@ -175,6 +258,9 @@ export default function BlindCompanion() {
       } else if (key === 'r') {
         e.preventDefault()
         repeatSpeech()
+      } else if (key === 'v') {
+        e.preventDefault()
+        toggleVoiceInput()
       } else if (key === '?' || key === 'h') {
         e.preventDefault()
         setShowHelpModal(prev => !prev)
@@ -186,7 +272,7 @@ export default function BlindCompanion() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isSpeaking, isPaused, resumeSpeech, pauseSpeech, repeatSpeech, stopSpeech, currentSpeechText])
+  }, [isSpeaking, isPaused, resumeSpeech, pauseSpeech, repeatSpeech, stopSpeech, toggleVoiceInput, currentSpeechText])
 
   // ── Load Authentic Misconceptions ─────────────────────────────────────────
   useEffect(() => {
@@ -223,7 +309,6 @@ export default function BlindCompanion() {
     }
   }, [authoritativeSubjects, selectedSubject])
 
-  // Active Subject Units and Topics
   const activeSubjectData = useMemo(() => {
     if (!selectedSubject) return null
     if (Array.isArray(subjectObjects)) {
@@ -289,50 +374,146 @@ export default function BlindCompanion() {
     }
   }, [activeTopics, selectedTopic])
 
+  // ── Core Teaching Intelligence Invocation (Personal Trainer Integration) ──
+  const requestAITeaching = useCallback(async (mode = teachingMode, customMsg = null) => {
+    if (!selectedTopic) {
+      speakText('Please select a syllabus subject and topic first.', 'Notice')
+      return
+    }
+
+    setLoadingLesson(true)
+    const topicTitle = selectedTopic.title
+    const unitTitle = selectedUnit?.title || selectedUnit?.name || 'Unit'
+    const subjectTitle = selectedSubject || 'Curriculum Subject'
+
+    let promptMessage = customMsg
+    if (!promptMessage) {
+      if (mode === 'structured_10_step') {
+        promptMessage = `Teach me ${topicTitle} from ${unitTitle} in ${subjectTitle} following the complete 10-step structured teaching workflow.`
+      } else if (mode === 'concept_to_sense') {
+        promptMessage = `Explain the visual diagram, circuit architecture, mathematical equations, and component breakdown for ${topicTitle} using Concept-to-Sense audio intelligence.`
+      } else if (mode === 'quick_revision') {
+        promptMessage = `Provide a rapid-fire high-yield exam revision for ${topicTitle} in ${subjectTitle}.`
+      } else if (mode === 'simple') {
+        promptMessage = `Explain ${topicTitle} using simple language, everyday analogies, and clear intuition.`
+      } else {
+        promptMessage = `Provide a detailed subject-specific explanation of ${topicTitle} grounded in our syllabus.`
+      }
+    }
+
+    const payload = {
+      message: promptMessage,
+      subject: subjectTitle,
+      unit: unitTitle,
+      chapter: unitTitle,
+      topic: topicTitle,
+      concept: topicTitle,
+      subtopic: topicTitle,
+      learning_objectives: selectedTopic.objectives || [],
+      teaching_mode: mode,
+      diagram_type: (subjectTitle.toLowerCase().includes('physic') || subjectTitle.toLowerCase().includes('electr') || subjectTitle.toLowerCase().includes('circuit'))
+        ? 'Circuit Diagram'
+        : (subjectTitle.toLowerCase().includes('math') ? 'Mathematical Graph / Expression' : 'Architectural Flowchart'),
+      audio_friendly: true,
+      explanation_mode: mode === 'simple' ? 'simple' : 'detailed',
+      history: conversationHistory.slice(-6)
+    }
+
+    try {
+      const res = await api.trainerChat(payload)
+      if (res && res.success && res.reply) {
+        const replyText = res.reply
+        setActiveLesson({
+          mode,
+          title: topicTitle,
+          unit: unitTitle,
+          subject: subjectTitle,
+          text: replyText,
+          timestamp: new Date()
+        })
+
+        // Update multi-turn history
+        setConversationHistory(prev => [
+          ...prev,
+          { role: 'user', text: promptMessage },
+          { role: 'model', text: replyText }
+        ])
+
+        // Auto-narrate if audioFirst is enabled
+        const labelText = mode === 'concept_to_sense'
+          ? `Concept-to-Sense Audio: ${topicTitle}`
+          : (mode === 'structured_10_step' ? `10-Step Lesson: ${topicTitle}` : `Tutor: ${topicTitle}`)
+        speakText(replyText, labelText)
+      } else {
+        const errMsg = res?.error || 'Teaching engine could not generate explanation. Please try again.'
+        speakText(errMsg, 'AI Error')
+      }
+    } catch (err) {
+      console.error('Teaching intelligence error', err)
+      speakText('Connection error communicating with the Personal Trainer teaching engine.', 'Connection Error')
+    } finally {
+      setLoadingLesson(false)
+    }
+  }, [selectedTopic, selectedUnit, selectedSubject, teachingMode, conversationHistory, speakText])
+
+  // Handle Asking Custom Question
+  const handleAskQuestion = (e) => {
+    if (e) e.preventDefault()
+    if (!studentQuestion.trim()) return
+    const q = studentQuestion.trim()
+    setStudentQuestion('')
+    requestAITeaching(teachingMode, q)
+  }
+
+  // Handle Practice Submit & AI Assessment
+  const handlePracticeSubmit = async (e) => {
+    e.preventDefault()
+    if (!practiceAnswer.trim()) return
+    setAssessingPractice(true)
+
+    const evaluationPrompt = `Evaluate the student's answer for the topic '${selectedTopic?.title || 'this topic'}'.
+Student Answer: "${practiceAnswer.trim()}"
+Provide concise verbal marks/score out of 5, highlight what was done correctly, and explain any missing points.`
+
+    try {
+      const res = await api.trainerChat({
+        message: evaluationPrompt,
+        subject: selectedSubject,
+        topic: selectedTopic?.title,
+        teaching_mode: 'practice_assessment',
+        audio_friendly: true
+      })
+      if (res && res.success && res.reply) {
+        setPracticeSubmitted(true)
+        setPracticeFeedback(res.reply)
+        if (voiceQuestions) {
+          speakText(res.reply, 'Checkpoint Assessment Result')
+        }
+      }
+    } catch (err) {
+      setPracticeFeedback('Thank you. Your answer has been registered.')
+    } finally {
+      setAssessingPractice(false)
+    }
+  }
+
   // Welcome Announcement
   const handleAnnounceWelcome = () => {
-    const welcomeMsg = `Welcome to the Blind Learning Companion, ${user?.name || 'Student'}. ` +
+    const welcomeMsg = `Welcome to the Blind Learning Companion teaching suite, ${user?.name || 'Student'}. ` +
       (hasValidCurriculum
-        ? `Your active syllabus has ${authoritativeSubjects.length} subjects. Selected subject is ${selectedSubject || 'none'}. You can press P to play or pause audio, N to jump, or question mark for keyboard help.`
+        ? `You are enrolled in ${authoritativeSubjects.length} subjects. Selected subject is ${selectedSubject || 'none'}. Selected topic is ${selectedTopic?.title || 'none'}. You can press P to play or pause, V to dictate a question, or question mark for keyboard help.`
         : `You currently have no validated syllabus uploaded. Please select Upload Syllabus to import your course document.`)
     speakText(welcomeMsg, 'Welcome Greeting')
   }
 
-  // Speak Current Topic
-  const handleReadCurrentTopic = () => {
-    if (!selectedTopic) {
-      speakText('No topic is currently selected. Please choose a subject and unit from your syllabus.', 'Topic Reader')
-      return
-    }
-
-    let speech = `Subject: ${selectedSubject}. Unit: ${selectedUnit?.title || selectedUnit?.name || 'Unit'}. Topic: ${selectedTopic.title}. `
-    if (explanationMode === 'simple') {
-      speech += `Concept overview: ${selectedTopic.description || selectedTopic.title}. Remember, this concept builds on your core curriculum foundations.`
-    } else {
-      speech += `Detailed syllabus breakdown: ${selectedTopic.description || selectedTopic.title}. `
-      if (Array.isArray(selectedTopic.objectives) && selectedTopic.objectives.length > 0) {
-        speech += `Key learning outcomes: ${selectedTopic.objectives.join('. ')}. `
-      }
-      if (spokenDiagrams) {
-        speech += `Spoken schema note: Conceptual diagrams for this unit represent hierarchical flow from foundational definitions down to practical problems.`
-      }
-    }
-    speakText(speech, `Topic: ${selectedTopic.title}`)
+  // Component-by-Component Explorer Audio
+  const handleExploreComponent = (compName, compDetails) => {
+    setActiveComponent(compName)
+    const msg = `Component Inspection: ${compName}. ${compDetails}`
+    speakText(msg, `Component: ${compName}`)
   }
 
-  // Handle Practice Submit
-  const handlePracticeSubmit = (e) => {
-    e.preventDefault()
-    if (!practiceAnswer.trim()) return
-    setPracticeSubmitted(true)
-    const feedback = `Thank you for your answer on ${selectedTopic?.title || 'this topic'}. Your spoken input has been registered. You accurately identified the core principles. Continue practicing with past exam questions.`
-    setPracticeFeedback(feedback)
-    if (voiceQuestions) {
-      speakText(feedback, 'Practice Feedback')
-    }
-  }
-
-  // If student does not have feature enabled
+  // Access check
   if (!isCompanionEnabled) {
     return (
       <div className="max-w-3xl mx-auto py-12 px-4 text-center">
@@ -364,7 +545,7 @@ export default function BlindCompanion() {
   return (
     <main
       role="main"
-      aria-label="Blind Learning Companion Dashboard"
+      aria-label="Blind Learning Companion Teaching Suite"
       className={`space-y-6 pb-12 transition-colors ${highContrast ? 'bg-black text-yellow-300 font-bold' : ''}`}
     >
       {/* Hidden Live Region for Screen Readers */}
@@ -382,20 +563,20 @@ export default function BlindCompanion() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Blind Learning Companion
+                  Blind Learning Companion · Teaching Suite
                 </h1>
                 <Badge className="bg-indigo-600 text-white font-bold text-[10px] uppercase tracking-wider">
-                  Audio-First
+                  Concept-to-Sense
                 </Badge>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                Accessible, syllabus-grounded learning companion with synthesized speech and voice navigation.
+                Syllabus-aware AI teaching, 10-step structured lessons, and mental-mapping visual explanations.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Global Accessible Controls */}
+        {/* Global Controls */}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -422,10 +603,10 @@ export default function BlindCompanion() {
             <Button
               variant="secondary"
               className="text-xs font-bold flex items-center gap-1.5 focus-visible:ring-4 focus-visible:ring-indigo-500"
-              aria-label="Open Settings"
+              aria-label="Open Companion Settings"
             >
               <SettingsIcon size={15} />
-              <span>Companion Settings</span>
+              <span>Settings</span>
             </Button>
           </Link>
         </div>
@@ -455,6 +636,20 @@ export default function BlindCompanion() {
 
         {/* Audio Action Buttons */}
         <div className="flex items-center gap-2 self-start md:self-center shrink-0">
+          {voiceSupported && (
+            <Button
+              type="button"
+              onClick={toggleVoiceInput}
+              className={`text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white transition-all ${
+                isListening ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+              }`}
+              aria-label={isListening ? 'Stop Listening' : 'Speak a Question (Hotkey: V)'}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+              <span>{isListening ? 'Listening...' : 'Voice Question'}</span>
+            </Button>
+          )}
+
           {isSpeaking ? (
             isPaused ? (
               <Button
@@ -480,13 +675,13 @@ export default function BlindCompanion() {
           ) : (
             <Button
               type="button"
-              onClick={handleReadCurrentTopic}
-              disabled={!selectedTopic}
+              onClick={() => requestAITeaching(teachingMode)}
+              disabled={!selectedTopic || loadingLesson}
               className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white disabled:opacity-50"
-              aria-label="Listen to Current Topic (Hotkey: P or Space)"
+              aria-label="Start AI Lesson (Hotkey: P or Space)"
             >
               <Play size={16} />
-              <span>Read Topic</span>
+              <span>{loadingLesson ? 'Generating...' : 'Start Lesson'}</span>
             </Button>
           )}
 
@@ -516,40 +711,13 @@ export default function BlindCompanion() {
         </div>
       </section>
 
-      {/* ── Section: Welcome and Progress Overview ───────────────────────── */}
-      <section aria-labelledby="overview-heading" className="p-6 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 id="overview-heading" className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-              Hello, {user?.name || 'Student'}
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-              Current enrolled subject: <strong className="text-indigo-700 dark:text-indigo-400">{selectedSubject || 'None Selected'}</strong>
-              {selectedUnit ? ` · Unit: ${selectedUnit.title || selectedUnit.name}` : ''}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              onClick={handleAnnounceWelcome}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-2 px-4 py-2 rounded-xl shadow-xs focus-visible:ring-4 focus-visible:ring-indigo-500"
-              aria-label="Listen to Audio Summary of Current Academic Progress"
-            >
-              <Volume2 size={16} />
-              <span>Audio Summary</span>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Section 1: My Syllabus ────────────────────────────────────────── */}
-      <section aria-labelledby="syllabus-heading" className="space-y-4">
+      {/* ── Section: Active Syllabus Navigation ────────────────────────────── */}
+      <section aria-labelledby="curriculum-select-heading" className="space-y-4">
         <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] pb-2">
           <div className="flex items-center gap-2">
             <BookOpen size={18} className="text-indigo-600" />
-            <h2 id="syllabus-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              1. My Syllabus (Structured Curriculum Navigation)
+            <h2 id="curriculum-select-heading" className="text-base font-bold text-slate-900 dark:text-white">
+              Syllabus Selection (Subject · Unit · Topic)
             </h2>
           </div>
           <button
@@ -557,7 +725,7 @@ export default function BlindCompanion() {
             className="text-xs font-semibold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-500 rounded p-1"
           >
             <UploadCloud size={14} />
-            <span>Change Syllabus</span>
+            <span>Switch Syllabus</span>
           </button>
         </div>
 
@@ -570,7 +738,7 @@ export default function BlindCompanion() {
               No Validated Syllabus Uploaded Yet
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-4">
-              To experience syllabus-grounded audio learning, upload your semester or course syllabus document.
+              To experience syllabus-grounded audio teaching, please upload your official semester course document.
             </p>
             <Button
               type="button"
@@ -585,7 +753,7 @@ export default function BlindCompanion() {
             {/* Subject Selector */}
             <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
               <label htmlFor="subject-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                A. Choose Subject ({authoritativeSubjects.length})
+                1. Subject ({authoritativeSubjects.length})
               </label>
               <select
                 id="subject-select"
@@ -600,15 +768,12 @@ export default function BlindCompanion() {
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Grounds all audio lessons in this syllabus course.
-              </p>
             </div>
 
-            {/* Unit / Chapter Selector */}
+            {/* Unit Selector */}
             <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
               <label htmlFor="unit-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                B. Choose Unit ({activeUnits.length})
+                2. Unit / Module ({activeUnits.length})
               </label>
               <select
                 id="unit-select"
@@ -626,15 +791,12 @@ export default function BlindCompanion() {
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                {selectedUnit?.summary || 'Standard syllabus module.'}
-              </p>
             </div>
 
             {/* Topic Selector */}
             <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
               <label htmlFor="topic-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                C. Choose Topic ({activeTopics.length})
+                3. Topic / Subtopic ({activeTopics.length})
               </label>
               <select
                 id="topic-select"
@@ -650,60 +812,362 @@ export default function BlindCompanion() {
                   <option key={idx} value={top.title}>{top.title}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                {selectedTopic?.description || 'Active focus topic.'}
-              </p>
             </div>
           </div>
         )}
       </section>
 
-      {/* ── Section 2: Continue Learning ──────────────────────────────────── */}
-      <section aria-labelledby="continue-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-3">
+      {/* ── Section: Teaching Mode & Intelligent Action Bar ───────────────── */}
+      <section aria-labelledby="teaching-modes-heading" className="p-5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/60 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <Compass size={18} className="text-indigo-600" />
-              <h2 id="continue-heading" className="text-base font-bold text-slate-900 dark:text-white">
-                2. Continue Learning
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Currently queued lesson: <strong className="text-slate-800 dark:text-slate-200">{selectedTopic?.title || 'None selected'}</strong>
+            <h2 id="teaching-modes-heading" className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Sparkles size={16} className="text-indigo-600" />
+              <span>Teaching Intelligence Mode</span>
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+              Select how the AI Personal Trainer delivers this syllabus concept.
             </p>
           </div>
 
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              onClick={() => {
+                setTeachingMode('structured_10_step')
+                requestAITeaching('structured_10_step')
+              }}
+              disabled={loadingLesson}
+              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
+                teachingMode === 'structured_10_step'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              10-Step Master Lesson
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => {
+                setTeachingMode('concept_to_sense')
+                requestAITeaching('concept_to_sense')
+              }}
+              disabled={loadingLesson}
+              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
+                teachingMode === 'concept_to_sense'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              Concept-to-Sense Audio
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => {
+                setTeachingMode('simple')
+                requestAITeaching('simple')
+              }}
+              disabled={loadingLesson}
+              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
+                teachingMode === 'simple'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              Simple Mode
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => {
+                setTeachingMode('detailed')
+                requestAITeaching('detailed')
+              }}
+              disabled={loadingLesson}
+              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
+                teachingMode === 'detailed'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              Detailed Mode
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => {
+                setTeachingMode('quick_revision')
+                requestAITeaching('quick_revision')
+              }}
+              disabled={loadingLesson}
+              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
+                teachingMode === 'quick_revision'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              Quick Revision
+            </Button>
+          </div>
+        </div>
+
+        {/* Quick Conversational Prompt Actions */}
+        <div className="pt-2 border-t border-indigo-200/60 dark:border-indigo-900/40 flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300">
+            Quick Follow-ups:
+          </span>
+          <button
+            type="button"
+            disabled={loadingLesson}
+            onClick={() => requestAITeaching(teachingMode, `Explain ${selectedTopic?.title} more simply using an everyday analogy.`)}
+            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+          >
+            💡 Simpler Explanation
+          </button>
+          <button
+            type="button"
+            disabled={loadingLesson}
+            onClick={() => requestAITeaching(teachingMode, `Give me another concrete real-world engineering or practical example of ${selectedTopic?.title}.`)}
+            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+          >
+            🔄 Another Example
+          </button>
+          <button
+            type="button"
+            disabled={loadingLesson}
+            onClick={() => requestAITeaching('concept_to_sense', `Break down and explore the individual components and connections of the diagram for ${selectedTopic?.title}.`)}
+            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+          >
+            🔍 Explore Diagram Components
+          </button>
+          <button
+            type="button"
+            disabled={loadingLesson}
+            onClick={() => requestAITeaching('quick_revision', `Give me a 60-second rapid revision checklist of ${selectedTopic?.title} for exam recall.`)}
+            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+          >
+            ⚡ Short Revision
+          </button>
+        </div>
+      </section>
+
+      {/* ── Active Teaching Lesson Presentation ───────────────────────────── */}
+      {loadingLesson ? (
+        <Card className="p-8 text-center space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 mx-auto flex items-center justify-center animate-spin">
+            <RefreshCw size={24} />
+          </div>
+          <div className="text-sm font-bold text-slate-900 dark:text-white">
+            Teaching Engine Generating Lesson for {selectedTopic?.title || 'Selected Topic'}...
+          </div>
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Grounded directly in your validated syllabus ({selectedSubject} · {selectedUnit?.title || 'Unit'}). Text-to-speech narration will begin automatically.
+          </p>
+        </Card>
+      ) : activeLesson ? (
+        <Card className="p-6 space-y-4 border-2 border-indigo-200 dark:border-indigo-900/50 shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {activeLesson.title}
+                </h3>
+                <Badge className="bg-indigo-600 text-white text-[10px] uppercase font-bold">
+                  {activeLesson.mode.replace('_', ' ')}
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {activeLesson.subject} · {activeLesson.unit}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={() => speakText(activeLesson.text, `Lesson: ${activeLesson.title}`)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl shadow-xs"
+              >
+                <Volume2 size={16} />
+                <span>Re-Listen Lesson</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Render Lesson Content cleanly with accessible reading typography */}
+          <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed space-y-3 whitespace-pre-wrap">
+            {activeLesson.text}
+          </div>
+        </Card>
+      ) : null}
+
+      {/* ── Section: Concept-to-Sense Interactive Component Explorer ───────── */}
+      <section aria-labelledby="visual-explorer-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
+          <div className="flex items-center gap-2">
+            <Cpu size={18} className="text-indigo-600" />
+            <h2 id="visual-explorer-heading" className="text-base font-bold text-slate-900 dark:text-white">
+              Concept-to-Sense Visual Audio Explorer
+            </h2>
+          </div>
           <Button
             type="button"
-            onClick={handleReadCurrentTopic}
-            disabled={!selectedTopic}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-2 px-4 py-2.5 rounded-xl self-start sm:self-center disabled:opacity-50 focus-visible:ring-4 focus-visible:ring-indigo-500"
-            aria-label={`Play audio lesson for ${selectedTopic?.title || 'selected topic'}`}
+            variant="secondary"
+            onClick={() => requestAITeaching('concept_to_sense')}
+            disabled={loadingLesson || !selectedTopic}
+            className="text-xs font-bold flex items-center gap-1.5 self-start sm:self-center"
           >
-            <Play size={16} />
-            <span>Play Audio Lesson</span>
+            <Activity size={15} />
+            <span>Generate Full Mental Map</span>
           </Button>
         </div>
 
-        {selectedTopic && (
-          <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
-            <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
-              Conceptual Summary & Spoken Text
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              {selectedTopic.description || `In-depth syllabus focus on ${selectedTopic.title}. Use the audio reader bar above or press Space to listen.`}
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Translates textbook diagrams, electrical circuits, mathematical curves, and scientific illustrations into tactile mental models. Select any component below to hear its isolated role, interconnections, and signal path:
+        </p>
+
+        {/* Interactive Component Pills */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => handleExploreComponent(
+              'Active Potential Source (Driver V1)',
+              'Provides nominal 12 Volts DC excitation potential. Located at top-left rail, driving clockwise continuous charge/signal flow into series impedance.'
+            )}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              activeComponent?.includes('Source')
+                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-indigo-600 mb-1">
+              <Zap size={16} />
+              <span className="text-xs font-bold">1. Excitation Source</span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+              12V Nominal Reference Driver
             </p>
-          </div>
-        )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExploreComponent(
+              'Control Gate / Series Switch S1',
+              'Located in series on the upper positive conductor rail. In closed state, establishes closed loop continuity. If opened, resistance becomes infinite, immediately interrupting loop flow.'
+            )}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              activeComponent?.includes('Switch')
+                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-indigo-600 mb-1">
+              <Sliders size={16} />
+              <span className="text-xs font-bold">2. Series Switch S1</span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+              Physical Loop Continuity Gate
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExploreComponent(
+              'Primary Impedance / Load R1',
+              'Rated at 100 Ohms. Connected between upper switched rail and ground return node. Generates a proportional voltage drop according to Ohm\'s Law, drawing 120 milliamperes of current.'
+            )}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              activeComponent?.includes('Impedance')
+                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-indigo-600 mb-1">
+              <Cpu size={16} />
+              <span className="text-xs font-bold">3. Load Element R1</span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+              100 Ohm Rated Working Impedance
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExploreComponent(
+              'Ground Reference / Return Node',
+              'Zero volt system reference rail. Completes the closed path back to the negative terminal of driver V1, ensuring zero floating potentials.'
+            )}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              activeComponent?.includes('Ground')
+                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-indigo-600 mb-1">
+              <ShieldCheck size={16} />
+              <span className="text-xs font-bold">4. Ground Reference</span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+              0V Return Conductor Node
+            </p>
+          </button>
+        </div>
       </section>
 
-      {/* ── Section 3: Concepts I Need to Improve (Evaluations & Misconceptions) ─ */}
+      {/* ── Section: Interactive Spoken Q&A Box ────────────────────────────── */}
+      <section aria-labelledby="interactive-qa-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
+        <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
+          <Mic size={18} className="text-indigo-600" />
+          <h2 id="interactive-qa-heading" className="text-base font-bold text-slate-900 dark:text-white">
+            Interactive Audio Tutoring (Ask Questions via Voice or Text)
+          </h2>
+        </div>
+
+        <form onSubmit={handleAskQuestion} className="space-y-3">
+          <div className="relative">
+            <textarea
+              rows={2}
+              value={studentQuestion}
+              onChange={(e) => setStudentQuestion(e.target.value)}
+              placeholder="Ask anything about this concept (e.g. 'Why does voltage divide in series?', 'Give another example', 'Explore the current path')..."
+              className="w-full p-3 pr-24 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus-visible:ring-4 focus-visible:ring-indigo-500"
+            />
+            <div className="absolute right-2 top-2 flex items-center gap-1.5">
+              {voiceSupported && (
+                <button
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  className={`p-2 rounded-lg text-white transition-all cursor-pointer ${
+                    isListening ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                  aria-label={isListening ? 'Stop Listening' : 'Speak Question (Hotkey: V)'}
+                  title="Speak your question"
+                >
+                  <Mic size={16} />
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={!studentQuestion.trim() || loadingLesson}
+                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 cursor-pointer"
+                aria-label="Submit Question to AI Tutor"
+                title="Send Question"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {/* ── Section: Concepts I Need to Improve (Authentic Misconceptions) ─── */}
       <section aria-labelledby="improve-heading" className="space-y-3">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
           <div className="flex items-center gap-2">
             <AlertTriangle size={18} className="text-amber-600" />
             <h2 id="improve-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              3. Concepts I Need to Improve (Evidence-Based Learning Gaps)
+              Concepts I Need to Improve (Evidence-Based Learning Gaps)
             </h2>
           </div>
           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -723,7 +1187,7 @@ export default function BlindCompanion() {
                 No Active Conceptual Misconceptions Found
               </div>
               <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
-                Your past evaluated assessments indicate solid conceptual understanding across completed topics. Any future evaluation weak spots will be synthesized here with spoken corrective advice.
+                Your past evaluated assessments indicate solid conceptual understanding across completed topics.
               </p>
             </div>
           </Card>
@@ -768,54 +1232,13 @@ export default function BlindCompanion() {
         )}
       </section>
 
-      {/* ── Section 4: Recommended Next Topic ─────────────────────────────── */}
-      <section aria-labelledby="next-heading" className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-2 mb-2">
-          <ArrowRight size={18} className="text-indigo-600" />
-          <h2 id="next-heading" className="text-base font-bold text-slate-900 dark:text-white">
-            4. Recommended Next Syllabus Topic
-          </h2>
-        </div>
-
-        {activeTopics.length > 1 ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">
-                Sequenced Curriculum Step
-              </span>
-              <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
-                {activeTopics[1].title}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {activeTopics[1].description || 'Next sequential topic in active module.'}
-              </p>
-            </div>
-
-            <Button
-              type="button"
-              onClick={() => {
-                setSelectedTopic(activeTopics[1])
-                speakText(`Switched to next topic: ${activeTopics[1].title}.`, 'Topic Advancement')
-              }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl self-start sm:self-center"
-            >
-              Advance to Topic
-            </Button>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">
-            Continue mastering your current focus topic or select another unit from Section 1 above.
-          </p>
-        )}
-      </section>
-
-      {/* ── Section 5: Practice and Assess ────────────────────────────────── */}
+      {/* ── Section: Practice & Audio Assessment Checkpoint ───────────────── */}
       <section aria-labelledby="practice-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Award size={18} className="text-indigo-600" />
             <h2 id="practice-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              5. Practice & Assess (Audio Checkpoint)
+              Practice & Assess (AI Audio Checkpoint)
             </h2>
           </div>
           <Button
@@ -852,14 +1275,14 @@ export default function BlindCompanion() {
             />
             <div className="flex items-center justify-between gap-3">
               <span className="text-[11px] text-slate-500">
-                Spoken feedback will play automatically upon submission.
+                Spoken evaluation will play automatically upon submission.
               </span>
               <Button
                 type="submit"
-                disabled={!practiceAnswer.trim()}
+                disabled={!practiceAnswer.trim() || assessingPractice}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl disabled:opacity-50"
               >
-                Submit Answer
+                {assessingPractice ? 'Evaluating...' : 'Submit Answer'}
               </Button>
             </div>
           </form>
@@ -869,60 +1292,10 @@ export default function BlindCompanion() {
               <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
               <div>
                 <strong className="block font-bold mb-0.5">Assessment Evaluation:</strong>
-                <p className="leading-relaxed">{practiceFeedback}</p>
+                <p className="leading-relaxed whitespace-pre-wrap">{practiceFeedback}</p>
               </div>
             </div>
           )}
-        </div>
-      </section>
-
-      {/* ── Section 6: Audio Revision ─────────────────────────────────────── */}
-      <section aria-labelledby="revision-heading" className="p-6 rounded-2xl bg-gradient-to-r from-indigo-900 to-slate-900 text-white space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Bookmark size={18} className="text-indigo-400" />
-            <h2 id="revision-heading" className="text-base font-bold text-white">
-              6. Audio Revision Mode
-            </h2>
-          </div>
-          <span className="text-xs text-indigo-300">
-            Speed: {audioSpeed}x · Mode: {explanationMode}
-          </span>
-        </div>
-
-        <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-          Listen to a uninterrupted, comprehensive recap of your active syllabus unit: <strong>{selectedUnit?.title || 'Current Unit'}</strong>. Perfect for hands-free audio review on headphones.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <Button
-            type="button"
-            onClick={() => {
-              const revisionSummary = `Unit Revision for ${selectedSubject}. Unit: ${selectedUnit?.title || 'Selected Module'}. Topics included: ${activeTopics.map(t => t.title).join(', ')}. In this module, the fundamental goal is to understand how these interrelated principles form the foundation of ${selectedSubject}. Keep practicing past problem sets to reinforce speed and accuracy.`
-              speakText(revisionSummary, `Revision: ${selectedUnit?.title || 'Active Unit'}`)
-            }}
-            className="bg-white hover:bg-slate-100 text-slate-900 text-xs font-bold flex items-center gap-2 px-5 py-2.5 rounded-xl shadow-lg focus-visible:ring-4 focus-visible:ring-indigo-400"
-            aria-label="Start Unit Audio Revision"
-          >
-            <Play size={16} className="text-indigo-600" />
-            <span>Start Unit Audio Revision</span>
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              const rates = [0.75, 1.0, 1.25, 1.5, 2.0]
-              const nextRate = rates[(rates.indexOf(audioSpeed) + 1) % rates.length]
-              setAudioSpeed(nextRate)
-              speakText(`Audio playback speed set to ${nextRate}x.`, 'Speed Change')
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700"
-            aria-label="Toggle playback speed"
-          >
-            <FastForward size={15} />
-            <span>Speed: {audioSpeed}x</span>
-          </Button>
         </div>
       </section>
 
@@ -956,6 +1329,10 @@ export default function BlindCompanion() {
               <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Play / Pause Speech</span>
                 <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">P or Space</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Voice Question (Mic)</span>
+                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">V</kbd>
               </div>
               <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Stop Speech</span>
