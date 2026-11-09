@@ -214,9 +214,8 @@ class GeminiService:
 
         last_error = ""
         models_to_try = [self.model]
-        for candidate in ("gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.8-flash"):
-            if candidate not in models_to_try:
-                models_to_try.append(candidate)
+        if "gemini-3.6-flash" not in models_to_try:
+            models_to_try.append("gemini-3.6-flash")
 
         for model_name in models_to_try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
@@ -3519,7 +3518,7 @@ Return ONLY a valid JSON object matching this exact schema:
             return normalized
 
         try:
-            raw = self.generate_content(prompt, files=files_payload, json_output=True, timeout=28, max_output_tokens=4096)
+            raw = self.generate_content(prompt, files=files_payload, json_output=True, timeout=60, max_output_tokens=4096)
             res = self.parse_json_response(raw)
             if isinstance(res, dict) and (res.get("title") or res.get("activity_title") or res.get("academic_theory") or res.get("scientific_principle")):
                 normalized = self._normalize_learn_anywhere_response(res, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
@@ -3527,19 +3526,22 @@ Return ONLY a valid JSON object matching this exact schema:
                 if is_valid:
                     return normalized
                 else:
-                    logger.warning(f"[LearnAnywhere] AI response failed coherence validation ({reason}).")
-                    if not is_test_env:
-                        return {
-                            "error": f"Generated activity for '{subject}' - '{active_topic}' did not meet subject accuracy checks ({reason}). Please retry or choose a specific syllabus topic.",
-                            "can_retry": True,
-                            "is_supported": False,
-                            "coherence_failure": reason
-                        }
-                    fallback = self._build_deterministic_learn_anywhere(
-                        subject, subject_id, active_topic, resource_environment, difficulty, sem_str, program, department,
-                        student_type=student_type, learning_method=learning_method
+                    logger.warning(f"[LearnAnywhere] AI response failed coherence validation ({reason}). Attempting dynamic retry...")
+                    refined_prompt = (
+                        f"{prompt}\n\n"
+                        f"IMPORTANT ACCURACY REQUIREMENT:\n"
+                        f"Ensure all content strictly aligns with '{subject}' and topic '{active_topic}'. Coherence note: {reason}."
                     )
-                    return self._normalize_learn_anywhere_response(fallback, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
+                    try:
+                        raw_retry = self.generate_content(refined_prompt, files=files_payload, json_output=True, timeout=50, max_output_tokens=4096)
+                        res_retry = self.parse_json_response(raw_retry)
+                        if isinstance(res_retry, dict) and (res_retry.get("title") or res_retry.get("activity_title")):
+                            norm_retry = self._normalize_learn_anywhere_response(res_retry, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
+                            is_v2, _ = self.validate_activity_coherence(norm_retry, subject, active_topic, student_type, sem_str)
+                            if is_v2:
+                                return norm_retry
+                    except Exception as retry_exc:
+                        logger.warning(f"[LearnAnywhere] Dynamic retry failed: {retry_exc}")
         except Exception as e:
             logger.warning(f"[GeminiService] generate_learn_anywhere API call error: {e}")
             err_str = str(e)
@@ -3549,6 +3551,19 @@ Return ONLY a valid JSON object matching this exact schema:
                     "is_supported": False,
                     "can_retry": True
                 }
+            # Attempt one fast dynamic retry if network or parsing experienced a temporary glitch
+            if not is_test_env:
+                try:
+                    logger.info(f"[LearnAnywhere] Retrying dynamic generation for '{subject}' - '{active_topic}'...")
+                    raw_retry = self.generate_content(prompt, files=files_payload, json_output=True, timeout=55, max_output_tokens=4096)
+                    res_retry = self.parse_json_response(raw_retry)
+                    if isinstance(res_retry, dict) and (res_retry.get("title") or res_retry.get("activity_title")):
+                        norm_retry = self._normalize_learn_anywhere_response(res_retry, subject, active_topic, unit, curriculum_reference, resource_environment, difficulty, sem_str, program, department, constraint_mode, teaching_plan=teaching_plan, student_type=student_type, custom_materials=custom_materials)
+                        is_v2, _ = self.validate_activity_coherence(norm_retry, subject, active_topic, student_type, sem_str)
+                        if is_v2:
+                            return norm_retry
+                except Exception as e2:
+                    logger.warning(f"[GeminiService] Secondary dynamic retry failed: {e2}")
 
         # In testing environments, provide deterministic curriculum-grounded activity
         if is_test_env:

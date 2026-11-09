@@ -51,21 +51,33 @@ export default function MisconceptionMap() {
   }, [selectedEvidence])
 
   // Delete Misconception
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm("Delete this misconception record permanently?")) {
       setMisconceptions(prev => prev.filter(m => m.id !== id))
+      try {
+        await api.deleteMisconception(id)
+      } catch (err) {
+        console.warn("Delete misconception notice:", err)
+      }
     }
   }
 
   // Toggle Completed / Resolved Status
-  const handleToggleResolved = (id) => {
+  const handleToggleResolved = async (id) => {
+    let nextStatus = 'Completed / Resolved'
     setMisconceptions(prev => prev.map(m => {
       if (m.id === id) {
         const isDone = m.status === 'Completed / Resolved'
-        return { ...m, status: isDone ? 'Active' : 'Completed / Resolved' }
+        nextStatus = isDone ? 'Active' : 'Completed / Resolved'
+        return { ...m, status: nextStatus }
       }
       return m
     }))
+    try {
+      await api.updateMisconception(id, { status: nextStatus })
+    } catch (err) {
+      console.warn("Update misconception status notice:", err)
+    }
   }
 
   const handleMasterInTrainer = (m) => {
@@ -184,64 +196,213 @@ export default function MisconceptionMap() {
                     </div>
                   </div>
 
-                  {/* Exact Question Text */}
-                  {m.exact_question && (
-                    <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
-                      <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">Evaluated Question ({qNum}):</span>
-                      <p className="text-[var(--text)] font-semibold leading-relaxed">{m.exact_question}</p>
+                  {/* Performance Summary Banner */}
+                  {m.performance_summary && (
+                    <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs space-y-2">
+                      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] pb-1.5 flex-wrap">
+                        <span className="font-extrabold text-[11.5px] text-[var(--accent)] flex items-center gap-1.5">
+                          <Sparkles size={13} />
+                          <span>Performance & Diagnostic Profile</span>
+                        </span>
+                        {m.performance_summary.percentage !== undefined && (
+                          <span className="text-[11px] font-bold text-[var(--text-soft)]">
+                            Score: <strong className="text-[var(--text)]">{m.performance_summary.percentage}%</strong>
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {Array.isArray(m.performance_summary.strengths) && m.performance_summary.strengths.length > 0 && (
+                          <div className="text-[11px]">
+                            <strong className="text-[var(--success)]">Strengths: </strong>
+                            <span>{m.performance_summary.strengths.join(', ')}</span>
+                          </div>
+                        )}
+                        {m.performance_summary.recommended_next_practice && (
+                          <div className="text-[11px]">
+                            <strong className="text-[var(--accent)]">Practice Focus: </strong>
+                            <span>{m.performance_summary.recommended_next_practice}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
-                  {/* Highlighted Evidence Quote Banner */}
-                  <div className="p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-xs leading-relaxed">
-                    <div className="font-extrabold text-[var(--error)] mb-1 flex items-center gap-1.5 uppercase tracking-wider">
-                      <AlertCircle size={15} />
-                      <span>Script Evidence Diagnostic:</span>
-                    </div>
-                    <div className="italic text-sm font-semibold text-[var(--text)]">
-                      &ldquo;{m.evidence || `${studentName}'s written response in ${qNum} demonstrates a conceptual misunderstanding of ${m.identified_concept || m.concept}.`}&rdquo;
-                    </div>
-                  </div>
+                  {/* Diagnosed Concept Groups (1 consolidated student record) */}
+                  {Array.isArray(m.concept_groups) && m.concept_groups.length > 0 ? (
+                    <div className="space-y-4">
+                      {m.concept_groups.map((cg, cgIdx) => (
+                        <div key={cgIdx} className="p-4 rounded-2xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3">
+                          {/* Concept Group Header */}
+                          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-[var(--border)] pb-2.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="w-6 h-6 rounded-lg bg-[var(--accent)] text-white font-extrabold text-xs flex items-center justify-center">
+                                {cgIdx + 1}
+                              </span>
+                              <strong className="text-sm font-extrabold text-[var(--text)]">
+                                {cg.concept}
+                              </strong>
+                              {cg.error_label && (
+                                <span className="text-[10.5px] px-2 py-0.5 rounded bg-[var(--surface)] text-[var(--accent)] border border-[var(--accent-dim)] font-bold">
+                                  {cg.error_label}
+                                </span>
+                              )}
+                              {cg.evidence_status && (
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                                  cg.evidence_status === 'VERIFIED'
+                                    ? 'bg-[var(--success-soft)] text-[var(--success)] border border-[var(--success)]/40'
+                                    : 'bg-[var(--warning-soft)] text-[var(--warning)] border border-[var(--warning)]/40'
+                                }`}>
+                                  {cg.evidence_status === 'VERIFIED' ? '✓ Evidence Supported' : '⚠ Needs Review'}
+                                </span>
+                              )}
+                              {cg.related_questions && cg.related_questions.length > 0 && (
+                                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--surface)] text-[var(--accent)] border border-[var(--accent-dim)] font-bold">
+                                  Affecting: Q{cg.related_questions.join(', Q')}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => navigate('/app/trainer', { state: { subject: m.subject, concept: cg.concept } })}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-[var(--accent-soft)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors flex items-center gap-1"
+                              >
+                                <Sparkles size={12} />
+                                <span>Master This Concept</span>
+                              </button>
+                            </div>
+                          </div>
 
-                  {/* Actual Misconception vs Correct Concept Comparison Table */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1.5 text-xs">
-                      <div className="font-extrabold text-[var(--error)] uppercase tracking-wider flex items-center gap-1">
-                        <span>❌ Actual Flawed Reasoning:</span>
-                      </div>
-                      <div className="font-semibold text-[var(--text)] leading-relaxed">
-                        {m.actual_misconception || m.misconception || m.description}
-                      </div>
-                      {(m.student_answer || m.student_reasoning) && (
-                        <div className="pt-2 text-xs text-[var(--text-soft)] font-mono bg-[var(--surface)] p-2.5 rounded-xl border border-[var(--border)] mt-1.5">
-                          <strong>Student Wrote:</strong> &ldquo;{m.student_answer || m.student_reasoning}&rdquo;
+                          {/* Flawed Reasoning vs Correct Model */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="p-3.5 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] space-y-1.5 text-xs">
+                              <div className="font-extrabold text-[var(--error)] uppercase tracking-wider flex items-center gap-1">
+                                <span>❌ Diagnosed Conceptual Flaw:</span>
+                              </div>
+                              <p className="font-semibold text-[var(--text)] leading-relaxed">
+                                {cg.actual_misconception || cg.misconception}
+                              </p>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] space-y-1.5 text-xs">
+                              <div className="font-extrabold text-[var(--success)] uppercase tracking-wider flex items-center gap-1">
+                                <span>✅ Correct Academic Model:</span>
+                              </div>
+                              <p className="font-semibold text-[var(--text)] leading-relaxed">
+                                {cg.correct_understanding || `Standard curriculum scientific principles of ${cg.concept}.`}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Nested Question Evidence */}
+                          {Array.isArray(cg.questions) && cg.questions.length > 0 && (
+                            <div className="space-y-2 pt-1">
+                              <span className="text-[10.5px] font-extrabold uppercase tracking-wider text-[var(--text-faint)] block">
+                                Supporting Question Evidence ({cg.questions.length}):
+                              </span>
+                              <div className="space-y-2">
+                                {cg.questions.map((q, qIdx) => (
+                                  <div key={qIdx} className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs space-y-1.5">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <span className="font-extrabold text-[var(--accent)] text-[11.5px]">
+                                        Question {q.question_number}
+                                      </span>
+                                      {q.awarded_marks !== undefined && q.maximum_marks !== undefined && (
+                                        <span className="text-[11px] font-semibold text-[var(--text-faint)]">
+                                          Score: <strong>{q.awarded_marks} / {q.maximum_marks} marks</strong>
+                                        </span>
+                                      )}
+                                    </div>
+                                    {q.exact_question && (
+                                      <p className="text-[var(--text)] font-semibold text-[11.5px] leading-snug">
+                                        &ldquo;{q.exact_question}&rdquo;
+                                      </p>
+                                    )}
+                                    {q.student_answer && (
+                                      <div className="font-mono text-[11px] text-[var(--text-soft)] italic bg-[var(--surface-alt)] p-2 rounded-lg border border-[var(--border)]">
+                                        <strong>Student Wrote:</strong> &ldquo;{q.student_answer}&rdquo;
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Remediation for this concept */}
+                          {cg.remedy && (
+                            <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] text-[12px] font-medium text-[var(--text)] flex items-start gap-2">
+                              <Lightbulb size={15} className="text-[var(--gold)] shrink-0 mt-0.5" />
+                              <div>
+                                <strong className="text-[var(--gold)]">Recommended Remediation:</strong> {cg.remedy}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    /* Fallback Single Question View */
+                    <>
+                      {/* Exact Question Text */}
+                      {m.exact_question && (
+                        <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs">
+                          <span className="font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">Evaluated Question ({qNum}):</span>
+                          <p className="text-[var(--text)] font-semibold leading-relaxed">{m.exact_question}</p>
                         </div>
                       )}
-                    </div>
 
-                    <div className="p-4 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] space-y-1.5 text-xs">
-                      <div className="font-extrabold text-[var(--success)] uppercase tracking-wider flex items-center gap-1">
-                        <span>✅ Correct Academic Model:</span>
+                      {/* Highlighted Evidence Quote Banner */}
+                      <div className="p-4 rounded-xl bg-[var(--error-soft)] border border-[var(--error)] text-xs leading-relaxed">
+                        <div className="font-extrabold text-[var(--error)] mb-1 flex items-center gap-1.5 uppercase tracking-wider">
+                          <AlertCircle size={15} />
+                          <span>Script Evidence Diagnostic:</span>
+                        </div>
+                        <div className="italic text-sm font-semibold text-[var(--text)]">
+                          &ldquo;{m.evidence || `${studentName}'s written response in ${qNum} demonstrates a conceptual misunderstanding of ${m.identified_concept || m.concept}.`}&rdquo;
+                        </div>
                       </div>
-                      <div className="font-semibold text-[var(--text)] leading-relaxed">
-                        {m.correct_understanding || m.correct_concept || `Standard scientific principles of ${m.identified_concept || m.concept || m.subject}.`}
+
+                      {/* Actual Misconception vs Correct Concept Comparison Table */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                        <div className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1.5 text-xs">
+                          <div className="font-extrabold text-[var(--error)] uppercase tracking-wider flex items-center gap-1">
+                            <span>❌ Actual Flawed Reasoning:</span>
+                          </div>
+                          <div className="font-semibold text-[var(--text)] leading-relaxed">
+                            {m.actual_misconception || m.misconception || m.description}
+                          </div>
+                          {(m.student_answer || m.student_reasoning) && (
+                            <div className="pt-2 text-xs text-[var(--text-soft)] font-mono bg-[var(--surface)] p-2.5 rounded-xl border border-[var(--border)] mt-1.5">
+                              <strong>Student Wrote:</strong> &ldquo;{m.student_answer || m.student_reasoning}&rdquo;
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-[var(--success-soft)] border border-[var(--success)] space-y-1.5 text-xs">
+                          <div className="font-extrabold text-[var(--success)] uppercase tracking-wider flex items-center gap-1">
+                            <span>✅ Correct Academic Model:</span>
+                          </div>
+                          <div className="font-semibold text-[var(--text)] leading-relaxed">
+                            {m.correct_understanding || m.correct_concept || `Standard scientific principles of ${m.identified_concept || m.concept || m.subject}.`}
+                          </div>
+                          {m.assessments && m.assessments.length > 0 && (
+                            <div className="pt-2 text-xs text-[var(--text-soft)] font-semibold mt-1.5">
+                              <strong>Detected in:</strong> {m.assessments.join(', ')}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      {m.assessments && m.assessments.length > 0 && (
-                        <div className="pt-2 text-xs text-[var(--text-soft)] font-semibold mt-1.5">
-                          <strong>Detected in:</strong> {m.assessments.join(', ')}
+
+                      {/* Teacher Remedy & Class Context */}
+                      {(m.recommended_remediation || m.remedy) && (
+                        <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
+                          <Lightbulb size={16} className="text-[var(--gold)] shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="text-[var(--gold)]">Recommended Remediation:</strong> {m.recommended_remediation || m.remedy}
+                          </div>
                         </div>
                       )}
-                    </div>
-                  </div>
-
-                  {/* Teacher Remedy & Class Context */}
-                  {(m.recommended_remediation || m.remedy) && (
-                    <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
-                      <Lightbulb size={16} className="text-[var(--gold)] shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="text-[var(--gold)]">Recommended Remediation:</strong> {m.recommended_remediation || m.remedy}
-                      </div>
-                    </div>
+                    </>
                   )}
 
                   {/* Footer Controls */}
@@ -325,33 +486,88 @@ export default function MisconceptionMap() {
               </button>
             </div>
 
-            {selectedEvidence.exact_question && (
-              <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
-                <span className="font-bold text-[var(--accent)] block">Official Question Text:</span>
-                <p className="text-[var(--text)] leading-relaxed">{selectedEvidence.exact_question}</p>
+            {Array.isArray(selectedEvidence.concept_groups) && selectedEvidence.concept_groups.length > 0 ? (
+              <div className="space-y-4">
+                {selectedEvidence.concept_groups.map((cg, i) => (
+                  <div key={i} className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-3 text-xs">
+                    <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
+                      <strong className="text-sm font-extrabold text-[var(--accent)]">
+                        {cg.concept}
+                      </strong>
+                      {cg.related_questions && (
+                        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text-soft)]">
+                          Questions: Q{cg.related_questions.join(', Q')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-3 bg-[var(--error-soft)] rounded-lg border border-[var(--error)] space-y-1">
+                      <span className="font-bold text-[var(--error)] block uppercase tracking-wider text-[10.5px]">Identified Conceptual Misunderstanding:</span>
+                      <p className="font-semibold text-[var(--text)] leading-relaxed">{cg.actual_misconception || cg.misconception}</p>
+                    </div>
+
+                    <div className="p-3 bg-[var(--success-soft)] rounded-lg border border-[var(--success)] space-y-1">
+                      <span className="font-bold text-[var(--success)] block uppercase tracking-wider text-[10.5px]">What the Student Should Have Understood:</span>
+                      <p className="font-medium text-[var(--text)] leading-relaxed">{cg.correct_understanding}</p>
+                    </div>
+
+                    {Array.isArray(cg.questions) && cg.questions.length > 0 && (
+                      <div className="space-y-2 pt-1">
+                        <span className="font-bold uppercase tracking-wider text-[10.5px] text-[var(--text-faint)] block">Question Scripts & Student Answers:</span>
+                        {cg.questions.map((q, qi) => (
+                          <div key={qi} className="p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] space-y-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-extrabold text-[var(--accent)]">Question {q.question_number}</span>
+                              {q.awarded_marks !== undefined && q.maximum_marks !== undefined && (
+                                <span className="font-semibold text-[var(--text-faint)]">Score: {q.awarded_marks}/{q.maximum_marks} marks</span>
+                              )}
+                            </div>
+                            {q.exact_question && (
+                              <p className="font-medium text-[var(--text)] text-[11.5px]">&ldquo;{q.exact_question}&rdquo;</p>
+                            )}
+                            {q.student_answer && (
+                              <p className="font-mono text-[11px] italic text-[var(--text-soft)] bg-[var(--surface-alt)] p-2 rounded border border-[var(--border)]">
+                                <strong>Written:</strong> &ldquo;{q.student_answer}&rdquo;
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
+            ) : (
+              <>
+                {selectedEvidence.exact_question && (
+                  <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
+                    <span className="font-bold text-[var(--accent)] block">Official Question Text:</span>
+                    <p className="text-[var(--text)] leading-relaxed">{selectedEvidence.exact_question}</p>
+                  </div>
+                )}
+
+                <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
+                  <span className="font-bold text-[var(--text-faint)] block">Student Script Response:</span>
+                  <p className="text-[var(--text)] leading-relaxed italic font-mono bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
+                    {selectedEvidence.student_answer || selectedEvidence.student_reasoning || selectedEvidence.evidence}
+                  </p>
+                </div>
+
+                <div className="p-3 bg-[var(--error-soft)] rounded-xl border border-[var(--error)] text-xs space-y-1">
+                  <span className="font-bold text-[var(--error)] block">Identified Conceptual Misunderstanding:</span>
+                  <p className="text-[var(--text)] leading-relaxed font-semibold">
+                    {selectedEvidence.actual_misconception || selectedEvidence.misconception || selectedEvidence.description}
+                  </p>
+                </div>
+
+                <div className="p-3 bg-[var(--success-soft)] rounded-xl border border-[var(--success)] text-xs space-y-1">
+                  <span className="font-bold text-[var(--success)] block">What the Student Should Have Understood:</span>
+                  <p className="text-[var(--text)] leading-relaxed">
+                    {selectedEvidence.correct_understanding || selectedEvidence.correct_concept}
+                  </p>
+                </div>
+              </>
             )}
-
-            <div className="p-3 bg-[var(--surface-alt)] rounded-xl border border-[var(--border)] text-xs space-y-1">
-              <span className="font-bold text-[var(--text-faint)] block">Student Script Response:</span>
-              <p className="text-[var(--text)] leading-relaxed italic font-mono bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
-                {selectedEvidence.student_answer || selectedEvidence.student_reasoning || selectedEvidence.evidence}
-              </p>
-            </div>
-
-            <div className="p-3 bg-[var(--error-soft)] rounded-xl border border-[var(--error)] text-xs space-y-1">
-              <span className="font-bold text-[var(--error)] block">Identified Conceptual Misunderstanding:</span>
-              <p className="text-[var(--text)] leading-relaxed font-semibold">
-                {selectedEvidence.actual_misconception || selectedEvidence.misconception || selectedEvidence.description}
-              </p>
-            </div>
-
-            <div className="p-3 bg-[var(--success-soft)] rounded-xl border border-[var(--success)] text-xs space-y-1">
-              <span className="font-bold text-[var(--success)] block">What the Student Should Have Understood:</span>
-              <p className="text-[var(--text)] leading-relaxed">
-                {selectedEvidence.correct_understanding || selectedEvidence.correct_concept}
-              </p>
-            </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
               <Button variant="secondary" onClick={() => setSelectedEvidence(null)}>Close</Button>

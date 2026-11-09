@@ -46,8 +46,9 @@ async function request(endpoint, options = {}) {
       headers['Content-Type'] = 'application/json'
     }
 
-    // Default timeout: 60s for auth requests to gracefully handle Render cloud cold starts, 45s for general requests
-    const defaultTimeout = endpoint.startsWith('/api/auth') ? 60000 : 45000
+    // Default timeout: 60s for auth requests, 90s for deep AI generation/evaluation, 45s for general requests
+    const isAIEndpoint = endpoint.includes('/generate') || endpoint.includes('/action') || endpoint.includes('/evaluate') || endpoint.includes('/trainer') || endpoint.includes('/learn-anywhere') || endpoint.includes('/reality-lab') || endpoint.includes('/knowledge-challenge')
+    const defaultTimeout = endpoint.startsWith('/api/auth') ? 60000 : isAIEndpoint ? 90000 : 45000
     const timeoutMs = options.timeout ?? defaultTimeout
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -373,6 +374,10 @@ export const api = {
     const qs = new URLSearchParams(params).toString()
     return request(`/api/misconceptions${qs ? '?' + qs : ''}`)
   },
+  updateMisconception: (itemId, payload = {}) =>
+    request(`/api/misconceptions/${encodeURIComponent(itemId)}`, { method: 'PUT', body: payload }),
+  deleteMisconception: (itemId) =>
+    request(`/api/misconceptions/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
 
   // ── Streak ────────────────────────────────────────────────────────────────
   getStreak: () => request('/api/user/streak'),

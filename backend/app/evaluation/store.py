@@ -639,113 +639,7 @@ def _store_mongodb(
         except Exception as p_err:
             logger.warning(f"[Plagiarism] Error storing plagiarism record in Mongo: {p_err}")
 
-    # Action Items: Generated exclusively for genuine TEACHER_EVALUATION records
-    if evaluation_source == "TEACHER_EVALUATION":
-        # 1. Flag for Teacher Review if unreadable / assigned
-        if is_unreadable or assigned_to_teacher:
-            db["action_items"].insert_one({
-                "id": f"act_teacher_review_{eval_id}",
-                "evaluation_source": evaluation_source,
-                "evaluationSource": evaluation_source,
-                "created_by_user_id": created_by_user_id,
-                "created_by_role": created_by_role,
-                "class_id": class_id,
-                "teacher_id": teacher_id,
-                "student_id": student_id,
-                "evaluation_id": eval_id,
-                "student_name": student_name,
-                "roll_number": roll_number,
-                "academic_status": "Assigned to Teacher",
-                "subject": subject,
-                "topic": f"Teacher Review Required for {subject}",
-                "question_num": "Evaluation",
-                "question_number": "Evaluation",
-                "total_marks": obtained_marks,
-                "maximum_marks": total_marks,
-                "marks_lost": max(0.0, round(total_marks - obtained_marks, 2)),
-                "affected_questions": ["All"],
-                "marks_lost_per_question": {"All": max(0.0, round(total_marks - obtained_marks, 2))},
-                "exact_question": "Full assessment script review required",
-                "student_answer": "Script flagged for manual teacher grading.",
-                "misconception": "Evaluation script unreadable or ambiguous.",
-                "learning_gap": "Evaluation script unreadable or ambiguous.",
-                "evidence": unreadable_reason or "Low confidence / unreadable script content.",
-                "correct_understanding": "Standard curriculum rubric.",
-                "issue": unreadable_reason or "The evaluator flagged this assessment for teacher review.",
-                "priority": "High",
-                "severity": "High",
-                "category": "teacher_review",
-                "action": "Teacher review required before treating the AI result as final.",
-                "recommended_action": "Teacher review required before treating the AI result as final.",
-                "status": "New",
-                "is_unreadable": is_unreadable,
-                "created_at": now,
-                "updated_at": now,
-            })
-
-        # 2. Strict Rule: Students who lose more than 20 marks in an evaluation
-        calc_marks_lost = round(max(0.0, total_marks - obtained_marks), 2)
-        affected_qs = [
-            str(q.get("question_number") or i + 1)
-            for i, q in enumerate(evaluations)
-            if _number(q.get("maximum_marks"), 0) > _number(q.get("awarded_marks"), 0)
-        ]
-        marks_lost_per_q = {
-            str(q.get("question_number") or i + 1): round(
-                max(0.0, _number(q.get("maximum_marks"), 0) - _number(q.get("awarded_marks"), 0)), 2
-            )
-            for i, q in enumerate(evaluations)
-            if _number(q.get("maximum_marks"), 0) > _number(q.get("awarded_marks"), 0)
-        }
-
-        if calc_marks_lost > 20.0:
-            worst_q = max(
-                evaluations,
-                key=lambda x: _number(x.get("maximum_marks"), 0) - _number(x.get("awarded_marks"), 0),
-                default={},
-            ) if evaluations else {}
-            gap_text = str(eval_result.get("major_conceptual_errors", ["Overall examination deficit"])[0] if eval_result.get("major_conceptual_errors") else "Multi-topic assessment deficit")
-            db["action_items"].insert_one({
-                "id": f"act_loss_{eval_id}",
-                "evaluation_source": evaluation_source,
-                "evaluationSource": evaluation_source,
-                "created_by_user_id": created_by_user_id,
-                "created_by_role": created_by_role,
-                "class_id": class_id,
-                "teacher_id": teacher_id,
-                "student_id": student_id,
-                "evaluation_id": eval_id,
-                "student_name": student_name,
-                "roll_number": roll_number,
-                "academic_status": f"At Risk (Lost {calc_marks_lost} marks)",
-                "subject": subject,
-                "topic": f"{subject} — {assessment_title}",
-                "question_num": ", ".join(affected_qs[:4]) + ("..." if len(affected_qs) > 4 else ""),
-                "question_number": ", ".join(affected_qs[:4]),
-                "total_marks": obtained_marks,
-                "maximum_marks": total_marks,
-                "marks_lost": calc_marks_lost,
-                "affected_questions": affected_qs,
-                "marks_lost_per_question": marks_lost_per_q,
-                "exact_question": str(worst_q.get("question_text") or "Multi-question examination breakdown"),
-                "student_answer": str(worst_q.get("student_answer") or worst_q.get("answer_summary") or "Accumulated multiple incorrect answers across the paper."),
-                "misconception": gap_text,
-                "learning_gap": gap_text,
-                "evidence": str(worst_q.get("evidence_reference") or overall_feedback or f"Lost {calc_marks_lost} marks out of {total_marks} marks."),
-                "correct_understanding": str(worst_q.get("what_student_should_have_written") or "Comprehensive standard examination solutions."),
-                "issue": overall_feedback or f"Student lost {calc_marks_lost} marks ({obtained_marks}/{total_marks}) across {len(affected_qs)} questions.",
-                "priority": "Critical" if calc_marks_lost >= 35 else "High",
-                "severity": "Critical" if calc_marks_lost >= 35 else "High",
-                "category": "excessive_marks_lost",
-                "action": f"Assign targeted remedial worksheet on {subject} and schedule 1-on-1 diagnostic review.",
-                "recommended_action": f"Assign targeted remedial worksheet on {subject} and schedule 1-on-1 diagnostic review.",
-                "status": "New",
-                "is_unreadable": is_unreadable,
-                "created_at": now,
-                "updated_at": now,
-            })
-
-    # 3. Create misconceptions and misconception-linked Action Items
+    # 3. Create misconceptions
     for q in evaluations:
         if not isinstance(q, dict) or not _is_conceptual_issue(q):
             continue
@@ -827,100 +721,19 @@ def _store_mongodb(
             "created_at": now,
         })
 
-        # Connect with Action Center: create an actionable intervention item ONLY for TEACHER_EVALUATION
-        if evaluation_source == "TEACHER_EVALUATION":
-            db["action_items"].insert_one({
-                "id": f"act_misc_{eval_id}_{q_num}",
-                "evaluation_source": evaluation_source,
-                "evaluationSource": evaluation_source,
-                "created_by_user_id": created_by_user_id,
-                "created_by_role": created_by_role,
-                "class_id": class_id,
-                "teacher_id": teacher_id,
-                "student_id": student_id,
-                "evaluation_id": eval_id,
-                "student_name": student_name,
-                "roll_number": roll_number,
-                "academic_status": f"Repeated Concept Gap ({concept_name})" if is_repeated else f"Conceptual Misunderstanding ({concept_name})",
-                "subject": subject,
-                "topic": f"{subject} — {concept_name}",
-                "question_num": f"Question {q_num}",
-                "question_number": q_num,
-                "total_marks": obtained_marks,
-                "maximum_marks": total_marks,
-                "marks_lost": q_lost,
-                "affected_questions": [q_num],
-                "marks_lost_per_question": {q_num: q_lost},
-                "exact_question": q_text,
-                "student_answer": std_ans,
-                "misconception": actual,
-                "learning_gap": actual,
-                "evidence": evidence_text,
-                "correct_understanding": correct_model,
-                "issue": f"Evidence in Question {q_num} demonstrates conceptual misunderstanding of {concept_name}: {actual}",
-                "priority": "Critical" if is_repeated else ("High" if ratio < 0.5 else "Medium"),
-                "severity": "Critical" if is_repeated else ("High" if ratio < 0.5 else "Medium"),
-                "category": "repeated_concept_loss" if is_repeated else "severe_misconception",
-                "action": remediation or f"Assign targeted tutorial on {concept_name} via Personal AI Trainer.",
-                "recommended_action": remediation or f"Assign targeted tutorial on {concept_name} via Personal AI Trainer.",
-                "status": "New",
-                "is_unreadable": is_unreadable,
-                "created_at": now,
-                "updated_at": now,
-            })
-
-    # 4. Repeatedly producing incomplete answers ONLY for TEACHER_EVALUATION
+    # Action Items: Generated exclusively for genuine TEACHER_EVALUATION records
+    # Grouped as EXACTLY ONE consolidated record per student per evaluation.
     if evaluation_source == "TEACHER_EVALUATION":
-        incomplete_qs = [
-            q for q in evaluations
-            if str(q.get("answer_classification") or "").lower() in {"incomplete_answer", "unanswered_question"}
-            or not q.get("attempted", True)
-        ]
-        if len(incomplete_qs) >= 2:
-            inc_q_nums = [str(q.get("question_number") or i + 1) for i, q in enumerate(incomplete_qs)]
-            inc_lost = sum(max(0.0, _number(q.get("maximum_marks"), 0) - _number(q.get("awarded_marks"), 0)) for q in incomplete_qs)
-            db["action_items"].insert_one({
-                "id": f"act_inc_{eval_id}",
-                "evaluation_source": evaluation_source,
-                "evaluationSource": evaluation_source,
-                "created_by_user_id": created_by_user_id,
-                "created_by_role": created_by_role,
-                "class_id": class_id,
-                "teacher_id": teacher_id,
-                "student_id": student_id,
-                "evaluation_id": eval_id,
-                "student_name": student_name,
-                "roll_number": roll_number,
-                "academic_status": "Incomplete Submissions",
-                "subject": subject,
-                "topic": f"{subject} — Multi-Question Incompleteness",
-                "question_num": ", ".join(inc_q_nums[:4]),
-                "question_number": ", ".join(inc_q_nums[:4]),
-                "total_marks": obtained_marks,
-                "maximum_marks": total_marks,
-                "marks_lost": round(inc_lost, 2),
-                "affected_questions": inc_q_nums,
-                "marks_lost_per_question": {
-                    str(q.get("question_number") or i + 1): round(max(0.0, _number(q.get("maximum_marks"), 0) - _number(q.get("awarded_marks"), 0)), 2)
-                    for i, q in enumerate(incomplete_qs)
-                },
-                "exact_question": str(incomplete_qs[0].get("question_text") or "Multiple questions left incomplete"),
-                "student_answer": str(incomplete_qs[0].get("student_answer") or "Left incomplete or unattempted in script"),
-                "misconception": "Time-management gap and incomplete multi-part structural answering.",
-                "learning_gap": "Time-management gap and incomplete multi-part structural answering.",
-                "evidence": f"Left {len(incomplete_qs)} questions incomplete or unanswered.",
-                "correct_understanding": "Complete, structured solutions for all required questions.",
-                "issue": f"Student produced incomplete or unattempted answers in {len(incomplete_qs)} questions, losing {round(inc_lost, 1)} marks.",
-                "priority": "High" if inc_lost > 15 else "Medium",
-                "severity": "High" if inc_lost > 15 else "Medium",
-                "category": "incomplete_answers",
-                "action": "Guide student on exam time allocation, pacing, and structuring multi-part solutions.",
-                "recommended_action": "Guide student on exam time allocation, pacing, and structuring multi-part solutions.",
-                "status": "New",
-                "is_unreadable": is_unreadable,
-                "created_at": now,
-                "updated_at": now,
-            })
+        from .action_center import derive_action_items_from_evaluation
+        try:
+            eval_doc["id"] = eval_id
+            eval_doc["_id"] = eval_id
+            db["action_items"].delete_many({"evaluation_id": eval_id})
+            derived_acts = derive_action_items_from_evaluation(eval_doc, mongo_db=db)
+            for act in derived_acts:
+                db["action_items"].update_one({"id": act["id"]}, {"$set": act}, upsert=True)
+        except Exception as act_err:
+            logger.warning("[ActionCenter] Mongo storage error: %s", act_err)
 
     db["academic_memory"].insert_one({
         "student_id": student_id,
@@ -1203,121 +1016,66 @@ def _store_sqlite(
         )
 
         # Insert Action Items in SQLite exclusively for genuine TEACHER_EVALUATION records
+        # Grouped as EXACTLY ONE consolidated record per student per evaluation.
         if evaluation_source == "TEACHER_EVALUATION":
-            calc_marks_lost = round(max(0.0, total_marks - obtained_marks), 2)
-            affected_qs = [
-                str(q.get("question_number") or i + 1)
-                for i, q in enumerate(evaluations)
-                if _number(q.get("maximum_marks"), 0) > _number(q.get("awarded_marks"), 0)
-            ]
-            marks_lost_per_q = {
-                str(q.get("question_number") or i + 1): round(
-                    max(0.0, _number(q.get("maximum_marks"), 0) - _number(q.get("awarded_marks"), 0)), 2
-                )
-                for i, q in enumerate(evaluations)
-                if _number(q.get("maximum_marks"), 0) > _number(q.get("awarded_marks"), 0)
-            }
-
-            if is_unreadable or assigned_to_teacher:
-                cursor.execute(
-                    """
-                    INSERT INTO action_items
-                    (id, teacher_id, student_id, evaluation_id, student_name, roll_number,
-                     academic_status, subject, topic, question_num, total_marks, maximum_marks,
-                     marks_lost, affected_questions, marks_lost_per_question, exact_question,
-                     student_answer, misconception, evidence, correct_understanding, issue,
-                     priority, severity, action, recommended_action, category, status, is_unreadable,
-                     evaluation_source, created_by_user_id, created_by_role, class_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        f"act_teacher_review_{eval_id}",
-                        teacher_id,
-                        student_id,
-                        eval_id,
-                        student_name,
-                        roll_number,
-                        "Assigned to Teacher",
-                        subject,
-                        f"Teacher Review Required for {subject}",
-                        "Evaluation",
-                        obtained_marks,
-                        total_marks,
-                        calc_marks_lost,
-                        _safe_json(["All"]),
-                        _safe_json({"All": calc_marks_lost}),
-                        "Full assessment script review required",
-                        "Script flagged for manual teacher grading.",
-                        "Evaluation script unreadable or ambiguous.",
-                        unreadable_reason or "Low confidence / unreadable script content.",
-                        "Standard curriculum rubric.",
-                        unreadable_reason or "The evaluator flagged this assessment for teacher review.",
-                        "High",
-                        "High",
-                        "Teacher review required before treating the AI result as final.",
-                        "Teacher review required before treating the AI result as final.",
-                        "teacher_review",
-                        "New",
-                        1,
-                        evaluation_source,
-                        created_by_user_id,
-                        created_by_role,
-                        class_id,
-                    ),
-                )
-
-            if calc_marks_lost > 20.0:
-                worst_q = max(
-                    evaluations,
-                    key=lambda x: _number(x.get("maximum_marks"), 0) - _number(x.get("awarded_marks"), 0),
-                    default={},
-                ) if evaluations else {}
-                cursor.execute(
-                    """
-                    INSERT INTO action_items
-                    (id, teacher_id, student_id, evaluation_id, student_name, roll_number,
-                     academic_status, subject, topic, question_num, total_marks, maximum_marks,
-                     marks_lost, affected_questions, marks_lost_per_question, exact_question,
-                     student_answer, misconception, evidence, correct_understanding, issue,
-                     priority, severity, action, recommended_action, category, status, is_unreadable,
-                     evaluation_source, created_by_user_id, created_by_role, class_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        f"act_loss_{eval_id}",
-                        teacher_id,
-                        student_id,
-                        eval_id,
-                        student_name,
-                        roll_number,
-                        f"At Risk (Lost {calc_marks_lost} marks)",
-                        subject,
-                        f"{subject} — {assessment_title}",
-                        ", ".join(affected_qs[:4]),
-                        obtained_marks,
-                        total_marks,
-                        calc_marks_lost,
-                        _safe_json(affected_qs),
-                        _safe_json(marks_lost_per_q),
-                        str(worst_q.get("question_text") or ""),
-                        str(worst_q.get("student_answer") or worst_q.get("answer_summary") or ""),
-                        "Multiple question assessment deficit",
-                        overall_feedback or f"Lost {calc_marks_lost} marks out of {total_marks} marks.",
-                        "Comprehensive standard solutions.",
-                        overall_feedback or f"Student lost {calc_marks_lost} marks ({obtained_marks}/{total_marks}).",
-                        "Critical" if calc_marks_lost >= 35 else "High",
-                        "Critical" if calc_marks_lost >= 35 else "High",
-                        f"Assign targeted remedial worksheet on {subject} and schedule 1-on-1 review.",
-                        f"Assign targeted remedial worksheet on {subject} and schedule 1-on-1 review.",
-                        "excessive_marks_lost",
-                        "New",
-                        0,
-                        evaluation_source,
-                        created_by_user_id,
-                        created_by_role,
-                        class_id,
-                    ),
-                )
+            from .action_center import derive_action_items_from_evaluation
+            try:
+                eval_row_doc = dict(request_data)
+                eval_row_doc.update({
+                    "id": eval_id,
+                    "evaluation_id": eval_id,
+                    "student_name": student_name,
+                    "roll_number": roll_number,
+                    "subject": subject,
+                    "assessment_title": assessment_title,
+                    "total_marks": total_marks,
+                    "obtained_marks": obtained_marks,
+                    "class_id": class_id,
+                    "teacher_id": teacher_id,
+                    "student_id": student_id,
+                    "is_unreadable": is_unreadable,
+                    "assigned_to_teacher": assigned_to_teacher,
+                    "unreadable_reason": unreadable_reason,
+                    "overall_feedback": overall_feedback,
+                    "evaluation_source": evaluation_source,
+                    "created_by_user_id": created_by_user_id,
+                    "created_by_role": created_by_role,
+                    "questions": evaluations,
+                })
+                cursor.execute("DELETE FROM action_items WHERE evaluation_id = ?", (eval_id,))
+                derived_acts = derive_action_items_from_evaluation(eval_row_doc, sqlite_conn=conn)
+                for act in derived_acts:
+                    cursor.execute(
+                        """INSERT OR REPLACE INTO action_items
+                           (id, teacher_id, student_id, evaluation_id, student_name, roll_number,
+                            academic_status, subject, topic, skill_or_topic, assessment_title, class_name,
+                            question_num, total_marks, maximum_marks, marks_lost, loss_ratio,
+                            affected_questions, marks_lost_per_question, exact_question,
+                            student_answer, misconception, evidence, correct_understanding, issue,
+                            priority, severity, priority_reason, source_link, action, recommended_action,
+                            category, status, is_unreadable,
+                            evaluation_source, created_by_user_id, created_by_role, class_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            act["id"], act.get("teacher_id"), act.get("student_id"), act.get("evaluation_id"),
+                            act.get("student_name"), act.get("roll_number"), act.get("academic_status"),
+                            act.get("subject"), act.get("topic"), act.get("skill_or_topic"),
+                            act.get("assessment_title"), act.get("class_name"),
+                            act.get("question_num"), act.get("total_marks"),
+                            act.get("maximum_marks"), act.get("marks_lost"), act.get("loss_ratio", 0),
+                            json.dumps(act.get("affected_questions", [])),
+                            json.dumps(act.get("marks_lost_per_question", {})), act.get("exact_question"),
+                            act.get("student_answer"), act.get("misconception"), act.get("evidence"),
+                            act.get("correct_understanding"), act.get("issue"), act.get("priority"),
+                            act.get("severity"), act.get("priority_reason"), act.get("source_link"),
+                            act.get("action"), act.get("recommended_action"),
+                            act.get("category"), act.get("status"), 1 if act.get("is_unreadable") else 0,
+                            act.get("evaluation_source"), act.get("created_by_user_id"), act.get("created_by_role"),
+                            act.get("class_id")
+                        )
+                    )
+            except Exception as act_err:
+                logger.warning("[ActionCenter] SQLite storage error: %s", act_err)
 
         # Isolated SQLite notifications
         if evaluation_source == "TEACHER_EVALUATION" and teacher_id:

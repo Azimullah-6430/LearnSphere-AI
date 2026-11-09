@@ -24,6 +24,8 @@ import {
   Trash2,
   Sparkles,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Layers,
   HelpCircle,
   X
@@ -36,6 +38,11 @@ export default function ActionCenter() {
   // Items State
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
+  const [expandedItems, setExpandedItems] = useState({})
+
+  const toggleExpand = (id) => {
+    setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }))
+  }
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('')
@@ -490,58 +497,322 @@ export default function ActionCenter() {
                     </div>
                   </div>
 
-                  {/* Student Answer & Misconception Diagnosis */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12.5px]">
-                    {item.student_answer ? (
-                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
-                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
-                          Student's Actual Written Response ({questionNum}):
-                        </span>
-                        <p className="font-mono text-[11.5px] text-[var(--text)] italic bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)] line-clamp-2">
-                          &ldquo;{item.student_answer}&rdquo;
-                        </p>
+                  {/* Individual Student Performance Summary */}
+                  {item.performance_summary && (
+                    <div className="p-3.5 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] text-xs space-y-2.5">
+                      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <Sparkles size={15} className="text-[var(--accent)]" />
+                          <span className="font-extrabold text-[12px] text-[var(--text)] uppercase tracking-wider">
+                            Individual Diagnostic Performance Summary
+                          </span>
+                        </div>
+                        {item.performance_summary.percentage !== undefined && (
+                          <span className="text-[11px] font-bold text-[var(--text-soft)]">
+                            Overall Score: <strong className="text-[var(--text)]">{item.performance_summary.percentage}%</strong>
+                          </span>
+                        )}
                       </div>
-                    ) : (
-                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
-                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
-                          Specific Focus Area:
-                        </span>
-                        <p className="font-semibold text-[12px] text-[var(--text)] bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)]">
-                          {focusTopic} &mdash; Question {questionNum}
-                        </p>
-                      </div>
-                    )}
 
-                    {item.misconception ? (
-                      <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] space-y-1">
-                        <span className="font-extrabold text-[var(--gold)] text-[11px] uppercase tracking-wider flex items-center gap-1">
-                          <AlertTriangle size={13} />
-                          <span>Diagnosed Misconception:</span>
-                        </span>
-                        <p className="font-semibold text-[var(--text)] text-[12px] leading-snug line-clamp-2">
-                          {item.misconception}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
-                        <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
-                          Evaluation Diagnosis:
-                        </span>
-                        <p className="text-[12px] text-[var(--text)] font-semibold line-clamp-2">
-                          {item.issue || 'Identified performance gap from completed evaluation.'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                      {/* Strengths & Needs Improvement */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        <div className="p-2.5 rounded-lg bg-[var(--success-soft)]/50 border border-[var(--success)]/40 space-y-1">
+                          <span className="text-[10.5px] font-extrabold uppercase tracking-wider text-[var(--success)] flex items-center gap-1">
+                            <CheckCircle2 size={13} />
+                            <span>Demonstrated Strengths:</span>
+                          </span>
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {Array.isArray(item.performance_summary.strengths) && item.performance_summary.strengths.length > 0 ? (
+                              item.performance_summary.strengths.map((str, sIdx) => (
+                                <span key={sIdx} className="px-2 py-0.5 rounded-md bg-[var(--surface)] text-[var(--text)] font-semibold text-[11px] border border-[var(--border)]">
+                                  ✓ {str}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-[var(--text-soft)] italic">Curriculum familiarity observed</span>
+                            )}
+                          </div>
+                        </div>
 
-                  {/* Concise Suggested Follow-up Action */}
-                  <div className="p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
-                    <Zap size={16} className="text-[var(--accent)] shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="text-[var(--accent)]">Suggested Follow-up Action:</strong>{' '}
-                      <span>{recommendedAction}</span>
+                        <div className="p-2.5 rounded-lg bg-[var(--warning-soft)]/50 border border-[var(--warning)]/40 space-y-1">
+                          <span className="text-[10.5px] font-extrabold uppercase tracking-wider text-[var(--warning)] flex items-center gap-1">
+                            <AlertTriangle size={13} />
+                            <span>Concepts Requiring Support:</span>
+                          </span>
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {Array.isArray(item.performance_summary.concepts_needing_improvement) && item.performance_summary.concepts_needing_improvement.length > 0 ? (
+                              item.performance_summary.concepts_needing_improvement.map((cni, cIdx) => (
+                                <span key={cIdx} className="px-2 py-0.5 rounded-md bg-[var(--surface)] text-[var(--error)] font-semibold text-[11px] border border-[var(--error)]/30">
+                                  ⚠ {cni}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-[var(--text-soft)] italic">None flagged</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Observed Errors Breakdown & Next Practice Target */}
+                      {item.performance_summary.observed_errors_summary && (
+                        <div className="text-[11.5px] text-[var(--text-soft)] flex items-start gap-1.5 pt-0.5">
+                          <strong className="text-[var(--text)] shrink-0">Observed Deficit Patterns:</strong>
+                          <span>{item.performance_summary.observed_errors_summary}</span>
+                        </div>
+                      )}
+
+                      {item.performance_summary.recommended_next_practice && (
+                        <div className="p-2.5 rounded-lg bg-[var(--accent-soft)] border border-[var(--accent)] text-[12px] flex items-center gap-2">
+                          <ArrowRight size={14} className="text-[var(--accent)] shrink-0" />
+                          <span className="font-semibold text-[var(--text)]">
+                            <strong className="text-[var(--accent)]">Next Practice Target:</strong> {item.performance_summary.recommended_next_practice}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* Grouped Recommendations by Concept */}
+                  {Array.isArray(item.recommended_actions) && item.recommended_actions.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-[var(--accent)] flex items-center gap-1.5">
+                        <Zap size={14} />
+                        <span>Recommended Pedagogical Interventions ({item.recommended_actions.length}):</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {item.recommended_actions.map((ra, rIdx) => (
+                          <div key={rIdx} className="p-3.5 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12px] space-y-2">
+                            <div className="flex items-center justify-between gap-1 flex-wrap border-b border-[var(--accent)]/30 pb-1.5">
+                              <span className="font-extrabold text-[var(--accent)] text-[12px]">
+                                {ra.concept}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {ra.priority && (
+                                  <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-[var(--surface)] text-[var(--accent)] border border-[var(--accent)]">
+                                    {ra.priority}
+                                  </span>
+                                )}
+                                {ra.related_questions && ra.related_questions.length > 0 && (
+                                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)]">
+                                    Affects: Q{ra.related_questions.join(', Q')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              <div>
+                                <strong className="text-[var(--text)] font-bold">Action: </strong>
+                                <span className="text-[var(--text)] font-semibold">{ra.action || ra.recommended_action}</span>
+                              </div>
+                              {ra.activity && (
+                                <div className="text-[11.5px] bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)]">
+                                  <strong className="text-[var(--accent)]">Activity: </strong>
+                                  <span className="text-[var(--text)]">{ra.activity}</span>
+                                </div>
+                              )}
+                              {ra.reason && (
+                                <div className="text-[11px] text-[var(--text-soft)]">
+                                  <strong>Reason: </strong>
+                                  <span>{ra.reason}</span>
+                                </div>
+                              )}
+                              {ra.expected_outcome && (
+                                <div className="text-[11px] text-[var(--success)] font-semibold">
+                                  <strong>Expected Outcome: </strong>
+                                  <span>{ra.expected_outcome}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Fallback Single Suggested Follow-up Action */
+                    <div className="p-3 rounded-xl bg-[var(--accent-soft)] border border-[var(--accent)] text-[12.5px] font-medium text-[var(--text)] flex items-start gap-2">
+                      <Zap size={16} className="text-[var(--accent)] shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-[var(--accent)]">Suggested Follow-up Action:</strong>{' '}
+                        <span>{recommendedAction}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Question-by-Question Breakdown (Expandable Accordion) */}
+                  {Array.isArray(item.question_details) && item.question_details.length > 0 ? (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(item.id)}
+                        className="w-full flex items-center justify-between p-3 rounded-xl bg-[var(--surface-alt)] hover:bg-[var(--surface-alt)]/80 border border-[var(--border)] transition-colors text-xs font-bold text-[var(--text)] cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Layers size={15} className="text-[var(--accent)]" />
+                          <span>
+                            Question-by-Question Diagnostic Details ({item.question_details.length} {item.question_details.length === 1 ? 'question' : 'questions'} with mark loss)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[var(--accent)] font-extrabold text-[11.5px]">
+                          <span>{expandedItems[item.id] ? 'Hide Question Breakdown' : 'Expand Question Breakdown'}</span>
+                          {expandedItems[item.id] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </div>
+                      </button>
+
+                      {expandedItems[item.id] && (
+                        <div className="mt-3 space-y-3 pt-1">
+                          {item.question_details.map((qd, qIdx) => (
+                            <div key={qIdx} className="p-4 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-2.5 text-xs">
+                              {/* Question Header */}
+                              <div className="flex items-center justify-between flex-wrap gap-2 border-b border-[var(--border)] pb-2.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="px-2.5 py-1 rounded-md bg-[var(--accent-soft)] text-[var(--accent)] font-extrabold text-[11.5px]">
+                                    Question {qd.question_number}
+                                  </span>
+                                  <span className="font-extrabold text-[13px] text-[var(--text)]">
+                                    {qd.concept}
+                                  </span>
+                                  {qd.error_label && (
+                                    <span className="px-2 py-0.5 rounded-md bg-[var(--surface)] text-[var(--accent)] border border-[var(--accent-dim)] font-bold text-[11px]">
+                                      {qd.error_label}
+                                    </span>
+                                  )}
+                                  {qd.evidence_status && (
+                                    <span className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold ${
+                                      qd.evidence_status === 'VERIFIED'
+                                        ? 'bg-[var(--success-soft)] text-[var(--success)] border border-[var(--success)]/40'
+                                        : 'bg-[var(--warning-soft)] text-[var(--warning)] border border-[var(--warning)]/40'
+                                    }`}>
+                                      {qd.evidence_status === 'VERIFIED' ? '✓ Evidence Supported' : '⚠ Needs Teacher Review'}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[var(--text-faint)] font-semibold text-[11.5px]">
+                                    Marks: <strong className="text-[var(--text)]">{qd.awarded_marks} / {qd.maximum_marks || qd.max_marks}</strong>
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-md bg-[var(--error-soft)] text-[var(--error)] font-bold text-[11px] border border-[var(--error)]">
+                                    &minus;{qd.marks_lost} marks
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Official Question Text */}
+                              {qd.question_text && (
+                                <div className="space-y-1">
+                                  <span className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] block">
+                                    Evaluated Question Text:
+                                  </span>
+                                  <p className="font-semibold text-[var(--text)] leading-relaxed bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)]">
+                                    {qd.question_text}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Student's Actual Answer */}
+                              {qd.student_answer && (
+                                <div className="space-y-1">
+                                  <span className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-faint)] block">
+                                    Student's Actual Written Response:
+                                  </span>
+                                  <p className="font-mono text-[11.5px] text-[var(--text)] italic bg-[var(--surface)] p-2.5 rounded-lg border border-[var(--border)] leading-relaxed">
+                                    &ldquo;{qd.student_answer}&rdquo;
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Diagnosed Flaw vs Standard Solution */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                                {qd.misconception && (
+                                  <div className="p-3 rounded-lg bg-[var(--gold-soft)] border border-[var(--gold)] space-y-1">
+                                    <span className="font-extrabold text-[var(--gold)] text-[10.5px] uppercase tracking-wider block">
+                                      ❌ Diagnosed Conceptual Error:
+                                    </span>
+                                    <p className="font-semibold text-[var(--text)] text-[11.5px] leading-snug">
+                                      {qd.misconception}
+                                    </p>
+                                  </div>
+                                )}
+                                {qd.correct_understanding && (
+                                  <div className="p-3 rounded-lg bg-[var(--success-soft)] border border-[var(--success)] space-y-1">
+                                    <span className="font-extrabold text-[var(--success)] text-[10.5px] uppercase tracking-wider block">
+                                      ✅ Curriculum Model Solution:
+                                    </span>
+                                    <p className="font-medium text-[var(--text)] text-[11.5px] leading-snug">
+                                      {qd.correct_understanding}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Remediation & Activity */}
+                              {(qd.action || qd.how_to_improve || qd.activity) && (
+                                <div className="p-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11.5px] text-[var(--text-soft)] space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <Sparkles size={14} className="text-[var(--accent)] shrink-0" />
+                                    <span><strong className="text-[var(--text)]">Action:</strong> {qd.action || qd.how_to_improve}</span>
+                                  </div>
+                                  {qd.activity && (
+                                    <div className="text-[11px] pl-5 text-[var(--text)]">
+                                      <strong className="text-[var(--accent)]">Specific Activity:</strong> {qd.activity}
+                                    </div>
+                                  )}
+                                  {qd.expected_outcome && (
+                                    <div className="text-[11px] pl-5 text-[var(--success)]">
+                                      <strong>Expected Outcome:</strong> {qd.expected_outcome}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Fallback Single Question View for legacy items */
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[12.5px]">
+                      {item.student_answer ? (
+                        <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                          <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                            Student's Actual Written Response ({questionNum}):
+                          </span>
+                          <p className="font-mono text-[11.5px] text-[var(--text)] italic bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)] line-clamp-2">
+                            &ldquo;{item.student_answer}&rdquo;
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                          <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                            Specific Focus Area:
+                          </span>
+                          <p className="font-semibold text-[12px] text-[var(--text)] bg-[var(--surface)] p-2 rounded-lg border border-[var(--border)]">
+                            {focusTopic} &mdash; Question {questionNum}
+                          </p>
+                        </div>
+                      )}
+
+                      {item.misconception ? (
+                        <div className="p-3 rounded-xl bg-[var(--gold-soft)] border border-[var(--gold)] space-y-1">
+                          <span className="font-extrabold text-[var(--gold)] text-[11px] uppercase tracking-wider flex items-center gap-1">
+                            <AlertTriangle size={13} />
+                            <span>Diagnosed Misconception:</span>
+                          </span>
+                          <p className="font-semibold text-[var(--text)] text-[12px] leading-snug line-clamp-2">
+                            {item.misconception}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-[var(--surface-alt)] border border-[var(--border)] space-y-1">
+                          <span className="font-bold text-[var(--text-faint)] text-[11px] uppercase tracking-wider block">
+                            Evaluation Diagnosis:
+                          </span>
+                          <p className="text-[12px] text-[var(--text)] font-semibold line-clamp-2">
+                            {item.issue || 'Identified performance gap from completed evaluation.'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Traceability, Source Links & Action Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-[var(--border)]">

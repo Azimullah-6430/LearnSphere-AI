@@ -3319,7 +3319,10 @@ def get_action_center_items():
     user_email = user.get("email", "") if user else ""
     class_id = request.args.get("class_id") or request.args.get("classId")
     try:
-        from app.evaluation.action_center import derive_action_items_from_evaluation
+        from app.evaluation.action_center import (
+            derive_action_items_from_evaluation,
+            consolidate_action_items_by_student,
+        )
 
         mongo_db = get_mongodb()
         if mongo_db is not None:
@@ -3447,6 +3450,7 @@ def get_action_center_items():
 
                 valid_items.append(d_ser)
 
+            valid_items = consolidate_action_items_by_student(valid_items)
             return jsonify({"success": True, "items": valid_items, "action_items": valid_items}), 200
 
         # SQLite: query action_items joined with evaluations
@@ -3589,6 +3593,7 @@ def get_action_center_items():
 
             items.append(d)
         conn.close()
+        items = consolidate_action_items_by_student(items)
         return jsonify({"success": True, "items": items, "action_items": items}), 200
     except Exception as exc:
         logger.error("Action Center error: %s", exc)
@@ -3612,7 +3617,7 @@ def update_action_center_item(item_id: str):
         }
         mongo_db   = get_mongodb()
         if mongo_db is not None:
-            mongo_db["action_items"].update_one(
+            res = mongo_db["action_items"].update_one(
                 {"id": item_id, "evaluation_source": "TEACHER_EVALUATION"},
                 {
                     "$set": {
@@ -3624,6 +3629,22 @@ def update_action_center_item(item_id: str):
                 },
                 upsert=False,
             )
+            if res.matched_count == 0 and item_id.startswith("act_student_"):
+                # Handle consolidated item id referencing evaluation
+                parts = item_id.replace("act_student_", "").split("_")
+                if parts:
+                    eval_id = parts[0]
+                    mongo_db["action_items"].update_many(
+                        {"evaluation_id": eval_id, "evaluation_source": "TEACHER_EVALUATION"},
+                        {
+                            "$set": {
+                                "status": new_status,
+                                "updated_by": teacher_id,
+                                "updated_at": now_str,
+                            },
+                            "$push": {"audit_trail": audit_entry},
+                        }
+                    )
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()
@@ -3633,6 +3654,15 @@ def update_action_center_item(item_id: str):
                    WHERE id = ? AND evaluation_source = 'TEACHER_EVALUATION'""",
                 (new_status, item_id)
             )
+            if cursor.rowcount == 0 and item_id.startswith("act_student_"):
+                parts = item_id.replace("act_student_", "").split("_")
+                if parts:
+                    cursor.execute(
+                        """UPDATE action_items 
+                           SET status = ?, updated_at = CURRENT_TIMESTAMP 
+                           WHERE evaluation_id = ? AND evaluation_source = 'TEACHER_EVALUATION'""",
+                        (new_status, parts[0])
+                    )
             conn.commit()
             conn.close()
         return jsonify({"success": True, "id": item_id, "status": new_status}), 200
@@ -3654,7 +3684,7 @@ def delete_action_center_item(item_id: str):
         }
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            mongo_db["action_items"].update_one(
+            res = mongo_db["action_items"].update_one(
                 {"id": item_id, "evaluation_source": "TEACHER_EVALUATION"},
                 {
                     "$set": {
@@ -3665,6 +3695,21 @@ def delete_action_center_item(item_id: str):
                     "$push": {"audit_trail": audit_entry},
                 }
             )
+            if res.matched_count == 0 and item_id.startswith("act_student_"):
+                parts = item_id.replace("act_student_", "").split("_")
+                if parts:
+                    eval_id = parts[0]
+                    mongo_db["action_items"].update_many(
+                        {"evaluation_id": eval_id, "evaluation_source": "TEACHER_EVALUATION"},
+                        {
+                            "$set": {
+                                "status": "Dismissed",
+                                "dismissed_by": teacher_id,
+                                "updated_at": now_str,
+                            },
+                            "$push": {"audit_trail": audit_entry},
+                        }
+                    )
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()
@@ -3672,6 +3717,13 @@ def delete_action_center_item(item_id: str):
                 "UPDATE action_items SET status = 'Dismissed' WHERE id = ? AND evaluation_source = 'TEACHER_EVALUATION'",
                 (item_id,)
             )
+            if cursor.rowcount == 0 and item_id.startswith("act_student_"):
+                parts = item_id.replace("act_student_", "").split("_")
+                if parts:
+                    cursor.execute(
+                        "UPDATE action_items SET status = 'Dismissed' WHERE evaluation_id = ? AND evaluation_source = 'TEACHER_EVALUATION'",
+                        (parts[0],)
+                    )
             conn.commit()
             conn.close()
         return jsonify({"success": True, "id": item_id, "status": "Dismissed"}), 200
@@ -3755,6 +3807,10 @@ def get_misconceptions():
 
                 docs.append(mongo_serialize(d))
 
+            from app.evaluation.misconceptions import group_misconceptions_by_student
+            if session_role == "teacher":
+                docs = group_misconceptions_by_student(docs)
+
             return jsonify({"success": True, "misconceptions": docs}), 200
 
         conn   = get_sqlite_db()
@@ -3790,10 +3846,217 @@ def get_misconceptions():
                 )
         rows = cursor.fetchall()
         conn.close()
-        return jsonify({"success": True, "misconceptions": [dict(r) for r in rows]}), 200
+        items = [dict(r) for r in rows]
+        from app.evaluation.misconceptions import group_misconceptions_by_student
+        if session_role == "teacher":
+            items = group_misconceptions_by_student(items)
+        return jsonify({"success": True, "misconceptions": items}), 200
     except Exception as exc:
         logger.error("Misconceptions error: %s", exc)
         return jsonify({"success": True, "misconceptions": []}), 200
+
+
+@app.route("/api/misconceptions/<item_id>", methods=["PUT"])
+@require_role("teacher")
+def update_misconception_item(item_id: str):
+    """Teacher update / resolve / review misconception item with persistent audit trail."""
+    try:
+        data = request.get_json(force=True) or {}
+        new_status = data.get("status")
+        evidence_status = data.get("evidence_status")
+        note = data.get("note") or data.get("teacher_notes") or ""
+        teacher_id = _current_user_id()
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+        update_fields = {
+            "updated_by": str(teacher_id),
+            "updated_at": now_str,
+        }
+        if new_status:
+            update_fields["status"] = new_status
+        if evidence_status:
+            update_fields["evidence_status"] = evidence_status
+        if note:
+            update_fields["teacher_notes"] = note
+
+        audit_entry = {
+            "action": f"Misconception status updated to '{new_status or evidence_status}'",
+            "updated_by": str(teacher_id),
+            "timestamp": now_str,
+            "note": note,
+        }
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            res = mongo_db["misconceptions"].update_one(
+                {"id": item_id, "evaluation_source": "TEACHER_EVALUATION"},
+                {"$set": update_fields, "$push": {"audit_trail": audit_entry}},
+            )
+            if res.matched_count == 0 and item_id.startswith("misc_student_"):
+                parts = item_id.replace("misc_student_", "").split("_")
+                if parts:
+                    eval_id = parts[0]
+                    mongo_db["misconceptions"].update_many(
+                        {"evaluation_id": eval_id, "evaluation_source": "TEACHER_EVALUATION"},
+                        {"$set": update_fields, "$push": {"audit_trail": audit_entry}},
+                    )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE misconceptions 
+                   SET status = COALESCE(?, status), updated_at = CURRENT_TIMESTAMP 
+                   WHERE id = ? AND evaluation_source = 'TEACHER_EVALUATION'""",
+                (new_status, item_id)
+            )
+            if cursor.rowcount == 0 and item_id.startswith("misc_student_"):
+                parts = item_id.replace("misc_student_", "").split("_")
+                if parts:
+                    cursor.execute(
+                        """UPDATE misconceptions 
+                           SET status = COALESCE(?, status), updated_at = CURRENT_TIMESTAMP 
+                           WHERE evaluation_id = ? AND evaluation_source = 'TEACHER_EVALUATION'""",
+                        (new_status, parts[0])
+                    )
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "id": item_id, "status": new_status}), 200
+    except Exception as exc:
+        logger.error("Update misconception error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/misconceptions/<item_id>", methods=["DELETE"])
+@require_role("teacher")
+def delete_misconception_item(item_id: str):
+    """Dismiss / archive a misconception item with audit trail."""
+    try:
+        teacher_id = _current_user_id()
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        audit_entry = {
+            "action": "Dismissed / archived by teacher",
+            "updated_by": str(teacher_id),
+            "timestamp": now_str,
+        }
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            res = mongo_db["misconceptions"].update_one(
+                {"id": item_id, "evaluation_source": "TEACHER_EVALUATION"},
+                {
+                    "$set": {"status": "Dismissed", "dismissed_by": str(teacher_id), "updated_at": now_str},
+                    "$push": {"audit_trail": audit_entry},
+                }
+            )
+            if res.matched_count == 0 and item_id.startswith("misc_student_"):
+                parts = item_id.replace("misc_student_", "").split("_")
+                if parts:
+                    eval_id = parts[0]
+                    mongo_db["misconceptions"].update_many(
+                        {"evaluation_id": eval_id, "evaluation_source": "TEACHER_EVALUATION"},
+                        {
+                            "$set": {"status": "Dismissed", "dismissed_by": str(teacher_id), "updated_at": now_str},
+                            "$push": {"audit_trail": audit_entry},
+                        }
+                    )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE misconceptions SET status = 'Dismissed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND evaluation_source = 'TEACHER_EVALUATION'",
+                (item_id,)
+            )
+            if cursor.rowcount == 0 and item_id.startswith("misc_student_"):
+                parts = item_id.replace("misc_student_", "").split("_")
+                if parts:
+                    cursor.execute(
+                        "UPDATE misconceptions SET status = 'Dismissed', updated_at = CURRENT_TIMESTAMP WHERE evaluation_id = ? AND evaluation_source = 'TEACHER_EVALUATION'",
+                        (parts[0],)
+                    )
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True, "id": item_id, "status": "Dismissed"}), 200
+    except Exception as exc:
+        logger.error("Delete misconception error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/action-center/analyze", methods=["POST"])
+@require_role("teacher")
+def trigger_ai_diagnostic_analysis():
+    """Trigger deep AI diagnostic analysis on an evaluation record."""
+    try:
+        data = request.get_json(force=True) or {}
+        eval_id = data.get("evaluation_id") or data.get("id")
+        if not eval_id:
+            return jsonify({"success": False, "error": "Missing evaluation_id parameter."}), 400
+
+        teacher_id = _current_user_id()
+        user = _lookup_user_by_id(teacher_id)
+        user_email = user.get("email", "") if user else ""
+
+        mongo_db = get_mongodb()
+        eval_doc = None
+        if mongo_db is not None:
+            eval_doc = mongo_db["evaluations"].find_one({"$or": [{"id": str(eval_id)}, {"evaluation_id": str(eval_id)}]})
+            if not eval_doc and ObjectId and len(str(eval_id)) == 24:
+                try:
+                    eval_doc = mongo_db["evaluations"].find_one({"_id": ObjectId(eval_id)})
+                except Exception:
+                    pass
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM evaluations WHERE id = ? OR evaluation_id = ?", (str(eval_id), str(eval_id)))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                eval_doc = dict(row)
+
+        if not eval_doc:
+            return jsonify({"success": False, "error": f"Evaluation '{eval_id}' not found."}), 404
+
+        p_teacher = str(eval_doc.get("teacher_id") or eval_doc.get("created_by_user_id") or "")
+        if p_teacher and p_teacher not in (str(teacher_id), str(user_email)):
+            return jsonify({"success": False, "error": "Unauthorized to diagnose this evaluation."}), 403
+
+        from app.evaluation.diagnostic_engine import analyze_evaluation_with_ai
+        analysis_result = analyze_evaluation_with_ai(eval_doc)
+
+        if not analysis_result.get("success"):
+            return jsonify(analysis_result), 500
+
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        if mongo_db is not None:
+            mongo_db["evaluations"].update_one(
+                {"id": str(eval_id)},
+                {"$set": {"deep_ai_diagnostics": analysis_result, "diagnostics_updated_at": now_str}}
+            )
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "UPDATE evaluations SET deep_ai_diagnostics = ? WHERE id = ?",
+                    (json.dumps(analysis_result), str(eval_id))
+                )
+                conn.commit()
+            except Exception:
+                pass
+            conn.close()
+
+        from app.evaluation.store import persist_evaluation_derived_entities
+        persist_evaluation_derived_entities(eval_doc, mongo_db=mongo_db, sqlite_conn=None)
+
+        return jsonify({
+            "success": True,
+            "evaluation_id": eval_id,
+            "diagnostics": analysis_result
+        }), 200
+    except Exception as exc:
+        logger.error("AI Diagnostic Analysis error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════

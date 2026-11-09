@@ -24,6 +24,15 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..db import get_mongodb, get_sqlite_db
+from .diagnostic_engine import (
+    classify_student_error,
+    generate_individual_performance_summary,
+    build_personalized_action,
+    STATUS_EVIDENCE_SUPPORTED,
+    STATUS_NEEDS_TEACHER_REVIEW,
+    STATUS_INSUFFICIENT_EVIDENCE,
+    TAXONOMY_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +95,13 @@ def extract_misconceptions_from_question(
     if not student_ans:
         return None
 
-    # Exclude calculation errors and correct answers (Requirement 3: Incorrect answer by itself is not proof)
-    if classification in {"correct_concept_with_calculation_error", "correct_answer"}:
+    subject = str(eval_doc.get("subject") or "General").strip()
+
+    # Step 3: High-precision error classification using 12-error taxonomy
+    # Calculation slips, missing steps, careless slips, and alternative valid expressions
+    # are NEVER classified as conceptual misconceptions.
+    classification_info = classify_student_error(q, subject)
+    if not classification_info.get("is_conceptual_misconception"):
         return None
 
     try:
@@ -106,45 +120,6 @@ def extract_misconceptions_from_question(
 
     feedback = q.get("feedback") if isinstance(q.get("feedback"), dict) else {}
 
-    # Check for evidence of conceptual misunderstanding
-    misc_detected = q.get("misconception_detected") is True
-    explicit_misc = str(q.get("misconception") or "").strip()
-    conceptual_mistake = str(q.get("conceptual_mistake") or "").strip()
-    error_type = str(q.get("error_type") or "").strip().lower()
-    issue_types = [str(x).strip().lower() for x in (q.get("issue_types") or []) if isinstance(x, str)]
-
-    has_conceptual_indicator = (
-        misc_detected
-        or bool(explicit_misc and len(explicit_misc) > 3)
-        or bool(conceptual_mistake and len(conceptual_mistake) > 3 and conceptual_mistake.lower() != "none")
-        or classification in {"wrong_concept", "contradictory_answer"}
-        or error_type in {"misconception", "conceptual_error", "conceptual misunderstanding"}
-        or any(t in {"misconception", "conceptual_error", "conceptual misunderstanding"} for t in issue_types)
-    )
-
-    if not has_conceptual_indicator:
-        # Not a conceptual issue (could be minor formatting, omission, or incomplete without conceptual error)
-        return None
-
-    # Determine whether evidence is sufficient to diagnose a specific conceptual flaw
-    diagnosed_flaw = explicit_misc or conceptual_mistake
-    if diagnosed_flaw and diagnosed_flaw.lower() in ("none", "n/a", "null", "false"):
-        diagnosed_flaw = ""
-
-    # Requirement 3 & 4:
-    # If the answer provides sufficient evidence of conceptual misunderstanding:
-    if diagnosed_flaw and len(diagnosed_flaw) > 3:
-        needs_teacher_review = False
-        evidence_status = "VERIFIED"
-        confidence = str(q.get("confidence") or "High")
-        actual_misconception = diagnosed_flaw
-    else:
-        # Evidence is insufficient to diagnose a specific conceptual flaw (Requirement 4)
-        needs_teacher_review = True
-        evidence_status = "NEEDS_TEACHER_REVIEW"
-        confidence = "Needs teacher review"
-        actual_misconception = "Needs teacher review: Student response indicates an error, but evidence is insufficient to confirm a specific conceptual misunderstanding."
-
     # Extract concept name strictly supported by the actual questions, curriculum topic, or evaluation evidence
     concepts_tested = q.get("concepts_tested")
     if isinstance(concepts_tested, list) and concepts_tested and str(concepts_tested[0]).strip():
@@ -156,7 +131,7 @@ def extract_misconceptions_from_question(
     elif q.get("topic") and str(q.get("topic")).strip():
         concept_name = str(q.get("topic")).strip()
     else:
-        concept_name = f"{eval_doc.get('subject', 'General')} Question Concept"
+        concept_name = f"{subject} Question Concept"
 
     # Extract verbatim question text
     exact_question = str(q.get("question_text") or "").strip()
@@ -180,12 +155,24 @@ def extract_misconceptions_from_question(
         or student_ans
     ).strip()
 
-    # Recommended remedy
-    remedy = str(
-        q.get("how_to_improve")
-        or feedback.get("improvement")
-        or f"Review core principles of {concept_name} with teacher guidance."
-    ).strip()
+    error_type = classification_info.get("error_type", "conceptual_misunderstanding")
+    error_label = classification_info.get("error_label", TAXONOMY_LABELS.get(error_type, "Conceptual Misunderstanding"))
+    evidence_status = classification_info.get("evidence_status", STATUS_EVIDENCE_SUPPORTED)
+    confidence = "Evidence supported" if evidence_status == STATUS_EVIDENCE_SUPPORTED else "Needs teacher review"
+    needs_teacher_review = (evidence_status != STATUS_EVIDENCE_SUPPORTED)
+    actual_misconception = classification_info.get("diagnostic_summary") or str(q.get("misconception") or q.get("conceptual_mistake") or "Conceptual misunderstanding")
+
+    # Build personalized remediation action based on mistake type
+    action_info = build_personalized_action(
+        error_type=error_type,
+        concept=concept_name,
+        subject=subject,
+        related_questions=[q_num],
+        evidence_text=evidence_text,
+        marks_lost=max(0.0, max_marks - awarded_marks),
+        total_marks=float(eval_doc.get("total_marks") or max_marks)
+    )
+    remedy = action_info.get("activity") or action_info.get("action")
 
     eval_id_str = str(eval_doc.get("_id") or eval_doc.get("id") or eval_doc.get("evaluation_id") or "").strip()
     student_name = str(eval_doc.get("student_name_snapshot") or eval_doc.get("student_name") or "Student").strip()
@@ -236,6 +223,10 @@ def extract_misconceptions_from_question(
         "needs_teacher_review": needs_teacher_review,
         "confidence": confidence,
         "severity": severity,
+        "error_type": error_type,
+        "error_label": error_label,
+        "activity": remedy,
+        "expected_outcome": action_info.get("expected_outcome", f"Mastery of {concept_name} standards."),
         "recommended_remediation": remedy,
         "remedy": remedy,
         "status": "Active",
@@ -271,6 +262,194 @@ def derive_misconceptions_from_evaluation(
             derived.append(item)
 
     return derived
+
+
+def group_misconceptions_by_student(misconceptions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Groups diagnosed misconceptions so that each student appears only once
+    in the consolidated view for a given evaluation, with all their respective
+    question-wise details, conceptual weaknesses, and remediation actions nested.
+    """
+    if not misconceptions:
+        return []
+
+    severity_weight = {"Critical": 3, "High": 2, "Medium": 1, "Low": 0}
+    confidence_weight = {"High": 3, "Medium": 2, "Needs teacher review": 1, "Low": 0}
+
+    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
+
+    for m in misconceptions:
+        sid = str(m.get("student_id") or "").strip()
+        roll = str(m.get("roll_number") or "").strip()
+        sname = str(m.get("student_name") or "").strip()
+        student_key = sid if sid else f"{roll}_{sname}".lower()
+
+        eval_id = str(m.get("evaluation_id") or m.get("evaluationId") or "").strip()
+        class_id = str(m.get("class_id") or "").strip()
+        subject = str(m.get("subject") or "General").strip()
+
+        key = (student_key, eval_id, class_id, subject)
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(m)
+
+    consolidated: List[Dict[str, Any]] = []
+
+    for (student_key, eval_id, class_id, subject), items in grouped.items():
+        # If item is already consolidated (has concept_groups and questions), preserve
+        if len(items) == 1 and items[0].get("concept_groups"):
+            consolidated.append(items[0])
+            continue
+
+        # Sort items by question number
+        items.sort(key=lambda x: str(x.get("question_number") or x.get("question_num") or "0"))
+
+        primary = dict(items[0])
+        student_name = primary.get("student_name") or "Student"
+        roll_number = primary.get("roll_number") or "N/A"
+        student_id = primary.get("student_id") or ""
+        class_name = primary.get("class_name") or class_id or "Class Scope"
+        assessment_title = primary.get("assessment_title") or f"{subject} Assessment"
+
+        # Group items by concept within this student
+        concept_dict: Dict[str, Dict[str, Any]] = {}
+        all_questions: List[str] = []
+        highest_sev = "Medium"
+        highest_conf = "Medium"
+        total_awarded = 0.0
+        total_max = 0.0
+        all_resolved = True
+
+        for it in items:
+            c_name = str(it.get("concept") or it.get("identified_concept") or it.get("topic") or "General Concept").strip()
+            c_key = c_name.lower()
+            q_num = str(it.get("question_number") or it.get("question_num") or "1").replace("Question ", "").strip()
+            if q_num and q_num not in all_questions:
+                all_questions.append(q_num)
+
+            q_awarded = float(it.get("awarded_marks") or 0.0)
+            q_max = float(it.get("maximum_marks") or 0.0)
+            total_awarded += q_awarded
+            total_max += q_max
+
+            if it.get("status") != "Completed / Resolved":
+                all_resolved = False
+
+            sev = str(it.get("severity") or "Medium")
+            if severity_weight.get(sev, 1) > severity_weight.get(highest_sev, 1):
+                highest_sev = sev
+
+            conf = str(it.get("confidence") or "Medium")
+            if confidence_weight.get(conf, 1) > confidence_weight.get(highest_conf, 1):
+                highest_conf = conf
+
+            q_entry = {
+                "question_number": q_num,
+                "question_num": f"Question {q_num}",
+                "exact_question": it.get("exact_question") or f"Question {q_num}",
+                "student_answer": it.get("student_answer") or it.get("student_reasoning") or "",
+                "evidence": it.get("evidence") or "",
+                "awarded_marks": q_awarded,
+                "maximum_marks": q_max,
+                "misconception": it.get("actual_misconception") or it.get("misconception") or "",
+                "correct_understanding": it.get("correct_understanding") or it.get("correct_concept") or "",
+                "how_to_improve": it.get("recommended_remediation") or it.get("remedy") or "",
+            }
+
+            if c_key not in concept_dict:
+                concept_dict[c_key] = {
+                    "concept": c_name,
+                    "identified_concept": c_name,
+                    "misconception": it.get("actual_misconception") or it.get("misconception") or "",
+                    "actual_misconception": it.get("actual_misconception") or it.get("misconception") or "",
+                    "correct_understanding": it.get("correct_understanding") or it.get("correct_concept") or "",
+                    "remedy": it.get("recommended_remediation") or it.get("remedy") or "",
+                    "recommended_remediation": it.get("recommended_remediation") or it.get("remedy") or "",
+                    "confidence": conf,
+                    "severity": sev,
+                    "questions": [q_entry],
+                    "related_questions": [q_num],
+                }
+            else:
+                cg = concept_dict[c_key]
+                cg["questions"].append(q_entry)
+                if q_num not in cg["related_questions"]:
+                    cg["related_questions"].append(q_num)
+                if not cg["misconception"] and it.get("misconception"):
+                    cg["misconception"] = it.get("misconception")
+                    cg["actual_misconception"] = it.get("misconception")
+
+        concept_groups = list(concept_dict.values())
+        first_cg = concept_groups[0] if concept_groups else {}
+
+        consolidated_item = {
+            "id": f"misc_student_{eval_id}_{student_key.replace(' ', '_')}",
+            "evaluation_id": eval_id,
+            "evaluationId": eval_id,
+            "evaluation_source": "TEACHER_EVALUATION",
+            "teacher_id": str(primary.get("teacher_id") or ""),
+            "class_id": class_id,
+            "class_name": class_name,
+            "student_id": student_id,
+            "student_user_id": primary.get("student_user_id"),
+            "student_name": student_name,
+            "roll_number": roll_number,
+            "subject": subject,
+            "assessment_title": assessment_title,
+            "assessments": [assessment_title],
+            "total_misconceptions": len(items),
+            "concept_count": len(concept_groups),
+            "affected_questions": all_questions,
+            "question_number": ", ".join(all_questions),
+            "question_num": f"Questions {', '.join(all_questions)}",
+            "awarded_marks": total_awarded,
+            "maximum_marks": total_max,
+            "severity": highest_sev,
+            "confidence": highest_conf,
+            "status": "Completed / Resolved" if all_resolved else "Active",
+            "occurrences": len(concept_groups),
+            "created_at": primary.get("created_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "concept_groups": concept_groups,
+            # Top-level backward compatibility fields
+            "concept": first_cg.get("concept", subject),
+            "identified_concept": first_cg.get("concept", subject),
+            "topic": f"{subject} — {first_cg.get('concept', subject)}",
+            "actual_misconception": first_cg.get("actual_misconception", "Diagnosed conceptual misunderstanding."),
+            "misconception": first_cg.get("misconception", "Diagnosed conceptual misunderstanding."),
+            "description": first_cg.get("misconception", "Diagnosed conceptual misunderstanding."),
+            "evidence": first_cg.get("questions", [{}])[0].get("evidence", primary.get("evidence", "")),
+            "exact_question": first_cg.get("questions", [{}])[0].get("exact_question", primary.get("exact_question", "")),
+            "student_answer": first_cg.get("questions", [{}])[0].get("student_answer", primary.get("student_answer", "")),
+            "student_reasoning": first_cg.get("questions", [{}])[0].get("student_answer", primary.get("student_answer", "")),
+            "correct_understanding": first_cg.get("correct_understanding", "Curriculum standard scientific model."),
+            "correct_concept": first_cg.get("correct_understanding", "Curriculum standard scientific model."),
+            "recommended_remediation": first_cg.get("recommended_remediation", "Targeted practice on core concepts."),
+            "remedy": first_cg.get("remedy", "Targeted practice on core concepts."),
+        }
+
+        # Step 5: Individual Student Performance Summary
+        eval_context = {
+            "student_name": student_name,
+            "subject": subject,
+            "total_marks": total_max,
+            "obtained_marks": total_awarded,
+        }
+        classified_qs_for_summary = []
+        for it in items:
+            classified_qs_for_summary.append({
+                "question_number": it.get("question_number") or "1",
+                "concept": it.get("concept") or subject,
+                "error_type": it.get("error_type", "conceptual_misunderstanding"),
+                "error_label": it.get("error_label", "Conceptual Misunderstanding"),
+                "awarded_marks": it.get("awarded_marks", 0.0),
+                "maximum_marks": it.get("maximum_marks", 0.0),
+                "marks_lost": max(0.0, float(it.get("maximum_marks", 0.0)) - float(it.get("awarded_marks", 0.0))),
+            })
+        consolidated_item["performance_summary"] = generate_individual_performance_summary(eval_context, classified_qs_for_summary)
+
+        consolidated.append(consolidated_item)
+
+    return consolidated
 
 
 def group_misconceptions_by_concept(misconceptions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
