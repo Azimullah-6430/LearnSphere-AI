@@ -5618,6 +5618,80 @@ def get_student_analytics():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/parent/report", methods=["GET", "POST"])
+@require_auth
+def get_parent_feedback_report_endpoint():
+    """Generates an accurate, empathetic, and evidence-grounded AI parent feedback report."""
+    try:
+        user_id = _current_user_id()
+        session_role = _current_role()
+
+        req_body = request.get_json(silent=True) or {}
+        if session_role == "student":
+            target_student_id = user_id
+        else:
+            target_student_id = request.args.get("student_id") or req_body.get("student_id") or user_id
+
+        user = _lookup_user_by_id(target_student_id)
+        if not user:
+            user = {"id": target_student_id, "name": "Student"}
+
+        user_email = user.get("email", "")
+        user_name = user.get("name", "")
+
+        evals = []
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            enrolled_sids = _get_enrolled_student_ids_for_user(target_student_id, user_email)
+            or_clauses = [
+                {"submitted_by": str(target_student_id)},
+                {"student_id": str(target_student_id)},
+                {"student_user_id": str(target_student_id)},
+            ]
+            if user_email:
+                or_clauses.extend([
+                    {"submitted_by": str(user_email)},
+                    {"student_id": str(user_email)},
+                ])
+            if user_name:
+                or_clauses.append({"student_name": user_name})
+                or_clauses.append({"student_name_snapshot": user_name})
+            for sid in enrolled_sids:
+                or_clauses.append({"student_id": str(sid)})
+
+            evals = [mongo_serialize(d) for d in mongo_db["evaluations"].find({"$or": or_clauses}).sort("created_at", -1)]
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM evaluations WHERE submitted_by=? OR student_id=? OR submitted_by=? ORDER BY created_at DESC",
+                (str(target_student_id), str(target_student_id), str(user_email))
+            )
+            evals = [dict(r) for r in cursor.fetchall()]
+            conn.close()
+
+        activity_log = req_body.get("activity_log") or []
+        study_sessions = req_body.get("study_sessions") or []
+        streak_days = int(req_body.get("streak_days") or 1)
+        formatted_session_time = str(req_body.get("formatted_session_time") or "0s")
+
+        from app.evaluation.parent_feedback import generate_parent_feedback_report
+        report = generate_parent_feedback_report(
+            student_profile=user,
+            evaluations=evals,
+            activity_log=activity_log,
+            study_sessions=study_sessions,
+            streak_days=streak_days,
+            formatted_session_time=formatted_session_time,
+            use_gemini=True
+        )
+
+        return jsonify(report), 200
+    except Exception as exc:
+        logger.error("[ParentReport] Endpoint error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # AI TRAINER
 # ══════════════════════════════════════════════════════════════════════════════

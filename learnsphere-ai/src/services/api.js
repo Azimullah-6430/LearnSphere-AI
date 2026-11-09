@@ -280,6 +280,9 @@ export const api = {
   getStudentAnalytics: (studentId = '') =>
     request(`/api/analytics/student${studentId ? `?student_id=${encodeURIComponent(studentId)}` : ''}`),
 
+  getParentReport: (payload = {}) =>
+    request('/api/parent/report', { method: 'POST', body: payload }),
+
   // ── AI Trainer ────────────────────────────────────────────────────────────
 
   trainerChat: (payload) => request('/api/trainer/chat', { method: 'POST', body: payload }),
