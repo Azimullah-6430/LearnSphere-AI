@@ -305,6 +305,10 @@ def _update_user_streak(user_id: str, user_doc: dict) -> dict:
 
         new_longest = max(longest_streak, new_streak)
 
+        # Performance optimization: if streak is already recorded for today, skip redundant database write
+        if last_date == today_str and int(user_doc.get("streak_count") or 0) == new_streak:
+            return user_doc
+
         update_fields = {
             "streak_count": new_streak,
             "streakDays": new_streak,
@@ -6263,10 +6267,15 @@ def learn_anywhere_action_endpoint():
         action_type = str(data.get("action_type") or "simpler_explanation").strip()
         subject = str(data.get("subject") or "").strip()
         topic = str(data.get("topic") or "").strip()
-        question = str(data.get("question") or "").strip()
+        question = str(data.get("question") or data.get("student_query") or "").strip()
         current_explanation = str(data.get("current_explanation") or "").strip()
         current_example = str(data.get("current_example") or "").strip()
         preferred_language = str(data.get("preferred_language") or "English").strip()
+        conversation_history = data.get("conversation_history") or []
+        missing_material = str(data.get("missing_material") or "").strip()
+        adaptive_level = str(data.get("adaptive_level") or "medium").strip()
+        activity_title = str(data.get("activity_title") or "").strip()
+        activity_steps = data.get("activity_steps") or []
 
         if not subject or not topic:
             return jsonify({
@@ -6282,7 +6291,12 @@ def learn_anywhere_action_endpoint():
             question=question,
             current_explanation=current_explanation,
             current_example=current_example,
-            preferred_language=preferred_language
+            preferred_language=preferred_language,
+            conversation_history=conversation_history,
+            missing_material=missing_material,
+            adaptive_level=adaptive_level,
+            activity_title=activity_title,
+            activity_steps=activity_steps
         )
 
         return jsonify({

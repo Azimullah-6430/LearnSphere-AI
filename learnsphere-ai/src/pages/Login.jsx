@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   GraduationCap,
@@ -15,6 +15,7 @@ import {
   Sprout,
   CheckCircle2,
   AlertCircle,
+  Loader2,
   X
 } from 'lucide-react'
 import { useApp } from '../context/AppContext.jsx'
@@ -120,7 +121,13 @@ export default function Login() {
   const [academicYear, setAcademicYear] = useState('2024-2025')
 
   const [loading, setLoading] = useState(false)
+  const [slowLoading, setSlowLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  // Pre-warm the backend cloud service as soon as the login view mounts
+  useEffect(() => {
+    api.warmup()
+  }, [])
 
   // Forgot Password Modal State
   const [showForgotModal, setShowForgotModal] = useState(false)
@@ -178,7 +185,9 @@ export default function Login() {
     e.preventDefault()
     if (loading) return
     setLoading(true)
+    setSlowLoading(false)
     setErrorMsg('')
+    const slowTimer = setTimeout(() => setSlowLoading(true), 3000)
 
     try {
       if (!isLogin) {
@@ -239,7 +248,9 @@ export default function Login() {
     } catch (err) {
       setErrorMsg(err?.message || 'Authentication error. Please verify your credentials and network connection.')
     } finally {
+      clearTimeout(slowTimer)
       setLoading(false)
+      setSlowLoading(false)
     }
   }
 
@@ -701,9 +712,17 @@ export default function Login() {
                   disabled={loading}
                   className="w-full py-2.5 sm:py-3 px-6 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed mt-1.5"
                 >
+                  {loading && <Loader2 size={16} className="animate-spin shrink-0" />}
                   <span>{loading ? (isLogin ? 'Signing In…' : 'Creating Account…') : isLogin ? 'Sign In' : 'Create Account'}</span>
                   {!loading && <ArrowRight size={16} />}
                 </button>
+
+                {slowLoading && loading && (
+                  <div className="text-center text-xs text-emerald-600 dark:text-emerald-400 font-medium animate-pulse mt-2 flex items-center justify-center gap-1.5">
+                    <Loader2 size={13} className="animate-spin shrink-0" />
+                    <span>Connecting to cloud server (waking up service, please wait)…</span>
+                  </div>
+                )}
 
                 {/* Divider */}
                 {isLogin && (

@@ -2586,17 +2586,53 @@ Return ONLY a valid JSON list of question objects:
         question: str = "",
         current_explanation: str = "",
         current_example: str = "",
-        preferred_language: str = "English"
+        preferred_language: str = "English",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        missing_material: str = "",
+        adaptive_level: str = "medium",
+        activity_title: str = "",
+        activity_steps: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Generates on-demand student assistance:
-        - simpler_explanation: Simpler analogy, clear breakdown, reduced technical jargon.
-        - another_example: A different worked example on the same topic.
-        - worked_solution: Complete step-by-step worked solution for the current question.
-        - more_challenging_task: A more challenging, higher-order thinking practice task.
+        Generates dynamic on-demand student assistance, follow-up answers, adaptive explanations,
+        intelligent resource substitutes, and Mermaid diagrams with strict syllabus grounding.
         """
         act_type = (action_type or "simpler_explanation").strip().lower()
+        if act_type in ("ask_question", "follow_up_doubt", "chat", "question"):
+            act_type = "ask_question"
+        elif act_type in ("simpler_words", "simpler_explanation", "explain_simply"):
+            act_type = "simpler_words"
+        elif act_type in ("another_example", "different_example"):
+            act_type = "another_example"
+        elif act_type in ("show_diagram", "diagram", "flowchart"):
+            act_type = "show_diagram"
+        elif act_type in ("step_by_step", "steps_breakdown"):
+            act_type = "step_by_step"
+        elif act_type in ("no_equipment_activity", "zero_equipment", "thought_experiment"):
+            act_type = "no_equipment_activity"
+        elif act_type in ("material_substitute", "find_alternative", "missing_material"):
+            act_type = "material_substitute"
+        elif act_type in ("summarize", "summary", "quick_revision", "cheat_sheet"):
+            act_type = "summarize"
+        elif act_type in ("test_understanding", "quiz_me", "checkpoint"):
+            act_type = "test_understanding"
+        elif act_type in ("explain_mistake", "why_wrong"):
+            act_type = "explain_mistake"
+        elif act_type in ("adaptive_level", "change_level"):
+            act_type = "adaptive_level"
+
         lang_note = f"Provide output in {preferred_language}." if preferred_language and preferred_language.lower() != "english" else ""
+
+        conv_text = ""
+        if conversation_history and isinstance(conversation_history, list):
+            conv_lines = []
+            for msg in conversation_history[-6:]:
+                role = "Student" if msg.get("role") in ("user", "student") else "AI Tutor"
+                conv_lines.append(f"{role}: {msg.get('content', '')}")
+            if conv_lines:
+                conv_text = "\nConversation Context (Previous Doubts & Clarifications):\n" + "\n".join(conv_lines)
+
+        steps_text = "\n".join(f"- {s}" for s in (activity_steps or [])) if activity_steps else "N/A"
 
         prompt = f"""
 You are the AI Learning Tutor for Learn from Anywhere in LearnSphere AI.
@@ -2605,16 +2641,39 @@ The student has requested: {act_type.replace('_', ' ').title()}.
 Context:
 - Subject: {subject}
 - Topic: {topic}
-- Current Question: {question or 'N/A'}
+- Activity Title: {activity_title or topic}
+- Activity Steps:
+{steps_text}
+- Current Student Doubt / Question: {question or 'N/A'}
+- Missing Material (if requesting substitute): {missing_material or 'N/A'}
+- Requested Explanation Level: {adaptive_level or 'medium'}
 - Current Explanation: {current_explanation or 'N/A'}
 - Current Example: {current_example or 'N/A'}
+{conv_text}
 {lang_note}
 
-DIRECTIVES BASED ON ACTION TYPE:
-- 'simpler_explanation': Provide a simpler, intuitive explanation using a clear real-world analogy. Avoid complex jargon.
-- 'another_example': Provide a fresh, different worked example demonstrating the concept step-by-step.
+STRICT DIRECTIVES BASED ON ACTION TYPE:
+- 'ask_question': Answer the student's actual question directly, accurately, and concisely. Use the conversation context to resolve references. Focus strictly on their question without regurgitating the entire chapter. If asking about household demonstrations, suggest safe household materials or a clear thought experiment. Include 2-3 key takeaway bullet points.
+- 'adaptive_level': Adapt the concept to level '{adaptive_level}'.
+  * If 'simple': Plain everyday language, basic terminology, familiar village/home analogies, zero jargon.
+  * If 'detailed': Deeper explanations, technical terms, governing formulas with KaTeX ($F=ma$), derivations, and additional examples.
+  * If 'quick': Concise revision notes, 3-5 bullet points, essential points, and a quick 1-sentence understanding check.
+- 'simpler_words': Provide a simpler, intuitive explanation using a clear everyday analogy (e.g. water pipes for circuits, weighing scales for equations). Avoid complex jargon.
+- 'another_example': Provide a fresh, different concrete real-world or industry example demonstrating the exact same concept step-by-step.
+- 'show_diagram': Provide a valid, renderable Mermaid diagram (flowchart TD or sequenceDiagram or stateDiagram) illustrating the concept or process, plus an accessible textual explanation.
+- 'step_by_step': Break down the complex concept into progressive, sequential bite-sized logical stages (Stage 1, Stage 2, Stage 3).
+- 'no_equipment_activity': Generate a practical activity or thought experiment requiring ZERO specialized equipment (using sunlight, shadows, leaves, clean water, or paper & pencil).
+- 'material_substitute': The student does NOT have '{missing_material}'. Evaluate whether a safe, scientifically valid household substitute exists. If yes, explain how to use it safely and what changes. If NO safe household substitute exists (e.g. mains electricity, hazardous chemicals, laboratory sensors), explicitly state why and offer a safe observation-based or thought experiment alternative. Never falsely claim household items behave identically to lab equipment.
+- 'summarize': Provide a high-yield revision summary with key formulas, essential definitions, and exam memory tips.
+- 'test_understanding': Generate 1-2 focused checkpoint questions testing comprehension of this specific concept, with verified expected answers.
+- 'explain_mistake': Explain why the student's previous answer was incorrect with encouraging, constructive guidance and the correct scientific rationale.
 - 'worked_solution': Provide a clear, complete, step-by-step worked solution for the current question ({question}).
 - 'more_challenging_task': Provide a new, more challenging practice question that tests deeper analytical reasoning or multi-step calculations.
+
+SAFETY & ACCURACY RULES:
+- Never recommend dangerous chemicals, mains electricity (220V), fire, or hazardous machinery.
+- Ground all facts in the authenticated subject ({subject}) and topic ({topic}).
+- Never invent fake measurements, fabricated historical sources, or unverified facts.
 
 Return ONLY a valid JSON object matching this schema:
 {{
@@ -2622,14 +2681,26 @@ Return ONLY a valid JSON object matching this schema:
   "title": "Descriptive title for this response",
   "content": "Detailed text content answering the student's request",
   "steps": ["Step 1...", "Step 2..."],
-  "follow_up_question": "Optional new question if action is more_challenging_task or another_example",
-  "expected_answer": "Expected answer if a new question is posed"
+  "mermaid_diagram": "flowchart TD\\n...",
+  "key_points": ["Key takeaway point 1", "Key takeaway point 2"],
+  "substitute_recommendation": {{
+    "material": "{missing_material or 'None'}",
+    "substitute": "Safe alternative item (or N/A)",
+    "feasibility": "high | medium | not_recommended",
+    "scientific_difference": "What behaves differently or why caution is needed"
+  }},
+  "follow_up_question": "Optional new checkpoint question",
+  "expected_answer": "Expected answer if a question is posed"
 }}
 """
         import os, sys
         is_test_env = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING") == "1" or "unittest" in sys.modules)
         if is_test_env:
-            return self._generate_learn_anywhere_action_fallback(act_type, subject, topic, question, current_explanation, current_example)
+            return self._generate_learn_anywhere_action_fallback(
+                act_type, subject, topic, question, current_explanation, current_example,
+                conversation_history=conversation_history, missing_material=missing_material,
+                adaptive_level=adaptive_level, activity_title=activity_title, activity_steps=activity_steps
+            )
 
         try:
             raw = self.generate_content(prompt, json_output=True)
@@ -2637,11 +2708,16 @@ Return ONLY a valid JSON object matching this schema:
             if isinstance(res, dict) and (res.get("content") or res.get("title")):
                 res.setdefault("action_type", act_type)
                 res.setdefault("steps", [])
+                res.setdefault("key_points", [])
                 return res
         except Exception as e:
             logger.warning(f"[GeminiService] generate_learn_anywhere_action API error: {e}")
 
-        return self._generate_learn_anywhere_action_fallback(act_type, subject, topic, question, current_explanation, current_example)
+        return self._generate_learn_anywhere_action_fallback(
+            act_type, subject, topic, question, current_explanation, current_example,
+            conversation_history=conversation_history, missing_material=missing_material,
+            adaptive_level=adaptive_level, activity_title=activity_title, activity_steps=activity_steps
+        )
 
     def _generate_learn_anywhere_action_fallback(
         self,
@@ -2650,7 +2726,12 @@ Return ONLY a valid JSON object matching this schema:
         topic: str,
         question: str = "",
         current_explanation: str = "",
-        current_example: str = ""
+        current_example: str = "",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        missing_material: str = "",
+        adaptive_level: str = "medium",
+        activity_title: str = "",
+        activity_steps: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Offline fallback for student on-demand learning actions grounded strictly in subject discipline."""
         act_type = (action_type or "simpler_explanation").strip().lower()
@@ -2658,6 +2739,8 @@ Return ONLY a valid JSON object matching this schema:
         is_math = any(w in sub_low for w in ["math", "algebra", "calculus", "geometr", "arithmetic", "statist", "probab"])
         is_cs = any(w in sub_low for w in ["computer", "data structure", "algorithm", "software", "code", "programm"])
         is_lang = any(w in sub_low for w in ["english", "language", "grammar", "literat", "french", "spanish", "german"])
+        is_social = any(w in sub_low for w in ["history", "civic", "social", "politic", "geograph"])
+        is_comm = any(w in sub_low for w in ["account", "commerce", "finance", "audit", "econom"])
         is_social = any(w in sub_low for w in ["history", "civic", "social", "politic", "geograph"])
         is_comm = any(w in sub_low for w in ["account", "commerce", "finance", "audit", "econom"])
 
@@ -2793,6 +2876,233 @@ Return ONLY a valid JSON object matching this schema:
                     "follow_up_question": f"Why does water travel faster down the plate than cooking oil in this demonstration of {topic}?",
                     "expected_answer": "Water has lower internal fluid viscosity and less resistance to shear flow than oil."
                 }
+
+        elif act_type == "ask_question":
+            clean_q = question or f"Understanding {topic}"
+            if is_math:
+                content = f"Regarding your question on {topic} ('{clean_q}'):\nIn mathematics, solving this requires identifying the invariant relationships and working backward or applying the direct algebraic rule. For example, if you are isolating a variable or computing a ratio, each side must be transformed equally without altering the equation balance."
+                points = [
+                    f"Core mathematical rule: maintain equivalence on both sides.",
+                    f"Check given boundary conditions before substituting numbers.",
+                    f"Verify the result using inverse operations."
+                ]
+            elif is_cs:
+                content = f"Regarding your question on {topic} ('{clean_q}'):\nIn computer algorithms, this behavior occurs because the processor executes each statement sequentially according to loop invariants and conditional branches. If an edge case or condition is not met, the state machine transitions along the alternative branch."
+                points = [
+                    f"Determinism: identical input always produces identical state progression.",
+                    f"Check base conditions (e.g. empty list or zero division).",
+                    f"Trace variable memory values step-by-step."
+                ]
+            elif is_lang:
+                content = f"Regarding your question on {topic} ('{clean_q}'):\nIn language and literature, meaning depends on structural context and grammar agreements. When modifying clause order or tense, ensuring coherence and tone clarity is the primary rule."
+                points = [
+                    f"Pay attention to subject-verb agreement and tense continuity.",
+                    f"Identify whether the context is descriptive, argumentative, or narrative.",
+                    f"Notice how transitional conjunctions change emphasis."
+                ]
+            else:
+                content = f"Regarding your question on {topic} ('{clean_q}'):\nIn physical and natural sciences, this phenomenon occurs because energy, matter, and forces interact according to fundamental conservation laws. For example, when particles or fluids change temperature, concentration, or pressure, the system naturally seeks equilibrium."
+                points = [
+                    f"Grounded in core scientific principle: conservation of mass and energy.",
+                    f"Observation depends on observable variables (temperature, contact surface, pressure).",
+                    f"Safe everyday materials can demonstrate the underlying mechanism without lab hazards."
+                ]
+
+            return {
+                "action_type": "ask_question",
+                "title": f"Answer: {clean_q[:60]}",
+                "content": content,
+                "steps": [
+                    f"Step 1: Identify the underlying governing principle of {topic}.",
+                    f"Step 2: Connect the given condition to observable evidence.",
+                    f"Step 3: Draw a verified conclusion without guessing."
+                ],
+                "mermaid_diagram": f"flowchart TD\n  A[Question: {clean_q[:30]}] --> B[Core Concept: {topic}]\n  B --> C[Scientific Evidence / Logic]\n  C --> D[Verified Answer]",
+                "key_points": points,
+                "follow_up_question": f"Does this explanation clarify why {topic} behaves this way in practice?",
+                "expected_answer": "Yes, understanding the fundamental principle explains the practical behavior."
+            }
+
+        elif act_type == "adaptive_level":
+            level = (adaptive_level or "medium").lower()
+            if level == "simple":
+                content = f"[Simple Mode - Everyday Language]\nThink of {topic} like everyday cause and effect: simple rules govern how things work around us. In plain words, when you apply force or provide input, you get a predictable change. No complex jargon is needed to understand the foundation."
+                points = ["Everyday analogy: simple cause and effect.", "Focus on what you see and measure.", "Zero complex formulas required."]
+            elif level == "detailed":
+                content = f"[Detailed Mode - In-Depth Academic Grounding]\nGoverning Theory for {topic}:\nThe academic framework relies on rigorous state equations and quantitative modeling. In college and upper-level coursework, we analyze boundary conditions, rate equations, and system equilibrium. For any applied parameter change, the theoretical transfer function dictates intermediate state derivations."
+                points = ["Governing formula derivation and boundary conditions.", "Quantitative rate analysis and parameter sensitivity.", "Rigorous mathematical modeling."]
+            else: # quick
+                content = f"[Quick Learning Mode - High-Yield Revision]\n• Core definition: {topic} represents the direct interaction between inputs and measurable system response.\n• Key Exam Highlight: Evaluators look for the governing law, correct units, and one clear practical example.\n• 1-Minute Takeaway: Always state the starting condition, the applied change, and the verified final result."
+                points = ["Core definition at a glance.", "Exam-oriented marking points.", "1-minute memory hook."]
+
+            return {
+                "action_type": "adaptive_level",
+                "title": f"{level.title()} Mode: {topic}",
+                "content": content,
+                "steps": [
+                    f"1. Review the {level} explanation of {topic}.",
+                    "2. Apply the key takeaways to your current problem or activity.",
+                    "3. Test your recall using the quick check below."
+                ],
+                "key_points": points,
+                "follow_up_question": f"What is the single most important rule to remember for {topic}?",
+                "expected_answer": f"The governing principle and its predictable cause-and-effect relationship in {topic}."
+            }
+
+        elif act_type == "show_diagram":
+            diagram = f"flowchart TD\n  Start[Start: {topic}] --> Prep[Gather Observation / Input]\n  Prep --> Exec[Apply Governing Rule]\n  Exec --> Obs[Measure Response]\n  Obs --> Finish[Verified Conclusion]"
+            return {
+                "action_type": "show_diagram",
+                "title": f"Process Flowchart: {topic}",
+                "content": f"Here is a visual flowchart illustrating how {topic} operates from initial condition to final observation. You can follow the diagram step-by-step from top to bottom.",
+                "steps": [
+                    f"Stage 1: Input preparation for {topic}.",
+                    "Stage 2: Execution of the governing rule.",
+                    "Stage 3: Measurement and verified conclusion."
+                ],
+                "mermaid_diagram": diagram,
+                "key_points": [
+                    "Sequential logic flows top to bottom.",
+                    "Each box represents a concrete observable phase.",
+                    "The final node confirms the scientific rule."
+                ],
+                "follow_up_question": f"Which stage in the diagram is where the active change happens?",
+                "expected_answer": "Stage 2: Execution of the governing rule."
+            }
+
+        elif act_type == "step_by_step":
+            return {
+                "action_type": "step_by_step",
+                "title": f"Step-by-Step Breakdown of {topic}",
+                "content": f"To master {topic} without feeling overwhelmed, break the concept down into these three progressive stages:",
+                "steps": [
+                    f"Stage 1 (Prerequisites): Understand the baseline condition and what variables are present in {topic}.",
+                    "Stage 2 (Mechanism): Trace the active transformation step-by-step as energy, logic, or force is applied.",
+                    "Stage 3 (Verification): Check the final outcome against theoretical predictions."
+                ],
+                "mermaid_diagram": f"flowchart LR\n  S1[Stage 1: Prerequisites] --> S2[Stage 2: Active Mechanism] --> S3[Stage 3: Verified Result]",
+                "key_points": [
+                    "Never skip Stage 1 prerequisites.",
+                    "Focus on one intermediate change at a time.",
+                    "Verify the final state with a self-check."
+                ],
+                "follow_up_question": f"Why is it important to check the baseline condition in Stage 1?",
+                "expected_answer": "To know the initial state so you can accurately measure what changed."
+            }
+
+        elif act_type == "no_equipment_activity":
+            return {
+                "action_type": "no_equipment_activity",
+                "title": f"Zero-Equipment Observation / Thought Experiment: {topic}",
+                "content": f"You don't need any specialized tools or lab equipment to explore {topic}. Here is a 100% zero-cost observation and thought experiment you can perform immediately using everyday surroundings:",
+                "steps": [
+                    f"Step 1: Observe your immediate surroundings (e.g. sunlight angle, your own breathing rhythm, or a pencil on paper).",
+                    f"Step 2: Introduce a controlled mental or physical variation related to {topic}.",
+                    "Step 3: Predict the result theoretically, then observe the actual outcome to verify the rule."
+                ],
+                "mermaid_diagram": "",
+                "key_points": [
+                    "100% Zero-cost and zero equipment required.",
+                    "Relies entirely on observation and thought experiment.",
+                    "Academically equivalent to lab demonstrations."
+                ],
+                "substitute_recommendation": {
+                    "material": missing_material or "Lab Equipment",
+                    "substitute": "Natural surroundings / Thought experiment",
+                    "feasibility": "high",
+                    "scientific_difference": "No physical apparatus used; focuses on mental trace and natural observations."
+                },
+                "follow_up_question": f"What natural observation did you use to demonstrate {topic}?",
+                "expected_answer": "An everyday natural phenomenon or paper-and-pencil thought experiment."
+            }
+
+        elif act_type == "material_substitute":
+            item = missing_material or "Specialized Lab Item"
+            return {
+                "action_type": "material_substitute",
+                "title": f"Safe Alternative for '{item}' in {topic}",
+                "content": f"If you do not have '{item}', you can explore {topic} without it. For safe educational demonstrations, common household items or clean paper and water can substitute for physical tools. If the item is hazardous (such as high voltage or toxic chemicals), we use a safe conceptual analog instead of dangerous improvisation.",
+                "steps": [
+                    f"Step 1: Check what common everyday object shares the physical property needed for {topic}.",
+                    "Step 2: If no safe substitute exists, use a paper trace or thought experiment.",
+                    "Step 3: Never use hazardous electrical mains (220V), fire, or toxic household chemicals."
+                ],
+                "mermaid_diagram": "",
+                "key_points": [
+                    f"Alternative identified for: {item}.",
+                    "Safety guaranteed: zero hazardous materials.",
+                    "Scientific validity preserved."
+                ],
+                "substitute_recommendation": {
+                    "material": item,
+                    "substitute": "Clean notebook paper, cotton string, water cup, or thought experiment",
+                    "feasibility": "high",
+                    "scientific_difference": "Safe household substitute demonstrates the underlying mechanism without specialized lab sensors."
+                },
+                "follow_up_question": f"Does the alternative allow you to observe the principle of {topic}?",
+                "expected_answer": "Yes, it safely models the core concept."
+            }
+
+        elif act_type == "summarize":
+            return {
+                "action_type": "summarize",
+                "title": f"Revision Summary & Cheat-Sheet: {topic}",
+                "content": f"High-Yield Summary for {topic} ({subject}):\n• Definition: The core mechanism governing how parameters interact in {topic}.\n• Key Law / Rule: System response is directly proportional to applied change under standard boundary conditions.\n• Common Exam Pitfall: Forgetting to state units or confusing cause with effect.\n• 10-Second Recall Hook: Remember the input-process-output chain.",
+                "steps": [
+                    f"1. Memorize the 1-sentence definition of {topic}.",
+                    "2. Practice writing the governing formula or rule from memory.",
+                    "3. Review the common exam pitfall."
+                ],
+                "mermaid_diagram": "",
+                "key_points": [
+                    f"Key definition: {topic}.",
+                    "Essential governing relationship.",
+                    "Common exam pitfall avoided."
+                ],
+                "follow_up_question": f"Can you state the core definition of {topic} in your own words?",
+                "expected_answer": f"A clear, concise explanation of the governing mechanism of {topic}."
+            }
+
+        elif act_type == "test_understanding":
+            q = f"In {topic}, what happens to the output if the primary input variable is doubled while keeping other conditions constant?"
+            ans = "The output changes predictably according to the governing direct or inverse mathematical relationship."
+            return {
+                "action_type": "test_understanding",
+                "title": f"Understanding Checkpoint: {topic}",
+                "content": f"Here is a targeted checkpoint question to test your practical understanding of {topic}:",
+                "steps": [
+                    "Step 1: Read the checkpoint question carefully.",
+                    "Step 2: Think about the governing rule without looking at the answer.",
+                    "Step 3: Compare your thought with the verified expected answer."
+                ],
+                "mermaid_diagram": "",
+                "key_points": [
+                    "Tests practical cause-and-effect reasoning.",
+                    "Directly relevant to syllabus examinations."
+                ],
+                "follow_up_question": q,
+                "expected_answer": ans
+            }
+
+        elif act_type == "explain_mistake":
+            return {
+                "action_type": "explain_mistake",
+                "title": f"Understanding Your Mistake in {topic}",
+                "content": f"Don't worry—making mistakes is how genuine learning happens! In {topic}, students often mix up the independent cause with the resulting observation, or forget boundary conditions. When analyzing this concept, first identify what variable is fixed and what is allowed to change.",
+                "steps": [
+                    f"Step 1: Identify what was assumed in your previous answer for {topic}.",
+                    "Step 2: Contrast your assumption with the governing physical or mathematical rule.",
+                    "Step 3: Try answering again with the corrected premise."
+                ],
+                "mermaid_diagram": "",
+                "key_points": [
+                    "Separate the fixed conditions from the moving variables.",
+                    "Focus on cause before looking at the outcome.",
+                    "Re-attempt with confidence."
+                ],
+                "follow_up_question": f"Would you like to retry the question for {topic} now?",
+                "expected_answer": "Yes, ready to re-attempt with the correct approach."
+            }
 
         elif act_type == "worked_solution":
             if is_math:
@@ -7114,7 +7424,8 @@ Return ONLY JSON:
     ) -> str:
         """
         Expert Human Tutor & Academic Coach for Personal Trainer.
-        Provides conversational, rigorous, and progressive teaching grounded strictly in the validated curriculum.
+        Provides conversational, rigorous, method-specific teaching grounded strictly in the validated curriculum.
+        Supports Mermaid diagrams, LaTeX mathematics, interactive problem solving, and focused follow-up doubt resolution.
         """
         ctx = student_context or {}
         student_name = ctx.get("name") or "Student"
@@ -7131,6 +7442,7 @@ Return ONLY JSON:
 
         # Format conversation history for multi-turn pedagogical awareness
         history_text = ""
+        has_history = False
         if history and isinstance(history, list):
             valid_turns = []
             for h in history[-8:]:
@@ -7139,12 +7451,89 @@ Return ONLY JSON:
                 if txt:
                     valid_turns.append(f"{role}: {txt}")
             if valid_turns:
+                has_history = True
                 history_text = "CONVERSATION HISTORY:\n" + "\n".join(valid_turns) + "\n\n"
+
+        # Determine learning method / strategy
+        strategy_norm = (study_strategy or "").lower()
+        if "step" in strategy_norm:
+            method_name = "Step-by-Step Learning"
+            method_directive = (
+                "METHOD INSTRUCTIONS (Step-by-Step Learning):\n"
+                "• Break the concept or procedure into sequential, logically numbered steps (Step 1, Step 2, Step 3...).\n"
+                "• Explain one step at a time in the exact operational sequence.\n"
+                "• For every step, explain what is done and WHY it is done.\n"
+                "• Show formulas, calculations, derivations, or code where relevant. Do not skip intermediate steps.\n"
+                "• Include a Mermaid flowchart (```mermaid ... ```) of the step sequence.\n"
+                "• Highlight common pitfalls or mistakes students make at specific steps.\n"
+                "• Conclude with an active checkpoint prompt."
+            )
+        elif "example" in strategy_norm or "real" in strategy_norm:
+            method_name = "Real-World Examples"
+            method_directive = (
+                "METHOD INSTRUCTIONS (Real-World Examples):\n"
+                "• Connect the theoretical topic directly to concrete real-world systems, industry engineering, or everyday technology.\n"
+                "• Provide at least 1-2 detailed, practical case studies (e.g. how major software systems, engineering machines, or modern companies use this).\n"
+                "• Explain the explicit technical connection between the real-world example and the underlying theoretical concept in {subject}.\n"
+                "• Discuss practical constraints, engineering trade-offs, and benefits.\n"
+                "• Include a Mermaid diagram (```mermaid ... ```) illustrating the real-world workflow or architecture.\n"
+                "• Conclude with a thought-provoking practical question for the student."
+            )
+        elif "revision" in strategy_norm or "review" in strategy_norm:
+            method_name = "Quick Revision"
+            method_directive = (
+                "METHOD INSTRUCTIONS (Quick Revision):\n"
+                "• Provide concise, high-yield examination revision notes designed for fast recall.\n"
+                "• Highlight mandatory academic definitions and high-scoring exam keywords.\n"
+                "• State governing formulas and equations clearly using KaTeX ($$...$$ for display blocks, $...$ for inline).\n"
+                "• Include a structured Markdown summary/comparison table (| Concept / Step | Key Rule | Common Pitfall |).\n"
+                "• Highlight top 3 examiner traps / common student misconceptions.\n"
+                "• Avoid unnecessary filler paragraphs; keep every sentence high-yield.\n"
+                "• Conclude with 2 rapid-fire active recall questions."
+            )
+        elif "practice" in strategy_norm or "question" in strategy_norm or "quiz" in strategy_norm:
+            method_name = "Practice Questions"
+            method_directive = (
+                "METHOD INSTRUCTIONS (Practice Questions):\n"
+                "• Provide targeted, syllabus-relevant exam practice questions with clear marks weightage (e.g. [5 Marks], [10 Marks]).\n"
+                "• If the student asks for practice or a challenge, give the question with given parameters, hints, and what examiners expect.\n"
+                "• For worked examples, follow strict problem-solving: Given -> Formula (KaTeX) -> Substitution & Calculations -> Final Answer with SI Units -> Scoring Breakdown.\n"
+                "• Offer an active challenge question for the student to attempt."
+            )
+        else:
+            method_name = "Learn a Concept"
+            method_directive = (
+                "METHOD INSTRUCTIONS (Learn a Concept):\n"
+                "• Explain the concept thoroughly from foundational principles using intuitive, student-friendly language.\n"
+                "• Clearly define technical terms before using them.\n"
+                "• Explain why and how the mechanism works from first principles.\n"
+                "• Provide a clear, relatable real-world example or intuitive analogy (Feynman Technique).\n"
+                "• Include a clean Mermaid flowchart (```mermaid ... ```) illustrating the core process or architecture.\n"
+                "• Conclude with a brief 2-bullet recap and a check-for-understanding question."
+            )
+
+        # Detect specific student intent
+        msg_lower = (message or "").lower().strip()
+        is_doubt = any(q in msg_lower for q in [
+            "why", "how come", "what if", "explain step", "still don't", "still dont",
+            "not clear", "confused", "why do we", "where does", "what does", "how does",
+            "difference", "can you clarify", "does that mean", "help me understand"
+        ]) or has_history
+
+        doubt_directive = ""
+        if is_doubt and has_history:
+            doubt_directive = f"""
+SPECIFIC DOUBT & QUESTION DIRECTIVE:
+The student is asking: "{message}"
+Address this EXACT question or doubt directly, specifically, and concisely first.
+Do NOT repeat the entire topic lecture from the beginning unless they asked for a complete reset.
+Explain the specific rationale, mechanism, or step the student asked about.
+"""
 
         prompt = f"""You are LearnSphere AI's Master Personal Tutor & Academic Coach.
 You behave like an exceptional, encouraging, rigorous human professor/tutor.
 
-ACADEMIC CONTEXT (Controls all educational dialogue):
+ACADEMIC CONTEXT:
 - Authenticated Student: {student_name} (ID: {student_id or 'Authenticated'})
 - Academic Level: {level.capitalize()} ({degree} · {dept} · {sem_str})
 - Active Subject Code / ID: {subject_id or 'N/A'}
@@ -7153,78 +7542,45 @@ ACADEMIC CONTEXT (Controls all educational dialogue):
 - Target Concept / Topic: {topic or 'Core Syllabus Concept'}
 - Validated Subject Topics: {validated_topics_str}
 - Validated Syllabus Blueprint: {syllabus_excerpt or subject}
-- Teaching Strategy: {study_strategy or 'Progressive Mastery Coaching'}
+- Active Learning Method: {method_name}
 
-{history_text}STUDENT'S QUESTION: "{message}"
+{history_text}STUDENT'S REQUEST: "{message}"
 
-PEDAGOGICAL & HUMAN TUTOR TEACHING GUIDELINES:
-
-1. CORE CONTEXT CONTROL & BOUNDARIES:
-   - The validated subject ({subject}) and active topic ({topic}) strictly control the educational context.
-   - Do NOT generate content unrelated to the selected subject/topic unless the student explicitly asks for it.
-   - Do NOT mention competing AI products, platforms, or models.
-
-2. SOCRATIC INTERACTION & ACTIVE QUESTIONING:
-   - Always teach concepts interactively. Do not just dump text; guide the student step-by-step.
-   - If the student answered a previous question, evaluate their response with precise technical accuracy (praise what is correct, gently correct misconceptions).
-   - ALWAYS conclude every explanation with an engaging diagnostic check-for-understanding question or active-recall prompt.
-
-3. PRECISE DIAGRAMS, FLOWCHARTS & VISUAL SCHEMATICS:
-   - For every architectural, algorithmic, structural, computational, or process-oriented concept, provide a crisp, accurate ASCII / Unicode diagram or flowchart inside a formatted code block (```text ... ```) or math block.
-   - Example flowchart style:
-     ```text
-     [Input Data / State] ──> (Step 1: Validation) ──> [Processing Unit] ──> [Output Result]
-                                     │
-                                     └── [Error / Boundary Case] ──> (Rollback)
-     ```
-
-4. EVIDENCE-BASED STUDY TECHNIQUES:
-   - **Feynman Technique**: Translate abstract math/computer science definitions into plain-English intuitive analogies before formal rigor.
-   - **First-Principles Breakdown**: Deconstruct how the concept works from foundational laws.
-   - **Active Recall**: Prompt key equations, keyword definitions, or step sequences from memory.
-   - **Exam High-Score Strategy**: Highlight exact exam keywords, diagram labels, scoring breakdown, and common pitfalls.
-
-5. PROGRESSIVE CONCEPT TEACHING FLOW:
-   When explaining a concept, structure your response clearly:
-   1. Intuitive Explanation & Analogy (Feynman Technique)
-   2. Formal Academic Definition & Core Principles
-   3. Architectural Schematic / Flowchart (ASCII/Unicode diagram)
-   4. Step-by-Step Mechanism / Working Example
-   5. Connection to {subject} & Exam High-Score Points
-   6. Check-for-Understanding Question (Interactive prompt for student)
-
-6. NUMERICAL & PROBLEM-SOLVING FLOW:
-   Strictly follow:
-   • Given: List all variables with symbols and standard units.
-   • Required: Declare target quantity.
-   • Formula: State governing equations clearly.
-   • Substitution: Clean numerical insertion.
-   • Calculation: Intermediate arithmetic steps.
-   • Units & Final Answer: Highlighted final value with SI dimensions.
-   • Explanation & Pitfalls: Common examiner traps.
-
-Output clean, beautifully formatted Markdown with bold labels, structured bullet points, and code/diagram blocks.
+{method_directive}
+{doubt_directive}
+VISUAL & FORMATTING RULES:
+1. FLOWCHARTS & DIAGRAMS (Mermaid):
+   Whenever a flowchart, process, state machine, or system architecture is relevant or requested, provide a valid Mermaid diagram inside a ```mermaid ... ``` code block.
+   Use syntax like:
+   ```mermaid
+   flowchart TD
+     A["Input State"] --> B{"Validation Check"}
+     B -- "Valid" --> C["Process Core Logic"]
+     B -- "Invalid" --> D["Rollback / Error"]
+   ```
+   Always wrap node labels containing brackets, parentheses, or spaces in double quotes.
+2. MATHEMATICAL FORMULAS (KaTeX):
+   Format standalone mathematical equations with display math ($$...$$) and inline symbols with single dollars ($x$, $O(\\log n)$).
+3. COMPARISONS & TABLES:
+   When comparing items, features, or steps, format as standard Markdown tables (| Feature | Option A | Option B |).
+4. CODE BLOCKS:
+   Use language tags (```python, ```cpp, ```java, ```sql) with clean indentation and helpful comments.
+5. PEDAGOGICAL BOUNDARIES:
+   Keep content grounded in {subject}. Do not mention competing AI products or models.
 """
         candidate_reply = ""
         try:
             reply = self.generate_content(prompt, json_output=False)
-            if reply and len(reply.strip()) > 30:
+            if reply and len(reply.strip()) > 20:
                 candidate_reply = reply.strip()
         except Exception as exc:
-            logger.warning(f"[GeminiService] generate_trainer_response AI call failed: {exc}")
+            logger.error(f"[GeminiService] generate_trainer_response AI call failed: {exc}")
 
         if not candidate_reply:
-            candidate_reply = self._build_deterministic_trainer_response(
-                message=message,
-                subject=subject,
-                topic=topic or "Core Concept",
-                unit=unit or "Core Unit",
-                strategy=study_strategy,
-                semester=sem_str,
-                student_context=ctx
-            )
+            logger.error(f"[GeminiService] No response returned by AI model for topic: {topic}")
+            raise RuntimeError("AI trainer response generation failed. Please click Retry.")
 
-        # Run strict 13-point Response-Quality Validation Layer
+        # Run strict Response-Quality Validation Layer
         validated_text, _ = TrainerResponseQualityValidator.validate_and_refine(
             response_text=candidate_reply,
             student_message=message,

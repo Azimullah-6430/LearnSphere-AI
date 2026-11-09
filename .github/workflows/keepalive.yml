@@ -1,0 +1,24 @@
+name: Render 24/7 Keep-Alive
+
+on:
+  schedule:
+    # Run every 10 minutes to prevent Render free-tier web service from sleeping (15-min idle timeout)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 25 https://learnsphere-ai-backend-dd84.onrender.com/health)
+          echo "Render Backend Health Status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "SUCCESS: Render backend is hot, active, and responsive."
+          else
+            echo "ALERT: Status code $HTTP_STATUS received. Retrying in 5 seconds..."
+            sleep 5
+            curl -s -f -m 30 https://learnsphere-ai-backend-dd84.onrender.com/health
+          fi
+

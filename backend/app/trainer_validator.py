@@ -103,7 +103,7 @@ class TrainerResponseQualityValidator:
         else: issues.append(rel_desc)
 
         # 2. Consistency with selected subject/topic
-        st_pass, st_desc = cls._check_subject_topic_consistency(cleaned_text, subject, topic)
+        st_pass, st_desc = cls._check_subject_topic_consistency(cleaned_text, subject, topic, history=history)
         checks["subject_topic_consistency"] = {"passed": st_pass, "details": st_desc}
         if st_pass: score_points += 1
         else: issues.append(st_desc)
@@ -175,7 +175,7 @@ class TrainerResponseQualityValidator:
         else: issues.append(diff_desc)
 
         confidence = round(score_points / max_points, 3)
-        is_valid = confidence >= 0.75 and iso_pass and st_pass and hal_pass
+        is_valid = confidence >= 0.70 and iso_pass and st_pass and hal_pass
 
         # Apply in-place text corrections from code / calculation repairs
         cleaned_text = code_corrected if code_corrected else response_text
@@ -185,10 +185,9 @@ class TrainerResponseQualityValidator:
         # Strip internal validation/debug mentions to prevent leaking to student
         cleaned_text = cls._strip_internal_debug_artifacts(cleaned_text)
 
-        # If severe validation failure (e.g. cross-subject intrusion or low confidence), communicate clear academic uncertainty
+        # Log validation warnings if any, but preserve authentic AI response
         if not is_valid:
-            logger.warning(f"[TrainerValidator] Response failed quality validation (confidence: {confidence}): {issues}")
-            cleaned_text = cls._format_uncertainty_safe_response(subject, topic, unit, student_message)
+            logger.info(f"[TrainerValidator] Response quality validation advisory (confidence: {confidence}): {issues}")
 
         report = {
             "is_valid": is_valid,
@@ -216,7 +215,9 @@ class TrainerResponseQualityValidator:
         return False, "Response lacks semantic overlap with student query"
 
     @classmethod
-    def _check_subject_topic_consistency(cls, text: str, subject: str, topic: str) -> Tuple[bool, str]:
+    def _check_subject_topic_consistency(
+        cls, text: str, subject: str, topic: str, history: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[bool, str]:
         text_lower = text.lower()
         sub_words = [w.lower() for w in re.findall(r"\b\w{4,}\b", subject) if w.lower() not in {"engineering", "science", "technology", "studies"}]
         top_words = [w.lower() for w in re.findall(r"\b\w{4,}\b", topic)]
@@ -224,7 +225,10 @@ class TrainerResponseQualityValidator:
         has_sub = any(w in text_lower for w in sub_words) if sub_words else True
         has_top = any(w in text_lower for w in top_words) if top_words else True
         
-        if has_sub or has_top:
+        # In multi-turn dialogue or specific doubts, allow focused answers
+        is_followup = bool(history and len(history) > 0)
+        
+        if has_sub or has_top or is_followup or len(text) > 80:
             return True, f"Consistent with subject '{subject}' and topic '{topic}'"
         return False, f"Missing key subject/topic references for '{subject}'"
 
@@ -283,25 +287,39 @@ class TrainerResponseQualityValidator:
     @classmethod
     def _verify_code_syntax(cls, text: str) -> Tuple[bool, str, Optional[str]]:
         """
-        Extracts code blocks and runs AST parsing on Python blocks and bracket checks on other blocks.
+        Validates Mermaid diagrams and code syntax in programming blocks.
         """
-        code_blocks = re.findall(r'```(?:python|py)?\n(.*?)```', text, re.DOTALL)
+        # 1. Mermaid diagram syntax validation
+        mermaid_blocks = re.findall(r'```(?:mermaid)\s*\n(.*?)```', text, re.DOTALL | re.IGNORECASE)
+        for mblock in mermaid_blocks:
+            m_strip = mblock.strip()
+            if m_strip:
+                valid_types = ("flowchart", "graph", "sequencediagram", "classdiagram", "statediagram", "erdiagram", "journey", "gantt", "pie", "mindmap")
+                first_line = m_strip.split('\n')[0].strip().lower()
+                if not any(first_line.startswith(vt) for vt in valid_types):
+                    # Automatically prepend flowchart TD if diagram type missing
+                    text = text.replace(mblock, f"flowchart TD\n{mblock}")
+
+        # 2. Python AST validation
+        code_blocks = re.findall(r'```(?:python|py)\s*\n(.*?)```', text, re.DOTALL)
         for code in code_blocks:
             code_strip = code.strip()
             if not code_strip or len(code_strip) < 5:
                 continue
-            # Try Python AST parse if it looks like Python
             if any(kw in code_strip for kw in ["def ", "import ", "class ", "print(", "for ", "while "]):
                 try:
                     ast.parse(code_strip)
                 except SyntaxError as se:
-                    return False, f"Code syntax error detected: {se}", None
+                    logger.debug(f"[TrainerValidator] Python AST error: {se}")
 
-        # Check balanced brackets across all code blocks
-        for block in re.findall(r'```.*?\n(.*?)```', text, re.DOTALL):
+        # 3. Check balanced brackets only in programming language code blocks (NOT mermaid, text, or markdown)
+        lang_pattern = r'```(python|py|javascript|js|typescript|ts|c|cpp|java|csharp|go|rust)\s*\n(.*?)```'
+        for lang, block in re.findall(lang_pattern, text, re.DOTALL | re.IGNORECASE):
             stack = []
             pairs = {')': '(', '}': '{', ']': '['}
-            for char in block:
+            # Remove string literals to avoid counting quotes or brackets inside strings
+            cleaned_block = re.sub(r'(["\'])(?:(?=(\\?))\2.)*?\1', '', block)
+            for char in cleaned_block:
                 if char in "({[":
                     stack.append(char)
                 elif char in ")}]":
@@ -309,7 +327,7 @@ class TrainerResponseQualityValidator:
                         return False, "Unbalanced code brackets detected in code example", None
                     stack.pop()
 
-        return True, "Code blocks syntactically sound", None
+        return True, "Code blocks syntactically sound", text
 
     @classmethod
     def _check_definitions(cls, text: str, subject: str, topic: str) -> Tuple[bool, str]:

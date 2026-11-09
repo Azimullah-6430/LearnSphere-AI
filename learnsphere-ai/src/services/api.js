@@ -26,6 +26,15 @@ const API_BASE_URL = isLocalhost
   ? (rawBase || '')
   : (rawBase || FALLBACK_BACKEND_URL)
 
+// Keep cloud backend awake while user has the browser tab open (every 8 minutes)
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    try {
+      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => {})
+    } catch {}
+  }, 8 * 60 * 1000)
+}
+
 async function request(endpoint, options = {}) {
   try {
     const url     = `${API_BASE_URL}${endpoint}`
@@ -37,8 +46,8 @@ async function request(endpoint, options = {}) {
       headers['Content-Type'] = 'application/json'
     }
 
-    // Default timeout: 15s for auth requests to prevent infinite loading, 30s for general requests
-    const defaultTimeout = endpoint.startsWith('/api/auth') ? 15000 : 30000
+    // Default timeout: 60s for auth requests to gracefully handle Render cloud cold starts, 45s for general requests
+    const defaultTimeout = endpoint.startsWith('/api/auth') ? 60000 : 45000
     const timeoutMs = options.timeout ?? defaultTimeout
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -104,18 +113,52 @@ export const api = {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
+  /** Non-blocking backend pre-warming ping */
+  warmup: () => {
+    try {
+      fetch(`${API_BASE_URL}/health`, { method: 'GET', credentials: 'include' }).catch(() => {})
+    } catch {}
+  },
+
   /** Validate current session. Called by AppContext on every app load. */
-  authMe: () => request('/api/auth/me'),
+  authMe: () => request('/api/auth/me', { timeout: 35000 }),
 
-  login: (credentials) => request('/api/auth/login', {
-    method: 'POST',
-    body: credentials,
-  }),
+  login: async (credentials) => {
+    let res = await request('/api/auth/login', {
+      method: 'POST',
+      body: credentials,
+      timeout: 60000,
+    })
+    // If request timed out or hit cloud cold-start (502/503/504), automatically retry once
+    if (res && !res.success && (res.isTimeout || res.isOffline || [502, 503, 504].includes(res.status))) {
+      console.info('[Auth] Server waking up; retrying login in 1.5s...')
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      res = await request('/api/auth/login', {
+        method: 'POST',
+        body: credentials,
+        timeout: 60000,
+      })
+    }
+    return res
+  },
 
-  register: (payload) => request('/api/auth/register', {
-    method: 'POST',
-    body: payload,
-  }),
+  register: async (payload) => {
+    let res = await request('/api/auth/register', {
+      method: 'POST',
+      body: payload,
+      timeout: 60000,
+    })
+    if (res && !res.success && (res.isTimeout || res.isOffline || [502, 503, 504].includes(res.status))) {
+      console.info('[Auth] Server waking up; retrying register in 1.5s...')
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      res = await request('/api/auth/register', {
+        method: 'POST',
+        body: payload,
+        timeout: 60000,
+      })
+    }
+    return res
+  },
 
   /** Invalidate server session and clear cookie. */
   logout: () => request('/api/auth/logout', { method: 'POST' }),
