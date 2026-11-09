@@ -4,9 +4,19 @@
   "private": true,
   "description": "LearnSphere AI Unified Application",
   "scripts": {
-    "dev": "cd learnsphere-ai && npm run dev",
+    "dev": "npm --prefix learnsphere-ai run dev",
     "start": "python backend/server.py",
     "server": "python backend/server.py",
-    "build": "cd learnsphere-ai && npm run build"
+    "install:frontend": "npm --prefix learnsphere-ai install",
+    "build": "npm --prefix learnsphere-ai install && npm --prefix learnsphere-ai run build"
+  },
+  "dependencies": {
+    "katex": "^0.19.1",
+    "lucide-react": "^0.383.0",
+    "mermaid": "^12.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0",
+    "recharts": "^2.12.7"
   }
 }
