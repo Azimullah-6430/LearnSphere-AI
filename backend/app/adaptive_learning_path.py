@@ -1039,8 +1039,47 @@ def generate_adaptive_worked_example(
     """
     Generate a concrete, audio-friendly worked example tailored to the student's struggle topic.
     Breaks down step-by-step reasoning and shows intermediate calculation/verification.
+    Dynamically calls Gemini AI when available.
     """
+    # ── 1. Dynamic Worked Example Generation via Gemini AI ─────────────────────
+    try:
+        from app.gemini_service import GeminiService
+        gs = GeminiService()
+        prompt = f"""You are LearnSphere AI's Senior Tutor for Blind Learners.
+Generate a concrete, audio-friendly worked example for:
+- Subject: {subject}
+- Topic: {topic}
+- Context: {step_title or 'Mastery Checkpoint Example'}
+
+Requirements:
+1. Provide a realistic, university/school problem statement with concrete numerical values, circuits, algorithms, or equations.
+2. 4-5 numbered sequential worked steps ('Step 1: ...', 'Step 2: ...', etc.) explaining each operation and intermediate calculation.
+3. Conversational spoken narrative designed to be read aloud via text-to-speech.
+Return a valid JSON object:
+{{
+  "topic": "{topic}",
+  "subject": "{subject}",
+  "problem_statement": "...",
+  "worked_steps": ["Step 1: ...", "Step 2: ...", "Step 3: ...", "Step 4: ..."],
+  "spoken_narrative": "..."
+}}"""
+        raw = gs.generate_content(prompt, json_output=True, temperature=0.1, timeout=15)
+        if raw:
+            data = json.loads(raw)
+            if data.get("worked_steps") and data.get("problem_statement"):
+                return {
+                    "topic": topic,
+                    "subject": subject,
+                    "problem_statement": data.get("problem_statement"),
+                    "worked_steps": data.get("worked_steps"),
+                    "spoken_narrative": data.get("spoken_narrative") or " ".join(data.get("worked_steps"))
+                }
+    except Exception as exc:
+        logger.debug("[AdaptivePath] Dynamic worked example AI notice: %s", exc)
+
+    # ── 2. Deterministic Syllabus Calibration (Discipline Grounded) ────────────
     t_lower = topic.lower()
+    s_lower = subject.lower()
 
     if "thevenin" in t_lower or "circuit" in t_lower:
         problem = "A 24 Volt DC source is connected across a series combination of a 40 Ohm and a 60 Ohm resistor. Find the Thevenin voltage and equivalent resistance across the 60 Ohm resistor."
@@ -1072,19 +1111,50 @@ def generate_adaptive_worked_example(
             "Then multiply by the derivative of the inside, which is 6x. "
             "Multiplying 4 by 6x gives the final answer: 24x times (3x squared plus 5) cubed."
         )
-    else:
-        problem = f"Standard benchmark problem applying the principles of {topic} in {subject}."
+    elif "arrhenius" in t_lower or "reaction" in t_lower or "kinetics" in t_lower or "chemistry" in s_lower:
+        problem = "For a reaction with activation energy Ea = 52.0 kJ/mol, calculate the factor by which the rate constant k increases when temperature rises from 300 K to 310 K. (R = 8.314 J/(mol K))."
         steps = [
-            f"Step 1: State the governing definition and boundary constraints of {topic}.",
-            "Step 2: Substitute explicit numerical given quantities with consistent SI units.",
-            "Step 3: Solve algebraic intermediate terms step-by-step to prevent calculation slips.",
-            "Step 4: Verify the result against standard physical laws."
+            "Step 1: Write the two-temperature Arrhenius relation: ln(k2 / k1) = (Ea / R) * (1/T1 - 1/T2).",
+            "Step 2: Convert units: Ea = 52,000 J/mol. T1 = 300 K, T2 = 310 K.",
+            "Step 3: Evaluate temperature difference: (1/300 - 1/310) = (10 / 93000) = 0.0001075 K^(-1).",
+            "Step 4: Multiply by Ea/R: ln(k2 / k1) = (52000 / 8.314) * 0.0001075 = 6254.5 * 0.0001075 = 0.6725.",
+            "Step 5: Take the exponential: k2 / k1 = e^(0.6725) = 1.96. The reaction rate nearly doubles."
         ]
         spoken = (
-            f"Here is a guided walkthrough for {topic}. First, state the governing boundary conditions. "
-            f"Second, substitute the known quantities with SI units. "
-            f"Third, calculate intermediate steps carefully without skipping arithmetic. "
-            f"Finally, check that the dimensions and units match your expected outcome."
+            "Problem: Calculate the rate increase for a reaction with Ea of 52 kilojoules per mole when heated from 300 to 310 Kelvin. "
+            "Using the two-temperature Arrhenius equation, the natural log of k2 over k1 equals Ea divided by R times 1 over T1 minus 1 over T2. "
+            "Evaluating the numbers gives natural log of k2 over k1 equals 0.6725. "
+            "Taking the exponential yields 1.96, meaning the reaction rate increases by a factor of 1.96, approximately doubling."
+        )
+    elif "binary" in t_lower or "tree" in t_lower or "data structure" in s_lower or "algorithm" in s_lower:
+        problem = "Given an empty Binary Search Tree, insert keys [45, 20, 60, 15, 30] in sequence. Trace node placement and search path for key 30."
+        steps = [
+            "Step 1: Insert 45 as the root node.",
+            "Step 2: Insert 20. Since 20 < 45, it becomes the left child of 45.",
+            "Step 3: Insert 60. Since 60 > 45, it becomes the right child of 45.",
+            "Step 4: Insert 15. Compare with root 45 (go left), compare with 20 (15 < 20), becomes left child of 20.",
+            "Step 5: Insert 30. Compare with root 45 (go left), compare with 20 (30 > 20), becomes right child of 20.",
+            "Step 6: Search path for 30: Start at root 45 -> move left to 20 -> move right to 30 (Key found in 2 comparisons)."
+        ]
+        spoken = (
+            "Problem: Trace insertion of keys 45, 20, 60, 15, and 30 into a binary search tree. "
+            "45 becomes root. 20 goes left. 60 goes right. 15 goes left of 20. 30 goes right of 20. "
+            "To search for 30, compare with 45 and go left to 20, then go right to find 30 in 2 steps."
+        )
+    else:
+        problem = f"Benchmark analytical problem for {topic} in {subject}."
+        steps = [
+            f"Step 1: Identify given parameters and governing boundary constraints for {topic}.",
+            "Step 2: Substitute verified numerical values with SI units into the fundamental equation.",
+            "Step 3: Carry out intermediate arithmetic without skipping algebraic operations.",
+            "Step 4: Verify dimensions and check that the solution satisfies the physical conservation laws."
+        ]
+        spoken = (
+            f"Problem: Benchmark problem for {topic}. "
+            f"First, state the governing boundary conditions. "
+            f"Second, substitute the known quantities with consistent units. "
+            f"Third, calculate intermediate steps carefully. "
+            f"Finally, verify that the result satisfies physical conservation laws."
         )
 
     return {

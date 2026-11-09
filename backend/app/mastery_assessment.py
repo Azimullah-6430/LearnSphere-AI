@@ -49,6 +49,16 @@ from app.learning_gap_detector import (
 logger = logging.getLogger(__name__)
 
 
+def _get_gemini_service():
+    """Lazily load GeminiService for dynamic, AI-grounded assessment intelligence."""
+    try:
+        from app.gemini_service import GeminiService
+        return GeminiService()
+    except Exception as exc:
+        logger.debug("[MasteryAssessment] GeminiService initialization notice: %s", exc)
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MASTERY STATES & EVALUATION RESULTS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,7 +218,29 @@ def generate_diagram_narration(subject: str, topic: str, context: str = "") -> s
     """
     Generates rich, spatial, and topological audio descriptions for diagrams,
     circuits, and graphs so blind students can build an accurate mental representation.
+    Dynamically calls Gemini AI when available.
     """
+    gs = _get_gemini_service()
+    if gs:
+        try:
+            prompt = (
+                f"You are LearnSphere AI's Concept-to-Sense visual intelligence engine for blind learners.\n"
+                f"Generate a rich, spatial, topological spoken audio description for an academic diagram, schematic, or graph representing '{topic}' in the subject '{subject}'.\n"
+                f"Context: {context or 'Textbook and examination visual specification'}\n\n"
+                f"Requirements:\n"
+                f"1. Spatial layout: mental map (top rail/quadrant, bottom, left branch, right, center, nodes).\n"
+                f"2. Element inventory: specify component labels, polarity, ratings, units, or axis variables.\n"
+                f"3. Directional flow: trace clockwise current, directed signal arrows, or curve slope behavior.\n"
+                f"4. Tactile analogies: intuitive physical tactile metaphors to make spatial orientation effortless.\n"
+                f"5. Natural spoken style for screen-reader / TTS narration without ASCII tables or raw delimiters.\n"
+                f"Output only the spoken description paragraph."
+            )
+            raw = gs.generate_content(prompt, json_output=False, temperature=0.1, timeout=12)
+            if raw and len(raw.strip()) > 40:
+                return raw.strip()
+        except Exception as exc:
+            logger.debug("[MasteryAssessment] Dynamic diagram narration error: %s", exc)
+
     s_lower = subject.lower()
     t_lower = topic.lower()
 
@@ -235,11 +267,24 @@ def generate_diagram_narration(subject: str, topic: str, context: str = "") -> s
             "The magnitude response curve is flat at 0 dB until the cutoff frequency of 50 radians per second, "
             "after which it rolls off with a negative slope of minus 20 decibels per decade."
         )
+    elif "binary" in t_lower or "tree" in t_lower or "data structure" in s_lower:
+        return (
+            f"Data Structure Topological Description: A hierarchical binary search tree representing {topic}. "
+            "At the top apex is the root node. Branching downward to the left is the left subtree containing keys strictly less than the root. "
+            "Branching downward to the right is the right subtree containing keys strictly greater than the root, maintaining recursive search invariant."
+        )
+    elif "reaction" in t_lower or "kinetics" in t_lower or "arrhenius" in t_lower or "chemistry" in s_lower:
+        return (
+            f"Reaction Profile Description: A continuous potential energy curve for {topic}. "
+            "The horizontal axis marks reaction coordinate progress from reactants to products. "
+            "The curve begins at the reactant enthalpy plateau, rises through an activation energy barrier Ea to the transition state peak, "
+            "and descends to the final product energy level."
+        )
     else:
         return (
-            f"Diagram Description: An academic diagram illustrating the governing configuration for {topic} in {subject}. "
-            "Key elements are structured from foundational input parameters on the left to resultant system outputs on the right, "
-            "with labelled intermediate transformation junctions."
+            f"Spatial System Description: An academic system diagram for {topic} in {subject}. "
+            f"The primary input conditions enter on the left rail, process sequentially through central transformation stages, "
+            f"and deliver verified output parameters at the right terminal."
         )
 
 
@@ -357,7 +402,90 @@ def generate_mastery_questions(
 
     questions: List[Dict[str, Any]] = []
 
-    # ── Electric Circuits / Network Theorems ──────────────────────────────────
+    # ── Try Dynamic Generation via Gemini AI ───────────────────────────────────
+    gs = _get_gemini_service()
+    if gs:
+        try:
+            gaps_summary = ""
+            if gaps:
+                prior = [g for g in gaps if g.get("topic", "").lower() == t_lower]
+                if prior:
+                    gaps_summary = f"Student previously exhibited the following diagnosed learning gap on this topic: {prior[0].get('mistake_nature')}. Frame questions to test whether this gap has been genuinely resolved."
+
+            syllabus_excerpt = ""
+            if syllabus_doc:
+                chapters = syllabus_doc.get("chapters") or syllabus_doc.get("units") or {}
+                s_chapters = chapters.get(subject) or []
+                if isinstance(s_chapters, list):
+                    for ch in s_chapters:
+                        if isinstance(ch, dict) and t_lower in [str(c).lower() for c in ch.get("concepts", [])]:
+                            syllabus_excerpt = f"Unit: {ch.get('name')}, Concepts: {', '.join(str(c) for c in ch.get('concepts', []))}"
+                            break
+
+            prompt = f"""You are LearnSphere AI's Senior Assessment Architect for Blind and Low-Vision Students.
+Generate 3 to 4 syllabus-grounded mastery assessment questions for:
+- Subject: {subject}
+- Unit: {unit}
+- Topic: {topic}
+- Subtopic: {subtopic or topic}
+- Syllabus Context: {syllabus_excerpt or subject}
+- Cognitive Tier Mode: {tier}
+{gaps_summary}
+
+Requirements:
+1. Cover progressive cognitive tiers:
+   - Tier 1 (basic_understanding): Definitions, fundamental laws, or foundational mechanism.
+   - Tier 2 (conceptual_reasoning): Step-by-step logic, boundary conditions, why the law holds.
+   - Tier 3 (problem_solving / application): Concrete calculation, algorithm tracing, or formula application with explicit numbers/equations.
+   - Tier 4 (advanced): Higher-order analytical synthesis or real-world application.
+2. For each question provide:
+   - "tier": one of ["basic_understanding", "conceptual_reasoning", "application", "problem_solving", "advanced"]
+   - "tier_label": Human readable label
+   - "question_text": Clear, rigorous academic question
+   - "spoken_prompt": Audio-friendly version written in natural spoken phonetics (no raw LaTeX symbols like \\frac, replace with 'divided by', powers with 'to the power', etc.)
+   - "math_narration": Spoken narration of mathematical formulas
+   - "diagram_description": Spatial tactile description if a diagram is relevant, otherwise ""
+   - "expected_criteria": Detailed grading rubric stating exact required terms, equations, and values
+   - "sample_answer": Complete model solution
+   - "points": 5.0
+   - "has_diagram": boolean
+Return a valid JSON array of question objects only."""
+
+            raw = gs.generate_content(prompt, json_output=True, temperature=0.1, timeout=20)
+            if raw:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list) and len(parsed) >= 2:
+                    dynamic_questions = []
+                    for item in parsed:
+                        q_text = str(item.get("question_text", "")).strip()
+                        if not q_text:
+                            continue
+                        q_tier = item.get("tier") or QUESTION_TIERS["BASIC"]
+                        if q_tier not in QUESTION_TIERS.values():
+                            q_tier = QUESTION_TIERS["BASIC"]
+                        dynamic_questions.append({
+                            "question_id": f"mq_{uuid.uuid4().hex[:8]}",
+                            "tier": q_tier,
+                            "tier_label": item.get("tier_label") or "Conceptual Mastery",
+                            "subject": subject,
+                            "unit": unit,
+                            "topic": topic,
+                            "subtopic": subtopic or topic,
+                            "question_text": q_text,
+                            "spoken_prompt": item.get("spoken_prompt") or narrate_math_expression(q_text),
+                            "math_narration": item.get("math_narration") or narrate_math_expression(item.get("sample_answer", "")),
+                            "diagram_description": item.get("diagram_description") or generate_diagram_narration(subject, topic),
+                            "expected_criteria": item.get("expected_criteria") or "Demonstrates clear conceptual understanding and correct application.",
+                            "sample_answer": item.get("sample_answer") or "",
+                            "points": float(item.get("points") or 5.0),
+                            "has_diagram": bool(item.get("has_diagram", False))
+                        })
+                    if len(dynamic_questions) >= 2:
+                        return dynamic_questions
+        except Exception as exc:
+            logger.debug("[MasteryAssessment] Dynamic question generation AI notice: %s", exc)
+
+    # ── Deterministic Syllabus Calibration (Discipline Grounded) ───────────────
     if "thevenin" in t_lower or ("network" in t_lower and "circuit" in s_lower):
         # Q1: Basic Understanding
         q1_text = (
@@ -500,10 +628,12 @@ def generate_mastery_questions(
             "has_diagram": False
         })
 
-    # ── General Fallback for Any Syllabus Topic ──────────────────────────────
-    else:
+    # ── Chemistry & Chemical Kinetics ─────────────────────────────────────────
+    elif "arrhenius" in t_lower or "reaction rate" in t_lower or "kinetics" in t_lower or "chemistry" in s_lower:
+        # Q1: Basic Understanding
         q1_text = (
-            f"Explain the foundational definition, governing equations, and scientific significance of {topic} in {unit}."
+            "State the Arrhenius equation relating rate constant k, frequency factor A, "
+            "activation energy Ea, and absolute temperature T. What does Ea represent?"
         )
         questions.append({
             "question_id": f"mq_{uuid.uuid4().hex[:8]}",
@@ -515,21 +645,117 @@ def generate_mastery_questions(
             "subtopic": subtopic or topic,
             "question_text": q1_text,
             "spoken_prompt": narrate_math_expression(q1_text),
-            "math_narration": f"Foundational definition of {topic}.",
+            "math_narration": "k equals A times e to the power minus Ea divided by R T.",
             "diagram_description": generate_diagram_narration(subject, topic),
-            "expected_criteria": f"Comprehensive statement of the definition, underlying principles, and physical interpretation of {topic}.",
-            "sample_answer": f"Standard academic definition and governing properties of {topic}.",
+            "expected_criteria": "States k = A * e^(-Ea / RT), identifying Ea as the activation energy required for reactant molecules to overcome the energy barrier and form products.",
+            "sample_answer": "The Arrhenius equation is k = A * e^(-Ea / (R * T)), where k is the rate constant, A is the frequency factor, Ea is activation energy, R is the universal gas constant, and T is absolute temperature.",
+            "points": 5.0,
+            "has_diagram": True
+        })
+
+        # Q2: Conceptual Application
+        q2_text = (
+            "Explain what occurs to the reaction rate constant k when temperature T increases. "
+            "Why does a catalyst lower the activation energy without shifting reaction equilibrium?"
+        )
+        questions.append({
+            "question_id": f"mq_{uuid.uuid4().hex[:8]}",
+            "tier": QUESTION_TIERS["APPLICATION"],
+            "tier_label": "Kinetic Principles & Catalysis",
+            "subject": subject,
+            "unit": unit,
+            "topic": topic,
+            "subtopic": subtopic or topic,
+            "question_text": q2_text,
+            "spoken_prompt": narrate_math_expression(q2_text),
+            "math_narration": "As temperature increases, exponential fraction increases, raising k. Catalyst provides alternative transition path.",
+            "diagram_description": generate_diagram_narration(subject, topic),
+            "expected_criteria": "Explains that increasing T increases the fraction of collisions with energy >= Ea, increasing k exponentially. Catalysts lower Ea equally in forward and reverse directions, keeping equilibrium constant K unchanged.",
+            "sample_answer": "Increasing temperature increases the kinetic energy of reactant molecules, exponentially increasing k. A catalyst lowers Ea for both forward and reverse paths equally, accelerating rate without changing equilibrium.",
+            "points": 5.0,
+            "has_diagram": False
+        })
+
+    # ── Computer Science & Data Structures ────────────────────────────────────
+    elif "binary search tree" in t_lower or "bst" in t_lower or "tree" in t_lower or "data structure" in s_lower or "algorithm" in s_lower:
+        q1_text = (
+            "Define a Binary Search Tree (BST) invariant property. What is the average time complexity "
+            "for search, insertion, and deletion in a balanced BST versus a degenerate BST?"
+        )
+        questions.append({
+            "question_id": f"mq_{uuid.uuid4().hex[:8]}",
+            "tier": QUESTION_TIERS["BASIC"],
+            "tier_label": "BST Invariants & Complexity",
+            "subject": subject,
+            "unit": unit,
+            "topic": topic,
+            "subtopic": subtopic or topic,
+            "question_text": q1_text,
+            "spoken_prompt": narrate_math_expression(q1_text),
+            "math_narration": "Left child key less than root, right child key greater than root. Average time O of log n, worst case O of n.",
+            "diagram_description": generate_diagram_narration(subject, topic),
+            "expected_criteria": "BST property: for every node, left subtree keys < node key < right subtree keys. Average time complexity is O(log n); worst case for skewed tree is O(n).",
+            "sample_answer": "In a BST, all keys in the left subtree are smaller than the node, and all keys in the right subtree are greater. Average search, insert, and delete are O(log n); degenerate trees degrade to O(n).",
+            "points": 5.0,
+            "has_diagram": True
+        })
+
+    # ── Electromagnetics & Physics ───────────────────────────────────────────
+    elif "coulomb" in t_lower or "gauss" in t_lower or "electrostatic" in t_lower or "electromagnetic" in s_lower:
+        q1_text = (
+            "State Gauss's Law in integral form. How does the total electric flux through a closed surface "
+            "relate to the enclosed charge, and what symmetry is required to compute electric field E?"
+        )
+        questions.append({
+            "question_id": f"mq_{uuid.uuid4().hex[:8]}",
+            "tier": QUESTION_TIERS["BASIC"],
+            "tier_label": "Integral Gauss's Law",
+            "subject": subject,
+            "unit": unit,
+            "topic": topic,
+            "subtopic": subtopic or topic,
+            "question_text": q1_text,
+            "spoken_prompt": narrate_math_expression(q1_text),
+            "math_narration": "Closed surface integral of E dot dA equals Q enclosed divided by epsilon zero.",
+            "diagram_description": generate_diagram_narration(subject, topic),
+            "expected_criteria": "States closed integral E . dA = Q_enclosed / epsilon_0. Identifies that spherical, cylindrical, or planar symmetry allows E to be factored out of the integral.",
+            "sample_answer": "Gauss's law states that the net outward electric flux through any closed Gaussian surface equals the net charge enclosed divided by permittivity epsilon_0. Spherical, cylindrical, or planar symmetry is needed to evaluate E algebraically.",
+            "points": 5.0,
+            "has_diagram": False
+        })
+
+    # ── General Dynamic Academic Questions ───────────────────────────────────
+    else:
+        q1_text = (
+            f"Define the foundational principles, governing physical or algorithmic laws, "
+            f"and operational mechanisms of {topic} within {unit}."
+        )
+        questions.append({
+            "question_id": f"mq_{uuid.uuid4().hex[:8]}",
+            "tier": QUESTION_TIERS["BASIC"],
+            "tier_label": "Basic Understanding",
+            "subject": subject,
+            "unit": unit,
+            "topic": topic,
+            "subtopic": subtopic or topic,
+            "question_text": q1_text,
+            "spoken_prompt": narrate_math_expression(q1_text),
+            "math_narration": f"Foundational definition and mathematical formulation of {topic}.",
+            "diagram_description": generate_diagram_narration(subject, topic),
+            "expected_criteria": f"Comprehensive definition of {topic}, identifying governing equations, operational constraints, and fundamental principles in {subject}.",
+            "sample_answer": f"In {subject}, {topic} establishes the governing relationship between system inputs, state transitions, and verified analytical outputs.",
             "points": 5.0,
             "has_diagram": False
         })
 
         q2_text = (
-            f"Describe a real-world scenario where {topic} is applied. What are the key boundary constraints and why does the principle hold?"
+            f"Explain a concrete real-world problem or practical system application where {topic} "
+            f"is implemented. Detail the boundary constraints and how failure to observe them causes errors."
         )
         questions.append({
             "question_id": f"mq_{uuid.uuid4().hex[:8]}",
             "tier": QUESTION_TIERS["APPLICATION"],
-            "tier_label": "Conceptual Application",
+            "tier_label": "System Application & Constraints",
             "subject": subject,
             "unit": unit,
             "topic": topic,
@@ -538,8 +764,8 @@ def generate_mastery_questions(
             "spoken_prompt": narrate_math_expression(q2_text),
             "math_narration": f"Real-world application and boundary constraints for {topic}.",
             "diagram_description": generate_diagram_narration(subject, topic),
-            "expected_criteria": "Concrete engineering or scientific application, noting operating constraints and analytical significance.",
-            "sample_answer": f"Standard practical use cases and governing laws of {topic}.",
+            "expected_criteria": f"Detailed practical implementation of {topic}, specifying operating boundaries, environmental conditions, and systemic significance.",
+            "sample_answer": f"Practical application of {topic} in production environments, highlighting operating boundaries and stability criteria.",
             "points": 5.0,
             "has_diagram": False
         })
@@ -600,6 +826,8 @@ def evaluate_mastery_submission(
     evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
     strengths: List[str] = []
     mistakes: List[str] = []
+    ai_act: Optional[str] = None
+    ai_chk: Optional[str] = None
 
     # Check for empty / unattempted answer
     if len(clean_student_ans) < 3:
@@ -607,87 +835,202 @@ def evaluate_mastery_submission(
         score = 0.0
         mistakes.append("No answer was provided for evaluation.")
     else:
-        # Subject-specific rubric rules
-        t_lower = topic.lower()
+        # ── Dynamic Evaluation via Gemini AI ──────────────────────────────────
+        evaluated_by_ai = False
+        gs = _get_gemini_service()
+        if gs:
+            try:
+                eval_prompt = f"""You are LearnSphere AI's Senior Academic Evaluator for Blind and Low-Vision Students.
+Evaluate the student's submission against the question and official rubric criteria with high academic precision.
 
-        # Circuit Theory / Thevenin / Norton
-        if "thevenin" in t_lower or "norton" in t_lower:
-            has_voltage_divider = any(w in ans_lower for w in ["voltage divider", "voltage division", "24 * (60", "24*(60", "24 * 0.6", "14.4"])
-            has_correct_vth = "14.4" in ans_lower
-            has_parallel_rth = any(w in ans_lower for w in ["parallel", "40 * 60", "40*60", "2400 / 100", "2400/100", "24 ohm", "24\\omega", "= 24"])
-            has_correct_rth = "24" in ans_lower and ("ohm" in ans_lower or "rth" in ans_lower or "r_th" in ans_lower or "resistance" in ans_lower)
-            has_deactivation = any(w in ans_lower for w in ["short", "short circuit", "zero volt", "deactivate"])
+ACADEMIC CONTEXT:
+- Student: {student_name}
+- Subject: {subject}
+- Unit: {unit}
+- Topic: {topic}
+- Question: "{question_text}"
+- Expected Criteria / Rubric: "{expected_criteria}"
+- Max Points: {max_score}
+- Student's Submission: "{clean_student_ans}" (Submission Mode: {submission_mode})
 
-            # Check for calculation error: formula is right but numbers are arithmetic slip
-            has_calc_error = any(w in ans_lower for w in ["120", "divider slip", "divided by 120", "24 * 60 / 120", "12v", "10 ohm"])
+EVALUATION DIRECTIVES:
+1. "score": float between 0.0 and {max_score}. Award partial credit fairly based on demonstrated understanding.
+2. "evaluation_result": Exactly one of:
+   - "Correct understanding"
+   - "Partially correct understanding"
+   - "Conceptual misunderstanding"
+   - "Calculation error"
+   - "Missing explanation"
+   - "Incorrect reasoning"
+3. "strengths": Array of 1-3 specific strings highlighting what the student got right.
+4. "mistakes": Array of 1-3 specific strings detailing where the student slipped or was confused (empty if completely correct).
+5. "explanation_of_mistakes": Conversational explanation in simple, clear language tailored for audio read-aloud via screen reader.
+6. "recommended_activity": Concrete learning action to solidify this concept.
+7. "targeted_checkpoint": A short follow-up practice problem.
 
-            if has_correct_vth and (has_correct_rth or has_parallel_rth):
-                score = 5.0
-                evaluation_result = EVALUATION_RESULTS["CORRECT"]
-                strengths.append("Correctly computed Thevenin voltage V_th = 14.4V via voltage division.")
-                strengths.append("Correctly de-energized the independent source and evaluated parallel equivalent resistance R_th = 24 Ohms.")
-            elif has_voltage_divider and has_calc_error:
-                score = 3.0
-                evaluation_result = EVALUATION_RESULTS["CALCULATION_ERROR"]
-                strengths.append("Your circuit setup and formula selection for voltage division were completely correct.")
-                mistakes.append("An arithmetic calculation slip occurred in denominator addition (40 + 60 = 100, not 120).")
-            elif "voltage" in ans_lower and ("series" in ans_lower or "ohm" in ans_lower):
-                score = 3.5
-                evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
-                strengths.append("Demonstrated good conceptual understanding of two-terminal equivalent networks.")
-                mistakes.append("Be sure to explicitly verify numerical intermediate steps.")
-            elif "short circuit" in ans_lower and "open circuit" in ans_lower and not ("14.4" in ans_lower):
-                score = 4.0
-                evaluation_result = EVALUATION_RESULTS["CORRECT"]
-                strengths.append("Correctly identified that independent voltage sources are replaced with short circuits.")
+Return a valid JSON object matching the above keys only."""
+                raw = gs.generate_content(eval_prompt, json_output=True, temperature=0.0, timeout=15)
+                if raw:
+                    ai_eval = json.loads(raw)
+                    if "score" in ai_eval and "evaluation_result" in ai_eval:
+                        score = min(max_score, max(0.0, float(ai_eval.get("score") or 0.0)))
+                        raw_res = str(ai_eval.get("evaluation_result", "")).strip()
+                        matched_res = None
+                        for v in EVALUATION_RESULTS.values():
+                            if v.lower() == raw_res.lower() or raw_res.lower() in v.lower():
+                                matched_res = v
+                                break
+                        evaluation_result = matched_res or (EVALUATION_RESULTS["CORRECT"] if score >= (0.8 * max_score) else EVALUATION_RESULTS["PARTIALLY_CORRECT"])
+                        strengths = ai_eval.get("strengths") or []
+                        mistakes = ai_eval.get("mistakes") or []
+                        ai_act = ai_eval.get("recommended_activity")
+                        ai_chk = ai_eval.get("targeted_checkpoint")
+                        evaluated_by_ai = True
+            except Exception as exc:
+                logger.debug("[MasteryAssessment] Dynamic AI evaluation notice: %s", exc)
+
+        # ── Deterministic Semantic Evaluator (Fallback & Verification) ─────────
+        if not evaluated_by_ai:
+            t_lower = topic.lower()
+
+            # Circuit Theory / Thevenin / Norton
+            if "thevenin" in t_lower or "norton" in t_lower:
+                has_voltage_divider = any(w in ans_lower for w in ["voltage divider", "voltage division", "24 * (60", "24*(60", "24 * 0.6", "14.4"])
+                has_correct_vth = "14.4" in ans_lower
+                has_parallel_rth = any(w in ans_lower for w in ["parallel", "40 * 60", "40*60", "2400 / 100", "2400/100", "24 ohm", "24\\omega", "= 24"])
+                has_correct_rth = "24" in ans_lower and ("ohm" in ans_lower or "rth" in ans_lower or "r_th" in ans_lower or "resistance" in ans_lower)
+                has_deactivation = any(w in ans_lower for w in ["short", "short circuit", "zero volt", "deactivate"])
+
+                # Check for calculation error: formula is right but numbers are arithmetic slip
+                has_calc_error = any(w in ans_lower for w in ["120", "divider slip", "divided by 120", "24 * 60 / 120", "12v", "10 ohm"])
+
+                if has_correct_vth and (has_correct_rth or has_parallel_rth):
+                    score = 5.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append("Correctly computed Thevenin voltage V_th = 14.4V via voltage division.")
+                    strengths.append("Correctly de-energized the independent source and evaluated parallel equivalent resistance R_th = 24 Ohms.")
+                elif has_voltage_divider and has_calc_error:
+                    score = 3.0
+                    evaluation_result = EVALUATION_RESULTS["CALCULATION_ERROR"]
+                    strengths.append("Your circuit setup and formula selection for voltage division were completely correct.")
+                    mistakes.append("An arithmetic calculation slip occurred in denominator addition (40 + 60 = 100, not 120).")
+                elif "voltage" in ans_lower and ("series" in ans_lower or "ohm" in ans_lower):
+                    score = 3.5
+                    evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
+                    strengths.append("Demonstrated good conceptual understanding of two-terminal equivalent networks.")
+                    mistakes.append("Be sure to explicitly verify numerical intermediate steps.")
+                elif "short circuit" in ans_lower and "open circuit" in ans_lower and not ("14.4" in ans_lower):
+                    score = 4.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append("Correctly identified that independent voltage sources are replaced with short circuits.")
+                else:
+                    score = 1.5
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append("Fundamental confusion between open-circuit voltage and short-circuit current across the load terminals.")
+
+            # Calculus / Chain Rule
+            elif "chain rule" in t_lower or "differentiation" in t_lower:
+                has_chain_formula = any(w in ans_lower for w in ["dy/dx", "dy/du", "du/dx", "inner", "outer", "f'(g(x))"])
+                has_derivative_24x = "24x" in ans_lower or "24 x" in ans_lower
+                has_power_3 = "(3x^2 + 5)^3" in ans_lower or "cubed" in ans_lower or "^3" in ans_lower
+                has_algebra_error = "12x" in ans_lower or "18x" in ans_lower
+
+                if (has_derivative_24x and has_power_3) or ("200 * pi" in ans_lower or "200\\pi" in ans_lower or "628" in ans_lower):
+                    score = 5.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append("Accurately applied the Chain Rule to differentiate both outer and inner functions.")
+                    strengths.append("Combined algebraic coefficients into the correct simplified derivative.")
+                elif has_chain_formula and has_power_3 and not has_derivative_24x:
+                    score = 3.0
+                    evaluation_result = EVALUATION_RESULTS["CALCULATION_ERROR"]
+                    strengths.append("Correctly identified inner function u and outer power derivative 4u^3.")
+                    mistakes.append("Coefficient multiplication slip when multiplying 4 by the inner derivative 6x.")
+                elif has_chain_formula:
+                    score = 4.0
+                    evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
+                    strengths.append("Correctly stated governing chain rule formulation dy/dx = (dy/du) * (du/dx).")
+                    mistakes.append("Include explicit step-by-step substitution to verify your final expression.")
+                else:
+                    score = 1.0
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append("Failed to recognize the composite function structure or omitted the inner derivative.")
+
+            # Chemistry / Reaction Kinetics / Arrhenius
+            elif "arrhenius" in t_lower or "reaction rate" in t_lower or "kinetics" in t_lower or "chemistry" in s_lower:
+                has_activation_energy = any(w in ans_lower for w in ["activation energy", "energy barrier", "minimum energy"])
+                has_electronegativity_slip = "electronegativity" in ans_lower
+                has_temp_relation = any(w in ans_lower for w in ["temperature", "rate constant", "collision", "exponential"])
+
+                if has_activation_energy:
+                    score = 5.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append("Correctly identified Ea as the activation energy in the Arrhenius equation.")
+                elif has_electronegativity_slip:
+                    score = 1.0
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append("Ea represents activation energy, not electronegativity.")
+                elif has_temp_relation:
+                    score = 3.5
+                    evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
+                    strengths.append("Understands the kinetic relationship between temperature and reaction rate.")
+                    mistakes.append("Explicitly state the formal role of Ea as the kinetic activation threshold.")
+                else:
+                    score = 1.5
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append("Failed to identify the governing parameters of the Arrhenius equation.")
+
+            # Computer Science / Data Structures
+            elif "binary search tree" in t_lower or "bst" in t_lower or "data structure" in s_lower:
+                has_bst_property = any(w in ans_lower for w in ["smaller", "greater", "left subtree", "right subtree", "<", ">"])
+                has_log_n = any(w in ans_lower for w in ["o(log n)", "log n", "logn", "logarithmic"])
+
+                if has_bst_property and has_log_n:
+                    score = 5.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append("Accurately stated BST ordering invariant and O(log n) average time complexity.")
+                elif has_bst_property:
+                    score = 3.5
+                    evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
+                    strengths.append("Correctly defined BST invariant.")
+                    mistakes.append("Specify time complexity metrics for average vs. worst-case degenerate trees.")
+                else:
+                    score = 1.5
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append("Failed to identify the left-smaller / right-greater BST ordering property.")
+
+            # General Concept Semantic Evaluator (Strict Keyword & Concept Overlap)
             else:
-                score = 1.5
-                evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
-                mistakes.append("Fundamental confusion between open-circuit voltage and short-circuit current across the load terminals.")
+                # Extract essential concept tokens from criteria
+                crit_words = set(re.findall(r'[a-zA-Z]{3,}', exp_lower))
+                stopwords = {"the", "and", "that", "this", "for", "with", "from", "are", "was", "any", "which", "states", "defined"}
+                crit_core = crit_words - stopwords
+                ans_words = set(re.findall(r'[a-zA-Z]{3,}', ans_lower))
 
-        # Calculus / Chain Rule
-        elif "chain rule" in t_lower or "differentiation" in t_lower:
-            has_chain_formula = any(w in ans_lower for w in ["dy/dx", "dy/du", "du/dx", "inner", "outer", "f'(g(x))"])
-            has_derivative_24x = "24x" in ans_lower or "24 x" in ans_lower
-            has_power_3 = "(3x^2 + 5)^3" in ans_lower or "cubed" in ans_lower or "^3" in ans_lower
-            has_algebra_error = "12x" in ans_lower or "18x" in ans_lower
+                overlap = len(crit_core.intersection(ans_words))
+                ratio = overlap / len(crit_core) if crit_core else 0.0
 
-            if (has_derivative_24x and has_power_3) or ("200 * pi" in ans_lower or "200\\pi" in ans_lower or "628" in ans_lower):
-                score = 5.0
-                evaluation_result = EVALUATION_RESULTS["CORRECT"]
-                strengths.append("Accurately applied the Chain Rule to differentiate both outer and inner functions.")
-                strengths.append("Combined algebraic coefficients into the correct simplified derivative.")
-            elif has_chain_formula and has_power_3 and not has_derivative_24x:
-                score = 3.0
-                evaluation_result = EVALUATION_RESULTS["CALCULATION_ERROR"]
-                strengths.append("Correctly identified inner function u and outer power derivative 4u^3.")
-                mistakes.append("Coefficient multiplication slip when multiplying 4 by the inner derivative 6x.")
-            elif has_chain_formula:
-                score = 4.0
-                evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
-                strengths.append("Correctly stated governing chain rule formulation dy/dx = (dy/du) * (du/dx).")
-                mistakes.append("Include explicit step-by-step substitution to verify your final expression.")
-            else:
-                score = 1.0
-                evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
-                mistakes.append("Failed to recognize the composite function structure or omitted the inner derivative.")
+                # Check for arithmetic error signals in numeric answers
+                arithmetic_signals = ["calculation error", "arithmetic error", "sign error", "slip"]
+                has_calc_signal = any(sig in ans_lower for sig in arithmetic_signals)
 
-        # General Concept Fallback
-        else:
-            word_count = len(clean_student_ans.split())
-            if word_count >= 20:
-                score = 4.5
-                evaluation_result = EVALUATION_RESULTS["CORRECT"]
-                strengths.append(f"Demonstrated sound qualitative and quantitative comprehension of {topic}.")
-            elif word_count >= 8:
-                score = 3.0
-                evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
-                strengths.append(f"Understands the baseline principle of {topic}.")
-                mistakes.append("Answer lacks detailed step-by-step derivation and boundary constraints.")
-            else:
-                score = 1.5
-                evaluation_result = EVALUATION_RESULTS["MISSING_EXPLANATION"]
-                mistakes.append("Answer is too brief to demonstrate full syllabus mastery.")
+                if ratio >= 0.55:
+                    score = 5.0
+                    evaluation_result = EVALUATION_RESULTS["CORRECT"]
+                    strengths.append(f"Demonstrated solid conceptual command and accurate formulation of {topic}.")
+                elif has_calc_signal and ratio >= 0.35:
+                    score = 3.0
+                    evaluation_result = EVALUATION_RESULTS["CALCULATION_ERROR"]
+                    strengths.append(f"Governing setup for {topic} is correct.")
+                    mistakes.append("An intermediate calculation error affected the final numerical result.")
+                elif ratio >= 0.30:
+                    score = 3.5
+                    evaluation_result = EVALUATION_RESULTS["PARTIALLY_CORRECT"]
+                    strengths.append(f"Addressed key aspects of {topic}.")
+                    mistakes.append("Missing detailed boundary constraints, formal equations, or derivation steps.")
+                else:
+                    score = 1.5
+                    evaluation_result = EVALUATION_RESULTS["CONCEPTUAL_MISUNDERSTANDING"]
+                    mistakes.append(f"Response does not capture the foundational principles or equations of {topic}.")
 
     # 3. Determine Mastery State Across Multi-Attempt Evidence (Prompt 5 Requirement 4)
     # A concept is understood ONLY when supported by sufficient evidence (>= 2 successful attempts >= 80% without conceptual gaps).
@@ -732,15 +1075,23 @@ def evaluate_mastery_submission(
     strengths_text = " ".join(strengths) if strengths else f"You engaged with the assessment question on {topic}."
     mistake_text = " ".join(mistakes) if mistakes else "No conceptual errors were detected in your solution."
 
-    if evaluation_result == EVALUATION_RESULTS["CORRECT"]:
+    if ai_act:
+        recommended_act = ai_act
+    elif evaluation_result == EVALUATION_RESULTS["CORRECT"]:
         recommended_act = f"Continue to the next advanced syllabus learning objective in {unit}."
-        targeted_practice = f"Explore multi-tier boundary conditions and real-world system applications of {topic}."
     elif evaluation_result == EVALUATION_RESULTS["CALCULATION_ERROR"]:
-        recommended_act = f"Audio Arithmetic Walkthrough: Review step-by-step denominator addition and SI units for {topic}."
-        targeted_practice = f"Solve a 2-step numeric verification problem on {topic} focusing on intermediate arithmetic."
+        recommended_act = f"Audio Arithmetic Walkthrough: Review step-by-step arithmetic operations and SI units for {topic}."
     else:
         recommended_act = f"Concept-to-Sense Audio: Listen to the physical intuition and step-by-step reasoning for {topic}."
-        targeted_practice = f"Complete a guided concept-check question contrasting open-circuit and short-circuit conditions in {topic}."
+
+    if ai_chk:
+        targeted_practice = ai_chk
+    elif evaluation_result == EVALUATION_RESULTS["CORRECT"]:
+        targeted_practice = f"Explore multi-tier boundary conditions and real-world system applications of {topic}."
+    elif evaluation_result == EVALUATION_RESULTS["CALCULATION_ERROR"]:
+        targeted_practice = f"Solve a 2-step numeric verification problem on {topic} focusing on intermediate arithmetic."
+    else:
+        targeted_practice = f"Complete a guided concept-check question reviewing fundamental principles in {topic}."
 
     spoken_feedback = (
         f"Assessment evaluation for {topic}: {evaluation_result}. Score: {score:.1f} out of {max_score:.1f}. "
