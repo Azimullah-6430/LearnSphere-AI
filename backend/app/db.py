@@ -292,6 +292,12 @@ def _init_mongodb_indexes(db) -> None:
         db["class_memberships"].create_index("student_user_id", sparse=True, background=True)
         db["plagiarism_records"].create_index([("teacher_id", 1), ("class_id", 1)], background=True)
 
+        # Blind companion tables
+        db["blind_learning_gaps"].create_index([("student_id", 1), ("subject", 1)], background=True)
+        db["blind_practice_attempts"].create_index([("student_id", 1), ("subject", 1)], background=True)
+        db["blind_topic_progress"].create_index([("student_id", 1), ("subject", 1), ("topic", 1)], unique=True, background=True)
+        db["blind_learning_paths"].create_index("student_id", unique=True, background=True)
+
         logger.info("[DB] MongoDB indexes verified.")
     except Exception as exc:
         # Non-fatal: indexes may already exist
@@ -623,6 +629,30 @@ def _init_sqlite_schema() -> None:
         feedback TEXT,
         mistake_nature TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS blind_topic_progress (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        unit TEXT,
+        topic TEXT NOT NULL,
+        subtopic TEXT,
+        status TEXT DEFAULT 'not_started',
+        completed_steps TEXT DEFAULT '[]',
+        attempts_count INTEGER DEFAULT 0,
+        mastery_score REAL DEFAULT 0.0,
+        last_studied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(student_id, subject, topic)
+    );
+
+    CREATE TABLE IF NOT EXISTS blind_learning_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id TEXT NOT NULL UNIQUE,
+        path_json TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 

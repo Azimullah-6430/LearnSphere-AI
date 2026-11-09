@@ -6190,6 +6190,149 @@ def submit_blind_practice_attempt():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/blind-companion/learning-path", methods=["GET"])
+@require_auth
+def get_blind_learning_path():
+    """Generate and return prioritized personalized learning path grounded in syllabus and learning gaps."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.adaptive_learning_path import generate_adaptive_learning_path
+        path_data = generate_adaptive_learning_path(
+            student_id=user_id,
+            student_name=student_name,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            **mongo_serialize(path_data)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Learning path error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/learning-path/command", methods=["POST"])
+@require_auth
+def handle_blind_learning_path_command():
+    """Handle voice / audio commands for adaptive learning path."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+        data = request.get_json(force=True) or {}
+        command = str(data.get("command") or "").strip()
+        step_id = str(data.get("step_id") or "").strip()
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.adaptive_learning_path import handle_learning_path_command
+        result = handle_learning_path_command(
+            command=command,
+            student_id=user_id,
+            student_name=student_name,
+            step_id=step_id,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify(mongo_serialize(result)), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Learning path command error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/learning-path/complete-step", methods=["POST"])
+@require_auth
+def complete_blind_learning_path_step():
+    """Mark a step as completed in durable progress storage and return updated path."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+        data = request.get_json(force=True) or {}
+        step_id = str(data.get("step_id") or "").strip()
+        subject = str(data.get("subject") or "").strip()
+        topic = str(data.get("topic") or "").strip()
+        unit = str(data.get("unit") or "").strip()
+
+        if not step_id or not topic:
+            return jsonify({"success": False, "error": "step_id and topic are required"}), 400
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.adaptive_learning_path import save_student_step_completion, generate_adaptive_learning_path
+        save_res = save_student_step_completion(
+            student_id=user_id,
+            subject=subject,
+            topic=topic,
+            step_id=step_id,
+            unit=unit,
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+
+        updated_path = generate_adaptive_learning_path(
+            student_id=user_id,
+            student_name=student_name,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            "completion": save_res,
+            "path": mongo_serialize(updated_path)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Complete step error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/learning-path/progress", methods=["GET"])
+@require_auth
+def get_blind_topic_progress_endpoint():
+    """Retrieve historical topic progress and completed activities across the syllabus."""
+    try:
+        user_id = _current_user_id()
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.adaptive_learning_path import get_student_topic_progress
+        progress_map = get_student_topic_progress(user_id, mongo_db, sqlite_conn)
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            "progress_map": mongo_serialize(progress_map)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Get progress error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SELF-EVALUATION (uses same engine as teacher portal)
 # ══════════════════════════════════════════════════════════════════════════════

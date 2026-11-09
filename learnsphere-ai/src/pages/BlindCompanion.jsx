@@ -81,6 +81,12 @@ export default function BlindCompanion() {
   const [topicStatusMap, setTopicStatusMap] = useState({})
   const [loadingGaps, setLoadingGaps] = useState(false)
 
+  // Adaptive Learning Path State (Prompt 4)
+  const [learningPath, setLearningPath] = useState(null)
+  const [loadingPath, setLoadingPath] = useState(false)
+  const [activeCommandResult, setActiveCommandResult] = useState(null)
+  const [voiceListening, setVoiceListening] = useState(false)
+
   // Practice & Checkpoint State
   const [practiceAnswer, setPracticeAnswer] = useState('')
   const [practiceSubmitted, setPracticeSubmitted] = useState(false)
@@ -294,6 +300,25 @@ export default function BlindCompanion() {
   useEffect(() => {
     fetchLearningGaps()
   }, [fetchLearningGaps])
+
+  // ── Load Personalized Adaptive Learning Path (Prompt 4) ────────────────────
+  const fetchLearningPath = useCallback(async () => {
+    setLoadingPath(true)
+    try {
+      const res = await api.getBlindLearningPath()
+      if (res && res.success) {
+        setLearningPath(res)
+      }
+    } catch (err) {
+      console.warn('Failed to load adaptive learning path', err)
+    } finally {
+      setLoadingPath(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchLearningPath()
+  }, [fetchLearningPath])
 
   // ── Determine Active Subjects & Structure ────────────────────────────────
   const authoritativeSubjects = useMemo(() => {
@@ -510,6 +535,7 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
           if (submitRes && submitRes.success) {
             if (submitRes.learning_gaps) setLearningGaps(submitRes.learning_gaps)
             if (submitRes.topic_status_map) setTopicStatusMap(submitRes.topic_status_map)
+            fetchLearningPath()
           }
         } catch (subErr) {
           console.warn('Practice attempt record error', subErr)
@@ -527,6 +553,103 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
       setAssessingPractice(false)
     }
   }
+
+  // ── Adaptive Learning Path Voice Commands & Step Progression (Prompt 4) ───
+  const handlePathCommand = useCallback(async (cmdText) => {
+    if (!cmdText) return
+    try {
+      speakText(`Processing audio command: ${cmdText}`, 'Voice Command')
+      const res = await api.executeBlindPathCommand({ command: cmdText })
+      if (res && res.spoken_response) {
+        setActiveCommandResult(res)
+        speakText(res.spoken_response, `Assistant: ${res.command || 'Recommendation'}`)
+
+        // If action is load_lesson, switch to the topic and begin teaching
+        if (res.action === 'load_lesson' && res.active_step) {
+          const step = res.active_step
+          if (step.subject) {
+            setSelectedSubject(step.subject)
+          }
+          if (res.suggested_teaching_mode) {
+            setTeachingMode(res.suggested_teaching_mode)
+          }
+          setTimeout(() => {
+            requestAITeaching(res.suggested_teaching_mode || 'simple', `Teach me ${step.topic} following ${step.title}`)
+          }, 350)
+        }
+      }
+    } catch (err) {
+      console.error('Learning path command error', err)
+      speakText('Sorry, could not process that command right now.', 'Error')
+    }
+  }, [speakText, requestAITeaching])
+
+  const toggleVoiceCommandInput = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      speakText('Speech recognition is not supported in this browser. Please use the quick command buttons.', 'Notice')
+      return
+    }
+
+    if (voiceListening) {
+      setVoiceListening(false)
+      return
+    }
+
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = 'en-US'
+      recognition.interimResults = false
+      recognition.maxAlternatives = 1
+
+      recognition.onstart = () => {
+        setVoiceListening(true)
+        speakText('Listening for command. Say: What should I study next, Why was this topic recommended, Start learning, Give me another example, or Show my learning progress.', 'Listening')
+      }
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript
+        setVoiceListening(false)
+        handlePathCommand(transcript)
+      }
+
+      recognition.onerror = () => {
+        setVoiceListening(false)
+      }
+
+      recognition.onend = () => {
+        setVoiceListening(false)
+      }
+
+      recognition.start()
+    } catch (err) {
+      console.warn('Speech recognition start error', err)
+      setVoiceListening(false)
+    }
+  }, [voiceListening, speakText, handlePathCommand])
+
+  const handleCompleteStep = useCallback(async (step) => {
+    if (!step) return
+    try {
+      const res = await api.completeBlindPathStep({
+        step_id: step.step_id,
+        subject: step.subject,
+        topic: step.topic,
+        unit: step.unit
+      })
+      if (res && res.success) {
+        if (res.path) {
+          setLearningPath(res.path)
+        } else {
+          fetchLearningPath()
+        }
+        speakText(`Step completed: ${step.title}. Your syllabus progress has been saved.`, 'Progress Saved')
+      }
+    } catch (err) {
+      console.error('Failed to complete step', err)
+      speakText('Could not save step progress.', 'Error')
+    }
+  }, [fetchLearningPath, speakText])
 
   // Welcome Announcement
   const handleAnnounceWelcome = () => {
@@ -1196,6 +1319,279 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
             </div>
           </div>
         </form>
+      </section>
+
+      {/* ── Section: Adaptive Learning Path (Syllabus-Integrated Recommendations) ─── */}
+      <section aria-labelledby="adaptive-path-heading" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+          <div className="flex items-center gap-2">
+            <Compass size={18} className="text-indigo-600 dark:text-indigo-400" />
+            <h2 id="adaptive-path-heading" className="text-base font-bold text-slate-900 dark:text-white">
+              Adaptive Learning Path (What to Study Next)
+            </h2>
+          </div>
+          {learningPath && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                Focus: {learningPath.focus_topic}
+              </span>
+              <span className="text-slate-500 dark:text-slate-400">
+                {learningPath.completed_count || 0} of {learningPath.total_steps || 0} steps completed
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Audio-First Command Bar (Prompt 4 Requirement 4) ── */}
+        <Card className="p-4 rounded-2xl bg-gradient-to-r from-indigo-900/10 via-purple-900/10 to-indigo-900/10 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800/60 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400" />
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Audio-First Voice & Quick Commands
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={toggleVoiceCommandInput}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                voiceListening
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+              }`}
+              aria-label={voiceListening ? 'Stop Listening for Voice Command' : 'Activate Voice Command via Microphone'}
+            >
+              <Mic size={14} />
+              <span>{voiceListening ? 'Listening...' : 'Voice Command'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => handlePathCommand('what should i study next')}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+              aria-label="Ask audio companion: What should I study next?"
+            >
+              <Headphones size={15} className="text-indigo-600 shrink-0" />
+              <span>"What should I study next?"</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePathCommand('why was this topic recommended')}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+              aria-label="Ask audio companion: Why was this topic recommended?"
+            >
+              <HelpCircle size={15} className="text-amber-600 shrink-0" />
+              <span>"Why this topic?"</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePathCommand('start learning')}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+              aria-label="Trigger audio companion: Start learning"
+            >
+              <Play size={15} className="text-emerald-600 shrink-0" />
+              <span>"Start learning."</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePathCommand('give me another example')}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+              aria-label="Ask audio companion: Give me another example"
+            >
+              <Zap size={15} className="text-purple-600 shrink-0" />
+              <span>"Another example."</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePathCommand('show my learning progress')}
+              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+              aria-label="Ask audio companion: Show my learning progress"
+            >
+              <Award size={15} className="text-blue-600 shrink-0" />
+              <span>"Show my progress."</span>
+            </button>
+          </div>
+
+          {/* Active Command Output Card */}
+          {activeCommandResult && (
+            <div className="mt-2 p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-700/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  Spoken Response Transcript
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => speakText(activeCommandResult.spoken_response, 'Voice Response')}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
+                    aria-label="Replay audio response"
+                  >
+                    <Volume2 size={13} />
+                    <span>Replay Audio</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveCommandResult(null)}
+                    className="text-xs text-slate-400 hover:text-slate-600 p-1"
+                    aria-label="Close command response"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed">
+                {activeCommandResult.spoken_response}
+              </p>
+
+              {/* If an example was returned */}
+              {activeCommandResult.example && (
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+                  <div className="font-bold text-slate-900 dark:text-white">
+                    Worked Problem:
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300">
+                    {activeCommandResult.example.problem_statement}
+                  </p>
+                  <div className="space-y-1 pt-1 font-mono text-[11px] text-indigo-700 dark:text-indigo-300">
+                    {activeCommandResult.example.worked_steps?.map((st, idx) => (
+                      <div key={idx}>{st}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* ── Sequenced Learning Path Steps (Prompt 4 Req 1, 2, 5) ── */}
+        {loadingPath ? (
+          <Card className="p-6 text-center text-xs text-slate-500">
+            Generating syllabus-integrated adaptive path...
+          </Card>
+        ) : !learningPath?.steps || learningPath.steps.length === 0 ? (
+          <Card className="p-6 text-center text-xs text-slate-500">
+            No active learning path steps found. Upload your course syllabus to begin guided learning.
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {learningPath.steps.map((step) => {
+              const isCompleted = Boolean(step.completed)
+              const badgeColor =
+                step.step_type === 'revise_prerequisite'
+                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200 border-purple-200 dark:border-purple-800'
+                  : (step.step_type === 'concept_breakdown'
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 border-blue-200 dark:border-blue-800'
+                      : (step.step_type === 'guided_example'
+                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
+                          : (step.step_type === 'independent_practice'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border-amber-200 dark:border-amber-800'
+                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800')))
+
+              return (
+                <div
+                  key={step.step_id}
+                  className={`p-4 rounded-2xl border transition-all ${
+                    isCompleted
+                      ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-80'
+                      : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 shadow-xs hover:border-indigo-400'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeColor}`}>
+                        Step {step.step_number} · {step.step_type.replace('_', ' ')}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        {step.subject} · {step.unit}
+                      </span>
+                      {isCompleted && (
+                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200 dark:border-emerald-800">
+                          <CheckCircle2 size={11} />
+                          <span>Completed</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const narration = `${step.title}. Recommended because: ${step.why_recommended} Supporting evidence: ${step.evidence_basis}. Activity: ${step.activity_description}. Mastery check: ${step.mastery_check}`
+                          speakText(narration, `Step ${step.step_number} Guidance`)
+                        }}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
+                        aria-label={`Listen to step ${step.step_number} guidance spoken aloud`}
+                      >
+                        <Volume2 size={14} />
+                        <span>Listen</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (step.subject && authoritativeSubjects.includes(step.subject)) {
+                            setSelectedSubject(step.subject)
+                          }
+                          const mode = step.step_type === 'revise_prerequisite' ? 'simple' : 'structured_10_step'
+                          setTeachingMode(mode)
+                          requestAITeaching(mode, `Teach me ${step.topic} for ${step.title}`)
+                        }}
+                        className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer shadow-2xs"
+                        aria-label={`Start learning step ${step.step_number}: ${step.title}`}
+                      >
+                        <Play size={12} />
+                        <span>Start Step</span>
+                      </button>
+
+                      {!isCompleted && (
+                        <button
+                          type="button"
+                          onClick={() => handleCompleteStep(step)}
+                          className="text-xs font-bold bg-slate-100 hover:bg-emerald-100 dark:bg-slate-700 dark:hover:bg-emerald-950/60 text-slate-700 hover:text-emerald-800 dark:text-slate-200 dark:hover:text-emerald-300 px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer border border-slate-200 dark:border-slate-600 transition-colors"
+                          aria-label={`Mark step ${step.step_number} as completed`}
+                        >
+                          <CheckCircle2 size={12} />
+                          <span>Complete</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 space-y-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {step.title}
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      <strong>Focus:</strong> {step.what_to_study}
+                    </p>
+
+                    {/* Recommendation Transparency Box (Prompt 4 Req 5) */}
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 text-[11px] space-y-1.5">
+                      <div className="text-indigo-700 dark:text-indigo-300">
+                        <strong className="text-slate-900 dark:text-white">Why Recommended:</strong> {step.why_recommended}
+                      </div>
+                      <div className="text-slate-600 dark:text-slate-400">
+                        <strong className="text-slate-900 dark:text-white">Learning Evidence:</strong> {step.evidence_basis}
+                      </div>
+                      <div className="text-slate-600 dark:text-slate-400">
+                        <strong className="text-slate-900 dark:text-white">Activity:</strong> {step.activity_description} ({step.activity_type})
+                      </div>
+                      <div className="text-emerald-700 dark:text-emerald-400">
+                        <strong className="text-slate-900 dark:text-white">Mastery Check:</strong> {step.mastery_check}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* ── Section: Concepts I Need to Improve (Evidence-Based Learning Gaps) ─── */}

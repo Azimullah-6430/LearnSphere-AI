@@ -387,6 +387,14 @@ export const api = {
     request('/api/blind-companion/learning-gaps'),
   submitBlindPractice: (payload) =>
     request('/api/blind-companion/practice/submit', { method: 'POST', body: payload }),
+  getBlindLearningPath: () =>
+    request('/api/blind-companion/learning-path'),
+  executeBlindPathCommand: (payload) =>
+    request('/api/blind-companion/learning-path/command', { method: 'POST', body: payload }),
+  completeBlindPathStep: (payload) =>
+    request('/api/blind-companion/learning-path/complete-step', { method: 'POST', body: payload }),
+  getBlindTopicProgress: () =>
+    request('/api/blind-companion/learning-path/progress'),
 
   // ── Streak ────────────────────────────────────────────────────────────────
   getStreak: () => request('/api/user/streak'),
