@@ -5095,45 +5095,134 @@ def get_dashboard_analytics():
     recent_evals  = []
     weak_topics   = []
     memory_items  = []
+    stats         = {}
 
     mongo_db = get_mongodb()
     try:
+        user = _lookup_user_by_id(user_id)
+        user_email = user.get("email", "") if user else ""
+        user_name = user.get("name", "") if user else ""
+
         if mongo_db is not None:
-            user = _lookup_user_by_id(user_id)
-            user_email = user.get("email", "") if user else ""
-            
             if session_role == "student":
-                eval_query = {
-                    "$or": [
-                        {"submitted_by": user_id},
-                        {"student_id": user_id},
-                        {"submitted_by": user_email},
-                    ]
-                }
-                recent_evals = [mongo_serialize(d) for d in
-                                mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(10)]
+                enrolled_sids = _get_enrolled_student_ids_for_user(user_id, user_email)
+                or_clauses = [
+                    {"submitted_by": str(user_id)},
+                    {"student_id": str(user_id)},
+                    {"student_user_id": str(user_id)},
+                ]
+                if user_email:
+                    or_clauses.extend([
+                        {"submitted_by": str(user_email)},
+                        {"student_id": str(user_email)},
+                    ])
+                if user_name:
+                    or_clauses.append({"student_name": user_name})
+                    or_clauses.append({"student_name_snapshot": user_name})
+                for sid in enrolled_sids:
+                    or_clauses.append({"student_id": str(sid)})
+
+                eval_query = {"$or": or_clauses}
+                all_evals = list(mongo_db["evaluations"].find(eval_query).sort("created_at", -1))
+                recent_evals = [mongo_serialize(d) for d in all_evals[:10]]
+
+                # Genuine calculation of average mastery
+                valid_scores = []
+                for e in all_evals:
+                    pct = e.get("percentage")
+                    if pct is not None:
+                        try:
+                            valid_scores.append(float(pct))
+                        except (ValueError, TypeError):
+                            pass
+                    else:
+                        tot = e.get("total_marks") or e.get("max_marks") or 0
+                        obt = e.get("obtained_marks") or e.get("awarded_marks") or 0
+                        if tot and float(tot) > 0:
+                            valid_scores.append(round((float(obt) / float(tot)) * 100, 1))
+
+                avg_mastery = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else None
+
+                # Genuine weak topics
+                weak_clauses = [{"student_id": str(user_id)}, {"student_user_id": str(user_id)}]
+                if user_email:
+                    weak_clauses.append({"student_id": str(user_email)})
+                if user_name:
+                    weak_clauses.append({"student_name": user_name})
+                for sid in enrolled_sids:
+                    weak_clauses.append({"student_id": str(sid)})
+
+                weak_docs = list(mongo_db["misconceptions"].find({
+                    "$or": weak_clauses,
+                    "status": {"$nin": ["Completed / Resolved", "Dismissed", "Resolved"]}
+                }).limit(8))
+                weak_topics = [mongo_serialize(d) for d in weak_docs]
+
                 memory_items = [mongo_serialize(d) for d in
-                                mongo_db["academic_memory"].find({"$or": [{"student_id": user_id}, {"student_id": user_email}]}).limit(5)]
-                weak_topics  = [mongo_serialize(d) for d in
-                                mongo_db["misconceptions"].find({"$or": [{"student_id": user_id}, {"student_id": user_email}], "resolved": {"$ne": True}}).limit(5)]
+                                mongo_db["academic_memory"].find({"$or": [{"student_id": str(user_id)}, {"student_id": str(user_email)}]}).limit(5)]
+                memory_count = mongo_db["academic_memory"].count_documents({"$or": [{"student_id": str(user_id)}, {"student_id": str(user_email)}]})
+
+                top_weak_concept = ""
+                if weak_topics:
+                    top_weak_concept = weak_topics[0].get("concept") or weak_topics[0].get("identified_concept") or weak_topics[0].get("topic") or ""
+
+                stats = {
+                    "total_evaluations": len(all_evals),
+                    "average_mastery": avg_mastery,
+                    "weak_topics_count": len(weak_docs),
+                    "academic_memory_count": memory_count,
+                    "top_practice_concept": top_weak_concept,
+                }
             else:
-                # Teachers: show genuine teacher evaluations they submitted
+                # Teachers: show genuine teacher evaluations
                 eval_query = {
                     "evaluation_source": "TEACHER_EVALUATION",
                     "$or": [
-                        {"submitted_by": user_id},
-                        {"teacher_id": user_id},
-                        {"created_by_user_id": user_id},
+                        {"submitted_by": str(user_id)},
+                        {"teacher_id": str(user_id)},
+                        {"created_by_user_id": str(user_id)},
+                        {"teacher_id": str(user_email)},
+                        {"submitted_by": str(user_email)},
                     ]
                 }
-                recent_evals = [mongo_serialize(d) for d in
-                                mongo_db["evaluations"].find(eval_query).sort("created_at", -1).limit(10)]
-                weak_topics  = [mongo_serialize(d) for d in
-                                mongo_db["misconceptions"].find({
-                                    "evaluation_source": "TEACHER_EVALUATION",
-                                    "$or": [{"teacher_id": user_id}, {"created_by_user_id": user_id}],
-                                    "resolved": {"$ne": True}
-                                }).limit(5)]
+                all_evals = list(mongo_db["evaluations"].find(eval_query).sort("created_at", -1))
+                recent_evals = [mongo_serialize(d) for d in all_evals[:10]]
+
+                active_student_keys = set()
+                valid_scores = []
+                for e in all_evals:
+                    sname = str(e.get("student_name") or e.get("student_name_snapshot") or "").strip()
+                    sid = str(e.get("student_id") or e.get("roll_number") or "").strip()
+                    if sname or sid:
+                        active_student_keys.add(sname or sid)
+                    pct = e.get("percentage")
+                    if pct is not None:
+                        try:
+                            valid_scores.append(float(pct))
+                        except (ValueError, TypeError):
+                            pass
+
+                avg_class_score = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else None
+
+                pending_actions_count = mongo_db["action_items"].count_documents({
+                    "evaluation_source": "TEACHER_EVALUATION",
+                    "$or": [{"teacher_id": str(user_id)}, {"created_by_user_id": str(user_id)}, {"teacher_id": str(user_email)}],
+                    "status": {"$nin": ["Completed", "Dismissed"]}
+                })
+
+                active_misconceptions_count = mongo_db["misconceptions"].count_documents({
+                    "evaluation_source": "TEACHER_EVALUATION",
+                    "$or": [{"teacher_id": str(user_id)}, {"created_by_user_id": str(user_id)}, {"teacher_id": str(user_email)}],
+                    "status": {"$nin": ["Completed / Resolved", "Dismissed", "Resolved"]}
+                })
+
+                stats = {
+                    "total_evaluations": len(all_evals),
+                    "active_students_count": len(active_student_keys),
+                    "pending_action_items_count": pending_actions_count,
+                    "active_misconceptions_count": active_misconceptions_count,
+                    "average_class_score": avg_class_score,
+                }
         else:
             conn   = get_sqlite_db()
             cursor = conn.cursor()
@@ -5141,14 +5230,78 @@ def get_dashboard_analytics():
             user_email = user.get("email", "") if user else ""
             if session_role == "student":
                 cursor.execute(
-                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR submitted_by=?) ORDER BY created_at DESC LIMIT 10", (user_id, user_id, user_email)
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR student_id=? OR submitted_by=?) ORDER BY created_at DESC",
+                    (str(user_id), str(user_id), str(user_email))
                 )
+                all_rows = [dict(r) for r in cursor.fetchall()]
+                recent_evals = all_rows[:10]
+                valid_scores = []
+                for e in all_rows:
+                    pct = e.get("percentage")
+                    if pct is not None:
+                        try:
+                            valid_scores.append(float(pct))
+                        except (ValueError, TypeError):
+                            pass
+                avg_mastery = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else None
+
+                cursor.execute(
+                    "SELECT * FROM misconceptions WHERE (student_id=? OR student_id=?) AND (status IS NULL OR status NOT IN ('Completed / Resolved', 'Dismissed', 'Resolved')) LIMIT 8",
+                    (str(user_id), str(user_email))
+                )
+                weak_topics = [dict(r) for r in cursor.fetchall()]
+                top_weak_concept = (weak_topics[0].get("concept") or weak_topics[0].get("identified_concept") or "") if weak_topics else ""
+
+                stats = {
+                    "total_evaluations": len(all_rows),
+                    "average_mastery": avg_mastery,
+                    "weak_topics_count": len(weak_topics),
+                    "academic_memory_count": 0,
+                    "top_practice_concept": top_weak_concept,
+                }
             else:
                 cursor.execute(
-                    "SELECT * FROM evaluations WHERE (submitted_by=? OR teacher_id=? OR created_by_user_id=?) AND evaluation_source='TEACHER_EVALUATION' ORDER BY created_at DESC LIMIT 10",
-                    (user_id, user_id, user_id)
+                    "SELECT * FROM evaluations WHERE (submitted_by=? OR teacher_id=? OR created_by_user_id=?) AND evaluation_source='TEACHER_EVALUATION' ORDER BY created_at DESC",
+                    (str(user_id), str(user_id), str(user_id))
                 )
-            recent_evals = [dict(r) for r in cursor.fetchall()]
+                all_rows = [dict(r) for r in cursor.fetchall()]
+                recent_evals = all_rows[:10]
+                active_student_keys = set()
+                valid_scores = []
+                for e in all_rows:
+                    sname = str(e.get("student_name") or "").strip()
+                    sid = str(e.get("student_id") or e.get("roll_number") or "").strip()
+                    if sname or sid:
+                        active_student_keys.add(sname or sid)
+                    pct = e.get("percentage")
+                    if pct is not None:
+                        try:
+                            valid_scores.append(float(pct))
+                        except (ValueError, TypeError):
+                            pass
+                avg_class_score = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else None
+
+                cursor.execute(
+                    "SELECT COUNT(*) FROM action_items WHERE (teacher_id=? OR created_by_user_id=?) AND (status IS NULL OR status NOT IN ('Completed', 'Dismissed')) AND evaluation_source='TEACHER_EVALUATION'",
+                    (str(user_id), str(user_id))
+                )
+                p_row = cursor.fetchone()
+                pending_actions_count = p_row[0] if p_row else 0
+
+                cursor.execute(
+                    "SELECT COUNT(*) FROM misconceptions WHERE (teacher_id=? OR created_by_user_id=?) AND (status IS NULL OR status NOT IN ('Completed / Resolved', 'Dismissed', 'Resolved')) AND evaluation_source='TEACHER_EVALUATION'",
+                    (str(user_id), str(user_id))
+                )
+                m_row = cursor.fetchone()
+                active_misconceptions_count = m_row[0] if m_row else 0
+
+                stats = {
+                    "total_evaluations": len(all_rows),
+                    "active_students_count": len(active_student_keys),
+                    "pending_action_items_count": pending_actions_count,
+                    "active_misconceptions_count": active_misconceptions_count,
+                    "average_class_score": avg_class_score,
+                }
             conn.close()
     except Exception as exc:
         logger.error("Analytics error: %s", exc)
@@ -5156,7 +5309,8 @@ def get_dashboard_analytics():
     return jsonify({
         "success":           True,
         "role":              session_role,
-        "total_evaluations": len(recent_evals),
+        "total_evaluations": stats.get("total_evaluations", len(recent_evals)),
+        "stats":             stats,
         "recentEvaluations": recent_evals,
         "weakTopics":        weak_topics,
         "academicMemory":    memory_items,

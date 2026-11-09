@@ -65,15 +65,35 @@ export function Button({ children, variant = 'primary', size = 'md', className =
 }
 
 export function StatCard({ label, value, delta, deltaTone, icon: Icon }) {
-  const toneClass = deltaTone === 'up' ? 'text-[var(--success)]' : deltaTone === 'down' ? 'text-[var(--error)]' : 'text-[var(--text-faint)]'
+  const toneClass =
+    deltaTone === 'up'
+      ? 'text-emerald-700 dark:text-emerald-400 font-bold'
+      : deltaTone === 'down'
+      ? 'text-rose-700 dark:text-rose-400 font-bold'
+      : deltaTone === 'warning'
+      ? 'text-amber-700 dark:text-amber-400 font-bold'
+      : 'text-slate-600 dark:text-slate-300 font-semibold'
+
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 sm:p-6 shadow-[var(--shadow-xs)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-sm)] transition-all duration-200 min-w-0">
-      <div className="flex items-center justify-between mb-2.5 gap-1.5">
-        <span className="text-xs sm:text-[13px] font-bold tracking-wider uppercase text-[var(--text-soft)] truncate">{label}</span>
-        {Icon && <Icon size={18} className="text-[var(--text-faint)] shrink-0" />}
+    <div className="bg-[var(--surface)] border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs hover:border-[var(--accent)] hover:shadow-md transition-all duration-200 min-w-0">
+      <div className="flex items-center justify-between mb-2.5 gap-2">
+        <span className="text-xs sm:text-[13px] font-extrabold tracking-wider uppercase text-slate-700 dark:text-slate-300 truncate">
+          {label}
+        </span>
+        {Icon && (
+          <div className="w-8 h-8 rounded-lg bg-[var(--accent-soft)] flex items-center justify-center shrink-0">
+            <Icon size={18} className="text-[var(--accent)]" />
+          </div>
+        )}
       </div>
-      <div className="text-2xl sm:text-3xl md:text-[34px] font-extrabold tracking-tight text-[var(--text)] leading-none truncate">{value}</div>
-      {delta && <div className={`text-xs sm:text-[13px] font-semibold mt-2.5 flex items-center gap-1.5 ${toneClass}`}>{delta}</div>}
+      <div className="text-2xl sm:text-3xl md:text-[34px] font-extrabold tracking-tight text-slate-900 dark:text-white leading-none truncate">
+        {value}
+      </div>
+      {delta && (
+        <div className={`text-xs sm:text-[13px] mt-2.5 flex items-center gap-1.5 ${toneClass}`}>
+          {delta}
+        </div>
+      )}
     </div>
   )
 }
