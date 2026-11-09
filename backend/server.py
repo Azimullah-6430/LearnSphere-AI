@@ -6087,6 +6087,110 @@ def trainer_chat():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# BLIND LEARNING COMPANION – EVIDENCE-BASED LEARNING GAP DETECTOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/blind-companion/learning-gaps", methods=["GET"])
+@require_auth
+def get_blind_learning_gaps():
+    """Retrieve authentic learning gaps, syllabus topic status, and audio summary for the authenticated student."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.learning_gap_detector import analyze_student_learning_gaps
+        analysis = analyze_student_learning_gaps(
+            student_id=user_id,
+            student_name=student_name,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            **mongo_serialize(analysis)
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Learning gap error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blind-companion/practice/submit", methods=["POST"])
+@require_auth
+def submit_blind_practice_attempt():
+    """Submit a practice attempt, dynamically update mistake classification and topic learning status."""
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+        student_name = user.get("name") or "Student"
+        data = request.get_json(force=True) or {}
+
+        subject = str(data.get("subject") or "General Academic").strip()
+        unit = str(data.get("unit") or "").strip()
+        topic = str(data.get("topic") or "General Concept").strip()
+        subtopic = str(data.get("subtopic") or topic).strip()
+        question_text = str(data.get("question_text") or "").strip()
+        student_answer = str(data.get("student_answer") or "").strip()
+        expected_answer = str(data.get("expected_answer") or "").strip()
+        is_correct = bool(data.get("is_correct", False))
+        score = float(data.get("score") or 0.0)
+        max_score = float(data.get("max_score") or 5.0)
+        feedback = str(data.get("feedback") or "").strip()
+
+        mongo_db = get_mongodb()
+        sqlite_conn = get_sqlite_db() if mongo_db is None else None
+
+        from app.learning_gap_detector import record_blind_practice_attempt, analyze_student_learning_gaps
+        record = record_blind_practice_attempt(
+            student_id=user_id,
+            student_name=student_name,
+            subject=subject,
+            unit=unit,
+            topic=topic,
+            subtopic=subtopic,
+            question_text=question_text,
+            student_answer=student_answer,
+            expected_answer=expected_answer,
+            is_correct=is_correct,
+            score=score,
+            max_score=max_score,
+            feedback=feedback,
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+
+        active_syllabus = _get_authoritative_curriculum(user_id, user)
+        updated_analysis = analyze_student_learning_gaps(
+            student_id=user_id,
+            student_name=student_name,
+            syllabus_doc=active_syllabus or {},
+            mongo_db=mongo_db,
+            sqlite_conn=sqlite_conn
+        )
+        if sqlite_conn:
+            sqlite_conn.close()
+
+        return jsonify({
+            "success": True,
+            "record": mongo_serialize(record),
+            "learning_gaps": mongo_serialize(updated_analysis.get("learning_gaps", [])),
+            "topic_status_map": updated_analysis.get("topic_status_map", {}),
+            "audio_summary": updated_analysis.get("audio_summary", "")
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Practice submit error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SELF-EVALUATION (uses same engine as teacher portal)
 # ══════════════════════════════════════════════════════════════════════════════
 

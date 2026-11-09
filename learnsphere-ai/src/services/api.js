@@ -382,6 +382,12 @@ export const api = {
   deleteMisconception: (itemId) =>
     request(`/api/misconceptions/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
 
+  // ── Blind Learning Companion ──────────────────────────────────────────────
+  getBlindLearningGaps: () =>
+    request('/api/blind-companion/learning-gaps'),
+  submitBlindPractice: (payload) =>
+    request('/api/blind-companion/practice/submit', { method: 'POST', body: payload }),
+
   // ── Streak ────────────────────────────────────────────────────────────────
   getStreak: () => request('/api/user/streak'),
   recordStreak: () => request('/api/user/streak', { method: 'POST' }),

@@ -582,6 +582,48 @@ def _init_sqlite_schema() -> None:
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(class_id, student_id)
     );
+
+    CREATE TABLE IF NOT EXISTS blind_learning_gaps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gap_id TEXT UNIQUE,
+        student_id TEXT NOT NULL,
+        student_name TEXT,
+        subject TEXT NOT NULL,
+        unit TEXT,
+        topic TEXT NOT NULL,
+        subtopic TEXT,
+        question_ref TEXT,
+        student_answer TEXT,
+        expected_answer TEXT,
+        mistake_nature TEXT NOT NULL,
+        why_learning_gap TEXT,
+        evidence_strength TEXT DEFAULT 'Possible difficulty requiring more practice',
+        recommended_action TEXT,
+        attempt_count INTEGER DEFAULT 1,
+        resolved BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS blind_practice_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        attempt_id TEXT UNIQUE,
+        student_id TEXT NOT NULL,
+        student_name TEXT,
+        subject TEXT NOT NULL,
+        unit TEXT,
+        topic TEXT NOT NULL,
+        subtopic TEXT,
+        question_text TEXT,
+        student_answer TEXT,
+        expected_answer TEXT,
+        is_correct BOOLEAN DEFAULT 0,
+        score REAL DEFAULT 0,
+        max_score REAL DEFAULT 5,
+        feedback TEXT,
+        mistake_nature TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """)
 
     cursor.execute("PRAGMA table_info(class_memberships);")

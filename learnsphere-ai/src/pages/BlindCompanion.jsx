@@ -76,9 +76,10 @@ export default function BlindCompanion() {
   // Concept-to-Sense Component Explorer State
   const [activeComponent, setActiveComponent] = useState(null)
 
-  // Misconceptions / Improvement Areas State
-  const [misconceptions, setMisconceptions] = useState([])
-  const [loadingMisconceptions, setLoadingMisconceptions] = useState(false)
+  // Evidence-Based Learning Gaps & Topic Status State
+  const [learningGaps, setLearningGaps] = useState([])
+  const [topicStatusMap, setTopicStatusMap] = useState({})
+  const [loadingGaps, setLoadingGaps] = useState(false)
 
   // Practice & Checkpoint State
   const [practiceAnswer, setPracticeAnswer] = useState('')
@@ -274,25 +275,25 @@ export default function BlindCompanion() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isSpeaking, isPaused, resumeSpeech, pauseSpeech, repeatSpeech, stopSpeech, toggleVoiceInput, currentSpeechText])
 
-  // ── Load Authentic Misconceptions ─────────────────────────────────────────
-  useEffect(() => {
-    let mounted = true
-    const fetchGaps = async () => {
-      setLoadingMisconceptions(true)
-      try {
-        const res = await api.getMisconceptions({ student_name: user?.name })
-        if (mounted && res && res.success && Array.isArray(res.misconceptions)) {
-          setMisconceptions(res.misconceptions)
-        }
-      } catch (err) {
-        console.warn('Failed to load student misconceptions', err)
-      } finally {
-        if (mounted) setLoadingMisconceptions(false)
+  // ── Load Authentic Learning Gaps & Topic Status ────────────────────────────
+  const fetchLearningGaps = useCallback(async () => {
+    setLoadingGaps(true)
+    try {
+      const res = await api.getBlindLearningGaps()
+      if (res && res.success) {
+        setLearningGaps(res.learning_gaps || [])
+        setTopicStatusMap(res.topic_status_map || {})
       }
+    } catch (err) {
+      console.warn('Failed to load learning gaps', err)
+    } finally {
+      setLoadingGaps(false)
     }
-    if (user?.name) fetchGaps()
-    return () => { mounted = false }
-  }, [user?.name])
+  }, [])
+
+  useEffect(() => {
+    fetchLearningGaps()
+  }, [fetchLearningGaps])
 
   // ── Determine Active Subjects & Structure ────────────────────────────────
   const authoritativeSubjects = useMemo(() => {
@@ -473,21 +474,51 @@ export default function BlindCompanion() {
 
     const evaluationPrompt = `Evaluate the student's answer for the topic '${selectedTopic?.title || 'this topic'}'.
 Student Answer: "${practiceAnswer.trim()}"
-Provide concise verbal marks/score out of 5, highlight what was done correctly, and explain any missing points.`
+Provide concise verbal marks/score out of 5, highlight what was done correctly, and explain any missing points or arithmetic/conceptual errors.`
 
     try {
       const res = await api.trainerChat({
         message: evaluationPrompt,
         subject: selectedSubject,
+        unit: selectedUnit?.title || selectedUnit?.name || '',
         topic: selectedTopic?.title,
         teaching_mode: 'practice_assessment',
         audio_friendly: true
       })
       if (res && res.success && res.reply) {
+        const feedbackText = res.reply
+        const isCorrect = !feedbackText.toLowerCase().includes('0/5') &&
+                          !feedbackText.toLowerCase().includes('1/5') &&
+                          !feedbackText.toLowerCase().includes('incorrect')
+        const scoreVal = isCorrect ? 4.5 : 2.0
+
+        // Dynamically submit attempt to Learning Gap Detector to update status & gaps without reload
+        try {
+          const submitRes = await api.submitBlindPractice({
+            subject: selectedSubject,
+            unit: selectedUnit?.title || selectedUnit?.name || '',
+            topic: selectedTopic?.title,
+            subtopic: selectedTopic?.title,
+            question_text: `State the core principle of ${selectedTopic?.title} and explain how it solves an everyday engineering or theoretical problem.`,
+            student_answer: practiceAnswer.trim(),
+            expected_answer: `Core theoretical definitions, boundary constraints, and practical applications for ${selectedTopic?.title}.`,
+            is_correct: isCorrect,
+            score: scoreVal,
+            max_score: 5.0,
+            feedback: feedbackText
+          })
+          if (submitRes && submitRes.success) {
+            if (submitRes.learning_gaps) setLearningGaps(submitRes.learning_gaps)
+            if (submitRes.topic_status_map) setTopicStatusMap(submitRes.topic_status_map)
+          }
+        } catch (subErr) {
+          console.warn('Practice attempt record error', subErr)
+        }
+
         setPracticeSubmitted(true)
-        setPracticeFeedback(res.reply)
+        setPracticeFeedback(feedbackText)
         if (voiceQuestions) {
-          speakText(res.reply, 'Checkpoint Assessment Result')
+          speakText(feedbackText, 'Checkpoint Assessment Result')
         }
       }
     } catch (err) {
@@ -804,13 +835,19 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
                 onChange={(e) => {
                   const t = activeTopics.find(top => top.title === e.target.value)
                   setSelectedTopic(t)
-                  speakText(`Selected topic: ${e.target.value}`, 'Topic Switch')
+                  const st = topicStatusMap[`${selectedSubject}::${e.target.value}`] || 'Not started'
+                  speakText(`Selected topic: ${e.target.value}. Learning status: ${st}.`, 'Topic Switch')
                 }}
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-xs font-semibold focus-visible:ring-4 focus-visible:ring-indigo-500"
               >
-                {activeTopics.map((top, idx) => (
-                  <option key={idx} value={top.title}>{top.title}</option>
-                ))}
+                {activeTopics.map((top, idx) => {
+                  const status = topicStatusMap[`${selectedSubject}::${top.title}`] || 'Not started'
+                  return (
+                    <option key={idx} value={top.title}>
+                      {top.title} · [{status}]
+                    </option>
+                  )
+                })}
               </select>
             </div>
           </div>
@@ -1161,7 +1198,7 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
         </form>
       </section>
 
-      {/* ── Section: Concepts I Need to Improve (Authentic Misconceptions) ─── */}
+      {/* ── Section: Concepts I Need to Improve (Evidence-Based Learning Gaps) ─── */}
       <section aria-labelledby="improve-heading" className="space-y-3">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
           <div className="flex items-center gap-2">
@@ -1171,59 +1208,91 @@ Provide concise verbal marks/score out of 5, highlight what was done correctly, 
             </h2>
           </div>
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            {misconceptions.length} recorded gap{misconceptions.length === 1 ? '' : 's'}
+            {learningGaps.length} diagnosed gap{learningGaps.length === 1 ? '' : 's'}
           </span>
         </div>
 
-        {loadingMisconceptions ? (
+        {loadingGaps ? (
           <Card className="p-6 text-center text-xs text-slate-500">
-            Checking evaluated assessment records...
+            Analyzing authentic student learning records...
           </Card>
-        ) : misconceptions.length === 0 ? (
+        ) : learningGaps.length === 0 ? (
           <Card className="p-5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 flex items-start gap-3">
             <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
             <div>
               <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                No Active Conceptual Misconceptions Found
+                No Active Learning Gaps Detected
               </div>
               <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
-                Your past evaluated assessments indicate solid conceptual understanding across completed topics.
+                Your evaluated assessments and practice attempts show solid understanding. Any specific calculation, formula, diagram, or conceptual gaps will appear here automatically when detected.
               </p>
             </div>
           </Card>
         ) : (
           <div className="grid sm:grid-cols-2 gap-3.5">
-            {misconceptions.slice(0, 4).map((gap, i) => (
+            {learningGaps.map((gap, i) => (
               <div
-                key={gap.id || i}
-                className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2 hover:border-amber-400 transition-colors"
+                key={gap.gap_id || i}
+                className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2.5 hover:border-amber-400 transition-colors shadow-xs"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded">
-                    {gap.subject || selectedSubject}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded">
+                      {gap.subject}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      gap.mistake_nature?.includes('Calculation')
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                        : (gap.mistake_nature?.includes('Diagram') || gap.mistake_nature?.includes('Graph')
+                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200')
+                    }`}>
+                      {gap.mistake_nature}
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded">
+                      {gap.evidence_strength}
+                    </span>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => {
-                      const msg = `Identified learning gap: ${gap.concept || gap.topic}. Detail: ${gap.description}. Recommended remedy: ${gap.remedy || 'Review standard textbook problems.'}`
-                      speakText(msg, `Gap: ${gap.concept || gap.topic}`)
+                      const msg = `Identified learning gap in ${gap.subject}, topic: ${gap.topic}. Nature of mistake: ${gap.mistake_nature}. Evidence strength: ${gap.evidence_strength}. Learning status: ${gap.status}. Why this occurred: ${gap.why_learning_gap}. Recommended next step: ${gap.recommended_action}`
+                      speakText(msg, `Diagnosis: ${gap.topic}`)
                     }}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 rounded p-1"
-                    aria-label={`Listen to spoken explanation for misconception ${gap.concept || gap.topic}`}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 rounded p-1 shrink-0"
+                    aria-label={`Listen to spoken diagnosis and remedy for ${gap.topic}`}
                   >
                     <Volume2 size={14} />
                     <span>Listen</span>
                   </button>
                 </div>
-                <div className="font-bold text-xs text-slate-900 dark:text-white">
-                  {gap.concept || gap.topic || 'Concept Weakness'}
+
+                <div>
+                  <div className="font-bold text-xs text-slate-900 dark:text-white">
+                    {gap.topic} {gap.subtopic && gap.subtopic !== gap.topic ? `· ${gap.subtopic}` : ''}
+                  </div>
+                  {gap.question_ref && (
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                      <strong>Activity:</strong> {gap.question_ref}
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  {gap.description}
+
+                {gap.student_answer && gap.student_answer !== 'Not provided' && (
+                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800">
+                    <span className="font-semibold block text-slate-700 dark:text-slate-300">Your Submitted Answer:</span>
+                    <p className="truncate">"{gap.student_answer}"</p>
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                  <strong>Why this indicates a gap:</strong> {gap.why_learning_gap}
                 </p>
-                {gap.remedy && (
-                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 p-2 rounded-lg">
-                    <strong>Recommended Fix:</strong> {gap.remedy}
+
+                {gap.recommended_action && (
+                  <div className="text-[11px] text-indigo-800 dark:text-indigo-200 bg-indigo-50/70 dark:bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-200/50 dark:border-indigo-900/50">
+                    <strong>Recommended Next Step:</strong> {gap.recommended_action}
                   </div>
                 )}
               </div>

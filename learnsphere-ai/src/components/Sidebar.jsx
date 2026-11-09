@@ -32,10 +32,9 @@ import {
 import { useApp } from '../context/AppContext.jsx'
 
 const navItemClass = ({ isActive }) =>
-  `relative group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm sm:text-[14.5px] font-semibold transition-all duration-150 cursor-pointer ${
-    isActive
-      ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-bold shadow-xs border border-[var(--accent)]/20'
-      : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
+  `relative group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm sm:text-[14.5px] font-semibold transition-all duration-150 cursor-pointer ${isActive
+    ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-bold shadow-xs border border-[var(--accent)]/20'
+    : 'text-[var(--text-soft)] hover:bg-[var(--surface-alt)] hover:text-[var(--text)]'
   }`
 
 function NavLabel({ children }) {
@@ -68,9 +67,8 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
     <aside
       role="navigation"
       aria-label="Main sidebar navigation"
-      className={`w-[260px] shrink-0 bg-[var(--surface)] border-r border-[var(--border)] flex flex-col fixed top-0 bottom-0 left-0 overflow-y-auto z-40 transition-transform duration-200 md:translate-x-0 scrollbar-thin ${
-        open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
-      }`}
+      className={`w-[260px] shrink-0 bg-[var(--surface)] border-r border-[var(--border)] flex flex-col fixed top-0 bottom-0 left-0 overflow-y-auto z-40 transition-transform duration-200 md:translate-x-0 scrollbar-thin ${open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+        }`}
       style={{
         paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
         paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))'
@@ -102,11 +100,10 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
         </div>
 
         {/* Workspace Portal Pill */}
-        <div className={`px-2.5 py-1.5 rounded-xl border flex items-center justify-between text-xs font-bold transition-all ${
-          isTeacher
+        <div className={`px-2.5 py-1.5 rounded-xl border flex items-center justify-between text-xs font-bold transition-all ${isTeacher
             ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-800 dark:text-emerald-300'
             : 'bg-teal-500/10 border-teal-500/25 text-teal-800 dark:text-teal-300'
-        }`}>
+          }`}>
           <div className="flex items-center gap-1.5 truncate">
             {isTeacher ? <Building2 size={13} className="shrink-0" /> : <GraduationCap size={14} className="shrink-0" />}
             <span className="truncate">{isTeacher ? 'Faculty Workspace' : 'Student Workspace'}</span>
