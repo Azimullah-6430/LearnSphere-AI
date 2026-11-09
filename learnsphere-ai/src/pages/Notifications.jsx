@@ -55,7 +55,7 @@ function getNotificationIcon(category) {
 }
 
 export default function Notifications() {
-  const { user, role } = useApp()
+  const { user, role, setUnreadNotificationCount } = useApp()
   const navigate = useNavigate()
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
@@ -69,24 +69,39 @@ export default function Notifications() {
   }
 
   const loadNotifications = async () => {
+    if (!user) {
+      setNotifications([])
+      setLoading(false)
+      if (setUnreadNotificationCount) setUnreadNotificationCount(0)
+      return
+    }
     setLoading(true)
     try {
-      const res = await api.getNotifications(role || 'all', user?.name || '')
+      const res = await api.getNotifications()
       if (res && res.success && Array.isArray(res.notifications)) {
         setNotifications(res.notifications)
+        const unread = res.unread_count ?? res.notifications.filter(n => !n.is_read).length
+        if (setUnreadNotificationCount) setUnreadNotificationCount(unread)
       } else {
         setNotifications([])
+        if (setUnreadNotificationCount) setUnreadNotificationCount(0)
       }
     } catch {
       setNotifications([])
+      if (setUnreadNotificationCount) setUnreadNotificationCount(0)
     } finally {
       setLoading(false)
     }
   }
 
+  // Clear state when user changes
   useEffect(() => {
+    setNotifications([])
     loadNotifications()
-  }, [user, role])
+    return () => {
+      setNotifications([])
+    }
+  }, [user?.id, user?._id, user?.email])
 
   const handleMarkAsRead = async (notifId, e) => {
     if (e) e.stopPropagation()
@@ -94,9 +109,12 @@ export default function Notifications() {
     try {
       const res = await api.markNotificationRead(notifId)
       if (res && res.success) {
-        setNotifications((prev) =>
-          prev.map((n) => ((n.id || n._id || n.notification_id) === notifId ? { ...n, is_read: true } : n))
-        )
+        setNotifications((prev) => {
+          const updated = prev.map((n) => ((n.id || n._id || n.notification_id) === notifId ? { ...n, is_read: true } : n))
+          const unread = updated.filter(n => !n.is_read).length
+          if (setUnreadNotificationCount) setUnreadNotificationCount(unread)
+          return updated
+        })
       }
     } catch {
       // ignore
@@ -109,6 +127,7 @@ export default function Notifications() {
       const res = await api.markAllNotificationsRead()
       if (res && res.success) {
         setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+        if (setUnreadNotificationCount) setUnreadNotificationCount(0)
         showToast('All notifications marked as read.')
       }
     } catch {
@@ -124,7 +143,12 @@ export default function Notifications() {
     try {
       const res = await api.deleteNotification(notifId)
       if (res && res.success) {
-        setNotifications((prev) => prev.filter((n) => (n.id || n._id || n.notification_id) !== notifId))
+        setNotifications((prev) => {
+          const filtered = prev.filter((n) => (n.id || n._id || n.notification_id) !== notifId)
+          const unread = filtered.filter(n => !n.is_read).length
+          if (setUnreadNotificationCount) setUnreadNotificationCount(unread)
+          return filtered
+        })
         showToast('Notification deleted.')
       }
     } catch {
@@ -139,6 +163,7 @@ export default function Notifications() {
       const res = await api.clearNotifications()
       if (res && res.success) {
         setNotifications([])
+        if (setUnreadNotificationCount) setUnreadNotificationCount(0)
         showToast('All notifications cleared.')
       }
     } catch {

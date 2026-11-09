@@ -401,8 +401,8 @@ export const api = {
 
   // ── Notifications ─────────────────────────────────────────────────────────
 
-  getNotifications: (role = 'all', studentName = '') =>
-    request(`/api/notifications?role=${role}&student_name=${encodeURIComponent(studentName)}`),
+  getNotifications: () =>
+    request('/api/notifications'),
   createNotification: (payload) =>
     request('/api/notifications', { method: 'POST', body: payload }),
   markNotificationRead: (id) =>

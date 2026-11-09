@@ -354,46 +354,107 @@ def _create_system_notification(
     message: str,
     category: str = "info",
     action_url: str = None,
-    target_role: str = "student",
-    target_name: str = None
+    target_role: str = None,
+    target_name: str = None,
+    notification_type: str = "system",
+    source_event_id: str = None,
+    sender_id: str = None
 ) -> dict:
-    """Safely create and persist a real system notification for MongoDB and SQLite."""
+    """
+    Safely create and persist a strictly user-specific notification.
+    Enforces recipient validation, ownership isolation, and event deduplication.
+    Never creates unaddressed or global broadcast notifications.
+    """
     try:
+        if not user_id or str(user_id).strip().lower() in ("none", "null", "undefined", "all", ""):
+            logger.warning("[Notifications] Rejecting unaddressed notification creation: missing recipient user_id.")
+            return {}
+
+        clean_uid = str(user_id).strip()
         notif_id = f"notif_{uuid.uuid4().hex[:12]}"
         now = datetime.utcnow()
+
+        mongo_db = get_mongodb()
+        
+        # Deduplication Mechanism:
+        # 1. By explicit source_event_id for the specific recipient
+        if source_event_id:
+            dedup_key = str(source_event_id).strip()
+            if mongo_db is not None:
+                existing = mongo_db["notifications"].find_one({
+                    "$or": [{"recipient_id": clean_uid}, {"target_id": clean_uid}, {"user_id": clean_uid}],
+                    "source_event_id": dedup_key
+                })
+                if existing:
+                    return existing
+            else:
+                conn = get_sqlite_db()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM notifications 
+                    WHERE (recipient_id = ? OR target_id = ? OR user_id = ?) AND source_event_id = ?
+                """, (clean_uid, clean_uid, clean_uid, dedup_key))
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    return dict(row)
+
+        # 2. Prevent identical spam within 15 minutes for the same recipient
+        fifteen_mins_ago = now - timedelta(minutes=15)
+        if mongo_db is not None:
+            existing = mongo_db["notifications"].find_one({
+                "$or": [{"recipient_id": clean_uid}, {"target_id": clean_uid}, {"user_id": clean_uid}],
+                "title": str(title).strip(),
+                "created_at": {"$gte": fifteen_mins_ago}
+            })
+            if existing:
+                return existing
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM notifications 
+                WHERE (recipient_id = ? OR target_id = ? OR user_id = ?) 
+                  AND title = ? 
+                  AND created_at >= datetime('now', '-15 minutes')
+            """, (clean_uid, clean_uid, clean_uid, str(title).strip()))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return dict(row)
+
         doc = {
             "notification_id": notif_id,
             "id": notif_id,
-            "user_id": str(user_id) if user_id else None,
-            "target_id": str(user_id) if user_id else None,
-            "target_role": target_role or "student",
-            "target_name": target_name,
-            "title": str(title),
-            "message": str(message),
-            "category": str(category or "info"),
+            "recipient_id": clean_uid,
+            "user_id": clean_uid,
+            "target_id": clean_uid,
+            "title": str(title).strip(),
+            "message": str(message).strip(),
+            "category": str(category or "info").strip(),
+            "notification_type": str(notification_type or "system").strip(),
+            "source_event_id": str(source_event_id).strip() if source_event_id else None,
+            "sender_id": str(sender_id).strip() if sender_id else None,
             "action_url": action_url,
             "is_read": False,
             "created_at": now,
         }
 
-        mongo_db = get_mongodb()
         if mongo_db is not None:
-            # Check for recent duplicate within 1 hour to prevent notification spam
-            one_hour_ago = now - timedelta(hours=1)
-            existing = mongo_db["notifications"].find_one({
-                "target_id": str(user_id),
-                "title": str(title),
-                "created_at": {"$gte": one_hour_ago}
-            })
-            if not existing:
-                mongo_db["notifications"].insert_one(doc)
+            mongo_db["notifications"].insert_one(doc)
         else:
             conn = get_sqlite_db()
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO notifications (target_role, target_id, target_name, title, message, category, is_read, notification_id, action_url, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
-            """, (target_role or "student", str(user_id) if user_id else None, target_name, str(title), str(message), str(category or "info"), notif_id, action_url))
+                INSERT INTO notifications (
+                    notification_id, recipient_id, user_id, target_id, title, message, category,
+                    notification_type, source_event_id, sender_id, action_url, is_read, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+            """, (
+                notif_id, clean_uid, clean_uid, clean_uid, doc["title"], doc["message"],
+                doc["category"], doc["notification_type"], doc["source_event_id"],
+                doc["sender_id"], action_url
+            ))
             conn.commit()
             conn.close()
 
@@ -1703,6 +1764,42 @@ def evaluate():
                 "success": False,
                 "error": f"Evaluation persistence could not be verified for record {eval_id}."
             }), 500
+
+        # Deliver genuine, user-specific notification to the evaluated student
+        eval_student_recipient = str(student_user_id or student_id or "").strip()
+        if eval_student_recipient and eval_student_recipient.lower() not in ("none", "n/a", "unknown", ""):
+            try:
+                sub_name = str(subject or "Assessment")
+                tot_score = result.get("total_score") if isinstance(result, dict) else 0
+                max_sc = result.get("max_score") if isinstance(result, dict) else 100
+                _create_system_notification(
+                    user_id=eval_student_recipient,
+                    title=f"Evaluation Available: {sub_name}",
+                    message=f"Your {assessment_title or sub_name} assessment has been evaluated. Score: {tot_score}/{max_sc}.",
+                    category="evaluation",
+                    action_url="/app/evaluated-papers",
+                    notification_type="evaluation",
+                    source_event_id=f"eval_completed_{eval_id}_{eval_student_recipient}",
+                    sender_id=str(user_id)
+                )
+            except Exception as notif_err:
+                logger.warning(f"[Evaluation] Notification delivery notice: {notif_err}")
+
+        # If submitted by a student to a teacher, deliver notification to that specific teacher
+        if session_role == "student" and teacher_id:
+            try:
+                _create_system_notification(
+                    user_id=str(teacher_id).strip(),
+                    title=f"Student Submission: {student_name or 'New Paper'}",
+                    message=f"Submission received for {subject or 'assessment'} ({assessment_title or 'Answer Sheet'}).",
+                    category="info",
+                    action_url="/app/history",
+                    notification_type="submission",
+                    source_event_id=f"sub_received_{eval_id}_{teacher_id}",
+                    sender_id=str(user_id)
+                )
+            except Exception as sub_notif_err:
+                logger.warning(f"[Submission] Notification delivery notice: {sub_notif_err}")
 
         return jsonify({
             "success":       True,
@@ -7940,78 +8037,63 @@ def review_memory_card():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NOTIFICATIONS (Real Dynamic System Notifications)
+# NOTIFICATIONS (Strict User-Specific Isolation & Security)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/notifications", methods=["GET"])
 @require_auth
 def get_notifications():
+    """
+    Fetch notifications belonging exclusively to the authenticated user.
+    Never broadcasts or returns notifications from other users.
+    """
     try:
-        user_id      = _current_user_id()
-        session_role = _current_role()
-        user         = _lookup_user_by_id(user_id) or {}
-        student_name = user.get("name", "")
-        email        = user.get("email", "")
+        user_id = _current_user_id()
+        if not user_id:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
 
+        uid_str = str(user_id).strip()
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            query: dict = {
+            # STRICT USER ISOLATION: Match ONLY authenticated user's unique stable ID
+            query = {
                 "$or": [
-                    {"target_id": str(user_id)},
-                    {"user_id": str(user_id)},
-                    {"target_id": email},
-                    {"target_role": "all"},
-                    {"target_role": session_role}
+                    {"recipient_id": uid_str},
+                    {"target_id": uid_str},
+                    {"user_id": uid_str}
                 ]
             }
-            if student_name:
-                query["$or"].append({"target_name": student_name})
             docs = [mongo_serialize(d) for d in
                     mongo_db["notifications"].find(query).sort("created_at", -1)]
-            
-            # If no notifications exist, generate real contextual system notifications for the user
-            if not docs:
-                streak_count = user.get("streak_count") or user.get("streakDays") or 1
-                level = user.get("level") or "college"
-                notifs_to_seed = [
-                    {
-                        "title": f"Daily Study Streak: {streak_count} Day{'s' if streak_count != 1 else ''}",
-                        "message": f"You're on a {streak_count}-day learning streak! Keep logging in daily to maintain momentum.",
-                        "category": "success",
-                        "action_url": "/app"
-                    },
-                    {
-                        "title": "AI Personal Trainer Ready",
-                        "message": f"Your {level.title()} syllabus and personalized study plan are synchronized with your academic profile.",
-                        "category": "info",
-                        "action_url": "/app/trainer"
-                    }
-                ]
-                for n in notifs_to_seed:
-                    created = _create_system_notification(
-                        user_id=user_id,
-                        title=n["title"],
-                        message=n["message"],
-                        category=n["category"],
-                        action_url=n["action_url"],
-                        target_role=session_role,
-                        target_name=student_name
-                    )
-                    if created:
-                        docs.append(mongo_serialize(created))
 
-            return jsonify({"success": True, "notifications": docs}), 200
+            unread_count = sum(1 for d in docs if not d.get("is_read"))
+            return jsonify({
+                "success": True,
+                "notifications": docs,
+                "unread_count": unread_count
+            }), 200
 
-        conn   = get_sqlite_db()
+        conn = get_sqlite_db()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM notifications
-            WHERE target_id = ? OR user_id = ? OR target_name = ? OR target_role = 'all' OR target_role = ?
+            WHERE recipient_id = ? OR target_id = ? OR user_id = ?
             ORDER BY created_at DESC
-        """, (str(user_id), str(user_id), student_name, session_role))
+        """, (uid_str, uid_str, uid_str))
         rows = cursor.fetchall()
         conn.close()
-        return jsonify({"success": True, "notifications": [dict(r) for r in rows]}), 200
+
+        docs = [dict(r) for r in rows]
+        for d in docs:
+            d["is_read"] = bool(d.get("is_read"))
+        unread_count = sum(1 for d in docs if not d.get("is_read"))
+
+        return jsonify({
+            "success": True,
+            "notifications": docs,
+            "unread_count": unread_count
+        }), 200
+
     except Exception as exc:
         logger.error("Get notifications error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -8020,25 +8102,112 @@ def get_notifications():
 @app.route("/api/notifications", methods=["POST"])
 @require_auth
 def create_notification_api():
+    """
+    Create genuine notifications with recipient validation and deduplication.
+    Teachers can deliver announcements to their verified class roster or specific students.
+    Students can only create self-directed notifications.
+    """
     try:
-        user_id = _current_user_id()
+        current_uid = _current_user_id()
+        session_role = _current_role()
         data = request.get_json(force=True) or {}
+
         title = str(data.get("title") or "").strip()
         message = str(data.get("message") or "").strip()
         category = str(data.get("category") or "info").strip()
         action_url = data.get("action_url")
+        notification_type = str(data.get("notification_type") or data.get("type") or "announcement").strip()
+        source_event_id = data.get("source_event_id")
+
         if not title or not message:
             return jsonify({"success": False, "error": "Title and message are required."}), 400
 
-        doc = _create_system_notification(
-            user_id=user_id,
-            title=title,
-            message=message,
-            category=category,
-            action_url=action_url,
-            target_role=_current_role(),
-        )
-        return jsonify({"success": True, "notification": mongo_serialize(doc)}), 201
+        class_id = data.get("class_id")
+        target_student_id = data.get("student_id") or data.get("recipient_id") or data.get("target_id")
+
+        created_notifications = []
+
+        # 1. Teacher dispatching announcement to an enrolled class roster
+        if session_role == "teacher" and class_id:
+            target_class = None
+            mongo_db = get_mongodb()
+            if mongo_db is not None:
+                target_class = mongo_db["teacher_classes"].find_one({"id": str(class_id), "teacher_id": str(current_uid)})
+            if not target_class:
+                conn = get_sqlite_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM teacher_classes WHERE id = ? AND teacher_id = ?", (str(class_id), str(current_uid)))
+                row = cursor.fetchone()
+                if row:
+                    target_class = dict(row)
+                    target_class["students"] = json.loads(target_class.pop("students_json", "[]") or "[]")
+                conn.close()
+
+            if not target_class:
+                return jsonify({"success": False, "error": "Class not found or unauthorized."}), 404
+
+            roster = target_class.get("students") or []
+            if not roster:
+                return jsonify({"success": False, "error": "No enrolled students in this class."}), 400
+
+            event_time = int(datetime.utcnow().timestamp())
+            for student in roster:
+                s_rec_id = str(student.get("student_user_id") or student.get("id") or student.get("student_id") or "").strip()
+                if s_rec_id and s_rec_id.lower() not in ("none", "null", ""):
+                    event_key = f"ann_{class_id}_{source_event_id or event_time}_{s_rec_id}"
+                    doc = _create_system_notification(
+                        user_id=s_rec_id,
+                        title=title,
+                        message=message,
+                        category=category,
+                        action_url=action_url or "/app",
+                        notification_type=notification_type,
+                        source_event_id=event_key,
+                        sender_id=str(current_uid)
+                    )
+                    if doc:
+                        created_notifications.append(mongo_serialize(doc))
+
+            return jsonify({
+                "success": True,
+                "message": f"Announcement delivered to {len(created_notifications)} enrolled students.",
+                "count": len(created_notifications),
+                "notifications": created_notifications
+            }), 201
+
+        # 2. Teacher delivering notification to a specific verified student
+        elif session_role == "teacher" and target_student_id:
+            clean_target = str(target_student_id).strip()
+            student_user = _lookup_user_by_id(clean_target)
+            if not student_user:
+                return jsonify({"success": False, "error": "Target student does not exist."}), 404
+
+            doc = _create_system_notification(
+                user_id=clean_target,
+                title=title,
+                message=message,
+                category=category,
+                action_url=action_url,
+                notification_type=notification_type,
+                source_event_id=source_event_id or f"direct_{current_uid}_{int(datetime.utcnow().timestamp())}_{clean_target}",
+                sender_id=str(current_uid)
+            )
+            return jsonify({"success": True, "notification": mongo_serialize(doc)}), 201
+
+        # 3. Standard user-scoped notification
+        else:
+            doc = _create_system_notification(
+                user_id=str(current_uid),
+                title=title,
+                message=message,
+                category=category,
+                action_url=action_url,
+                notification_type=notification_type,
+                source_event_id=source_event_id,
+                sender_id=str(current_uid)
+            )
+            return jsonify({"success": True, "notification": mongo_serialize(doc)}), 201
+
     except Exception as exc:
         logger.error("Create notification error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -8047,54 +8216,96 @@ def create_notification_api():
 @app.route("/api/notifications/<notif_id>/read", methods=["PUT"])
 @require_auth
 def mark_notification_read(notif_id: str):
+    """
+    Mark a specific notification as read, enforcing strict recipient ownership.
+    Rejects unauthorized access with 403 Forbidden.
+    """
     try:
+        user_id = _current_user_id()
+        if not user_id:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+        uid_str = str(user_id).strip()
         mongo_db = get_mongodb()
         if mongo_db is not None:
+            id_clause = [{"id": str(notif_id)}, {"notification_id": str(notif_id)}]
             if ObjectId and len(str(notif_id)) == 24:
                 try:
-                    mongo_db["notifications"].update_one(
-                        {"_id": ObjectId(notif_id)}, {"$set": {"is_read": True}}
-                    )
+                    id_clause.append({"_id": ObjectId(notif_id)})
                 except Exception:
                     pass
+
+            existing = mongo_db["notifications"].find_one({"$or": id_clause})
+            if not existing:
+                return jsonify({"success": False, "error": "Notification not found."}), 404
+
+            # Recipient authorization check
+            rec_id = str(existing.get("recipient_id") or existing.get("target_id") or existing.get("user_id") or "").strip()
+            if rec_id != uid_str:
+                logger.warning(f"[Security] User {uid_str} attempted unauthorized access to notification {notif_id} of user {rec_id}")
+                return jsonify({"success": False, "error": "Unauthorized access to notification."}), 403
+
             mongo_db["notifications"].update_one(
-                {"$or": [{"id": str(notif_id)}, {"notification_id": str(notif_id)}]},
-                {"$set": {"is_read": True}}
+                {"_id": existing["_id"]},
+                {"$set": {"is_read": True, "read_at": datetime.utcnow()}}
             )
-        else:
-            conn   = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE notifications SET is_read=1 WHERE id=? OR notification_id=?", (str(notif_id), str(notif_id)))
-            conn.commit()
+            return jsonify({"success": True, "id": notif_id}), 200
+
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notifications WHERE id = ? OR notification_id = ?", (str(notif_id), str(notif_id)))
+        row = cursor.fetchone()
+        if not row:
             conn.close()
+            return jsonify({"success": False, "error": "Notification not found."}), 404
+
+        row_dict = dict(row)
+        rec_id = str(row_dict.get("recipient_id") or row_dict.get("target_id") or row_dict.get("user_id") or "").strip()
+        if rec_id != uid_str:
+            conn.close()
+            logger.warning(f"[Security] User {uid_str} attempted unauthorized access to notification {notif_id} of user {rec_id}")
+            return jsonify({"success": False, "error": "Unauthorized access to notification."}), 403
+
+        cursor.execute("UPDATE notifications SET is_read = 1 WHERE id = ? OR notification_id = ?", (str(notif_id), str(notif_id)))
+        conn.commit()
+        conn.close()
+
         return jsonify({"success": True, "id": notif_id}), 200
+
     except Exception as exc:
+        logger.error("Mark notification read error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route("/api/notifications/read-all", methods=["PUT"])
 @require_auth
 def mark_all_notifications_read():
-    """Mark all notifications as read for current user."""
+    """Mark all notifications as read for the currently authenticated user only."""
     try:
         user_id = _current_user_id()
-        user = _lookup_user_by_id(user_id) or {}
-        name = user.get("name", "")
+        if not user_id:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
 
+        uid_str = str(user_id).strip()
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            mongo_db["notifications"].update_many(
-                {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_name": name}]},
-                {"$set": {"is_read": True}}
+            res = mongo_db["notifications"].update_many(
+                {"$or": [{"recipient_id": uid_str}, {"target_id": uid_str}, {"user_id": uid_str}]},
+                {"$set": {"is_read": True, "read_at": datetime.utcnow()}}
             )
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE notifications SET is_read=1 WHERE target_id=? OR user_id=? OR target_name=?", (str(user_id), str(user_id), name))
-            conn.commit()
-            conn.close()
+            return jsonify({"success": True, "message": "All notifications marked as read.", "modified_count": res.modified_count}), 200
+
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE notifications SET is_read = 1 
+            WHERE recipient_id = ? OR target_id = ? OR user_id = ?
+        """, (uid_str, uid_str, uid_str))
+        conn.commit()
+        conn.close()
 
         return jsonify({"success": True, "message": "All notifications marked as read."}), 200
+
     except Exception as exc:
         logger.error("Mark all read error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -8103,34 +8314,58 @@ def mark_all_notifications_read():
 @app.route("/api/notifications/<notif_id>", methods=["DELETE"])
 @require_auth
 def delete_notification_api(notif_id: str):
-    """Delete a specific notification."""
+    """
+    Delete a specific notification, enforcing strict recipient ownership.
+    Rejects unauthorized deletion attempts with 403 Forbidden.
+    """
     try:
         user_id = _current_user_id()
+        if not user_id:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+        uid_str = str(user_id).strip()
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            id_clause = []
+            id_clause = [{"id": str(notif_id)}, {"notification_id": str(notif_id)}]
             if ObjectId and len(str(notif_id)) == 24:
                 try:
                     id_clause.append({"_id": ObjectId(notif_id)})
                 except Exception:
                     pass
-            id_clause.append({"id": str(notif_id)})
-            id_clause.append({"notification_id": str(notif_id)})
-            
-            mongo_db["notifications"].delete_many({
-                "$and": [
-                    {"$or": id_clause},
-                    {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_role": "all"}, {"target_role": _current_role()}]}
-                ]
-            })
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM notifications WHERE (id=? OR notification_id=?) AND (target_id=? OR user_id=? OR target_role='all')", (str(notif_id), str(notif_id), str(user_id), str(user_id)))
-            conn.commit()
+
+            existing = mongo_db["notifications"].find_one({"$or": id_clause})
+            if not existing:
+                return jsonify({"success": False, "error": "Notification not found."}), 404
+
+            rec_id = str(existing.get("recipient_id") or existing.get("target_id") or existing.get("user_id") or "").strip()
+            if rec_id != uid_str:
+                logger.warning(f"[Security] User {uid_str} attempted unauthorized deletion of notification {notif_id} of user {rec_id}")
+                return jsonify({"success": False, "error": "Unauthorized access to notification."}), 403
+
+            mongo_db["notifications"].delete_one({"_id": existing["_id"]})
+            return jsonify({"success": True, "id": notif_id, "message": "Notification deleted."}), 200
+
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notifications WHERE id = ? OR notification_id = ?", (str(notif_id), str(notif_id)))
+        row = cursor.fetchone()
+        if not row:
             conn.close()
+            return jsonify({"success": False, "error": "Notification not found."}), 404
+
+        row_dict = dict(row)
+        rec_id = str(row_dict.get("recipient_id") or row_dict.get("target_id") or row_dict.get("user_id") or "").strip()
+        if rec_id != uid_str:
+            conn.close()
+            logger.warning(f"[Security] User {uid_str} attempted unauthorized deletion of notification {notif_id} of user {rec_id}")
+            return jsonify({"success": False, "error": "Unauthorized access to notification."}), 403
+
+        cursor.execute("DELETE FROM notifications WHERE id = ? OR notification_id = ?", (str(notif_id), str(notif_id)))
+        conn.commit()
+        conn.close()
 
         return jsonify({"success": True, "id": notif_id, "message": "Notification deleted."}), 200
+
     except Exception as exc:
         logger.error("Delete notification error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -8139,25 +8374,34 @@ def delete_notification_api(notif_id: str):
 @app.route("/api/notifications", methods=["DELETE"])
 @require_auth
 def clear_all_notifications_api():
-    """Clear all notifications for the current user."""
+    """Clear all notifications belonging exclusively to the current user."""
     try:
         user_id = _current_user_id()
-        user = _lookup_user_by_id(user_id) or {}
-        name = user.get("name", "")
+        if not user_id:
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
 
+        uid_str = str(user_id).strip()
         mongo_db = get_mongodb()
         if mongo_db is not None:
-            mongo_db["notifications"].delete_many(
-                {"$or": [{"target_id": str(user_id)}, {"user_id": str(user_id)}, {"target_name": name}]}
+            res = mongo_db["notifications"].delete_many(
+                {"$or": [{"recipient_id": uid_str}, {"target_id": uid_str}, {"user_id": uid_str}]}
             )
-        else:
-            conn = get_sqlite_db()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM notifications WHERE target_id=? OR user_id=? OR target_name=?", (str(user_id), str(user_id), name))
-            conn.commit()
-            conn.close()
+            return jsonify({"success": True, "message": "All notifications cleared.", "deleted_count": res.deleted_count}), 200
+
+        conn = get_sqlite_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM notifications 
+            WHERE recipient_id = ? OR target_id = ? OR user_id = ?
+        """, (uid_str, uid_str, uid_str))
+        conn.commit()
+        conn.close()
 
         return jsonify({"success": True, "message": "All notifications cleared."}), 200
+
+    except Exception as exc:
+        logger.error("Clear notifications error: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
     except Exception as exc:
         logger.error("Clear notifications error: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 
 export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal }) {
-  const { theme, toggleTheme, logout, role, streakDays, formattedSessionTime, teacherClasses, activeClassId, setActiveClassId, isUserActive, institutionMode } = useApp()
+  const { theme, toggleTheme, logout, role, streakDays, formattedSessionTime, teacherClasses, activeClassId, setActiveClassId, isUserActive, institutionMode, unreadNotificationCount } = useApp()
   const navigate = useNavigate()
   const isTeacher = role === 'teacher'
 
@@ -117,12 +117,16 @@ export default function Topbar({ title, crumb, onMenuClick, onOpenSyllabusModal 
 
           <button
             onClick={() => navigate('/app/notifications')}
-            title="View notifications"
-            aria-label="View notifications"
+            title={unreadNotificationCount > 0 ? `${unreadNotificationCount} unread notification${unreadNotificationCount !== 1 ? 's' : ''}` : "View notifications"}
+            aria-label={unreadNotificationCount > 0 ? `${unreadNotificationCount} unread notification${unreadNotificationCount !== 1 ? 's' : ''}` : "View notifications"}
             className="relative w-9 h-9 flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--surface-alt)] transition-all shadow-xs cursor-pointer"
           >
             <Bell size={17} strokeWidth={1.8} />
-            <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+            {unreadNotificationCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white font-mono text-[10px] font-extrabold flex items-center justify-center border-2 border-[var(--surface)] shadow-xs">
+                {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+              </span>
+            )}
           </button>
 
           <button

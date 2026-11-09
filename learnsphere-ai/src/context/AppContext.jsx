@@ -109,6 +109,9 @@ export function AppProvider({ children }) {
   const [teacherClasses,  setTeacherClasses]       = useState([])
   const [activeClassId,   setActiveClassIdState]   = useState('')
 
+  // ── Notifications (Strictly account-scoped) ───────────────────────────────
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
+
   // ═══════════════════════════════════════════════════════════════════════════
   // STATE CLEANUP & RESET
   // ═══════════════════════════════════════════════════════════════════════════
@@ -125,6 +128,7 @@ export function AppProvider({ children }) {
     setStreakDays(1)
     setTeacherClasses([])
     setActiveClassIdState('')
+    setUnreadNotificationCount(0)
   }, [])
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -301,6 +305,33 @@ export function AppProvider({ children }) {
       if (keyClasses) safeSet(keyClasses, teacherClasses)
     }
   }, [teacherClasses, role, currentUser])
+
+  // ── Account-scoped notification sync ─────────────────────────────────────
+  const refreshNotifications = useCallback(async () => {
+    if (!currentUser) {
+      setUnreadNotificationCount(0)
+      return
+    }
+    try {
+      const res = await api.getNotifications()
+      if (res && res.success && Array.isArray(res.notifications)) {
+        const count = res.unread_count ?? res.notifications.filter(n => !n.is_read).length
+        setUnreadNotificationCount(count)
+      } else {
+        setUnreadNotificationCount(0)
+      }
+    } catch {
+      setUnreadNotificationCount(0)
+    }
+  }, [currentUser])
+
+  useEffect(() => {
+    if (authenticated && currentUser) {
+      refreshNotifications()
+    } else {
+      setUnreadNotificationCount(0)
+    }
+  }, [authenticated, currentUser, refreshNotifications])
 
   // ── Theme sync ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -672,6 +703,11 @@ export function AppProvider({ children }) {
     // Institution
     institutionMode,
     setInstitutionMode,
+
+    // Notifications (Strictly account-scoped)
+    unreadNotificationCount,
+    setUnreadNotificationCount,
+    refreshNotifications,
 
     // Teacher classes (isolated to teachers)
     teacherClasses: filteredTeacherClasses,

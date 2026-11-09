@@ -266,7 +266,12 @@ def _init_mongodb_indexes(db) -> None:
         # plagiarism
         db["plagiarism_records"].create_index("file_hash", sparse=True, background=True)
 
-        # notifications
+        # notifications: strict user-specific isolation & performance indexes
+        db["notifications"].create_index([("recipient_id", 1), ("created_at", -1)], background=True)
+        db["notifications"].create_index([("target_id", 1), ("created_at", -1)], background=True)
+        db["notifications"].create_index([("user_id", 1), ("created_at", -1)], background=True)
+        db["notifications"].create_index([("recipient_id", 1), ("is_read", 1)], background=True)
+        db["notifications"].create_index([("recipient_id", 1), ("source_event_id", 1)], sparse=True, background=True)
         db["notifications"].create_index([("created_at", -1)], background=True)
 
         # opportunities and news
@@ -452,12 +457,19 @@ def _init_sqlite_schema() -> None:
 
     CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        target_role TEXT NOT NULL,
+        notification_id TEXT,
+        recipient_id TEXT,
+        user_id TEXT,
         target_id TEXT,
+        target_role TEXT,
         target_name TEXT,
         title TEXT NOT NULL,
         message TEXT NOT NULL,
         category TEXT DEFAULT 'info',
+        notification_type TEXT DEFAULT 'system',
+        source_event_id TEXT,
+        sender_id TEXT,
+        action_url TEXT,
         is_read BOOLEAN DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -757,7 +769,12 @@ def _init_sqlite_schema() -> None:
     existing_notif_cols = {row[1] for row in cursor.fetchall()}
     needed_notif_cols = {
         "notification_id": "TEXT",
+        "recipient_id": "TEXT",
         "user_id": "TEXT",
+        "target_id": "TEXT",
+        "source_event_id": "TEXT",
+        "notification_type": "TEXT DEFAULT 'system'",
+        "sender_id": "TEXT",
         "action_url": "TEXT",
         "category": "TEXT DEFAULT 'info'"
     }
@@ -767,6 +784,15 @@ def _init_sqlite_schema() -> None:
                 cursor.execute(f"ALTER TABLE notifications ADD COLUMN {col} {defn};")
             except Exception as exc:
                 logger.debug("[DB] SQLite notifications migration notice (%s): %s", col, exc)
+
+    # SQLite notification isolation indexes
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id, is_read, created_at);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_target ON notifications(target_id, is_read, created_at);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_source ON notifications(source_event_id);")
+    except Exception as exc:
+        logger.debug("[DB] SQLite notification index notice: %s", exc)
 
 
     # Migrations for syllabi
