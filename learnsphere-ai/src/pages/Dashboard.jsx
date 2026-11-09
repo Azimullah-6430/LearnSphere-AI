@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api.js'
-import { useApp } from '../context/AppContext.jsx'
+import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { Card, CardHeader, Badge, Button, StatCard } from '../components/ui/Primitives.jsx'
 import {
   Brain,
@@ -31,8 +31,17 @@ import {
   Globe,
   PlusCircle,
   BarChart3,
-  Sparkles
+  Sparkles,
+  Headphones,
+  Volume2,
+  VolumeX,
+  Mic,
+  Target,
+  Award,
+  ListChecks,
+  ArrowUpRight
 } from 'lucide-react'
+import { speakText, stopSpeech, narrateMathClient } from '../utils/blindAudio.js'
 
 export default function Dashboard() {
   const { role, authenticated, authLoading, user } = useApp()
@@ -88,9 +97,32 @@ function UnauthenticatedState() {
 function StudentDashboard() {
   const navigate = useNavigate()
   const { user, streakDays, formattedSessionTime } = useApp()
+  const { curriculum, subjects } = useAuthoritativeCurriculum()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Blind Learning Companion Integration (Prompt 6)
+  const isBlindCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+  const [blindGaps, setBlindGaps] = useState([])
+  const [blindLearningPath, setBlindLearningPath] = useState(null)
+  const [isSpeakingOverview, setIsSpeakingOverview] = useState(false)
+
+  useEffect(() => {
+    if (isBlindCompanionEnabled) {
+      api.getBlindLearningGaps().then(res => {
+        if (res && res.success && Array.isArray(res.learning_gaps)) {
+          setBlindGaps(res.learning_gaps)
+        }
+      }).catch(() => {})
+
+      api.getBlindLearningPath().then(res => {
+        if (res && res.success && res.learning_path) {
+          setBlindLearningPath(res.learning_path)
+        }
+      }).catch(() => {})
+    }
+  }, [isBlindCompanionEnabled])
 
   useEffect(() => {
     async function loadStudentDashboard() {
@@ -166,6 +198,251 @@ function StudentDashboard() {
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {/* Accessible Blind Learning Hub (Prompt 6 - Exclusive to disabled/blind students) */}
+      {isBlindCompanionEnabled && (
+        <div className="p-6 sm:p-7 rounded-3xl bg-indigo-50/90 dark:bg-indigo-950/40 border-2 border-indigo-300 dark:border-indigo-800 space-y-6 shadow-sm">
+          {/* Accessible Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-indigo-200 dark:border-indigo-800">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                <Headphones size={24} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                    Blind Learning Companion
+                  </span>
+                  <Badge tone="accent">Accessible Hub</Badge>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+                  Accessible Learning Dashboard
+                </h2>
+              </div>
+            </div>
+
+            {/* Spoken Overview Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isSpeakingOverview) {
+                  stopSpeech()
+                  setIsSpeakingOverview(false)
+                } else {
+                  const nextStepDesc = blindLearningPath?.steps?.[0]?.title || 'Personal Tutor Lesson'
+                  const gapsCount = blindGaps.length
+                  const syllabusText = subjects.length ? `Your enrolled subjects are: ${subjects.join(', ')}.` : 'No uploaded syllabus found.'
+                  const speech = `Welcome to your Accessible Learning Hub. ${syllabusText} You have ${gapsCount} diagnosed concept areas to improve. Your recommended next lesson is: ${nextStepDesc}. Total evaluated papers: ${totalEvalsCount}. Average mastery: ${avgScore ?? 75} percent.`
+                  speakText(speech, 'Accessible Hub Overview')
+                  setIsSpeakingOverview(true)
+                }
+              }}
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold flex items-center gap-2 cursor-pointer shadow-xs shrink-0"
+              aria-label="Listen to Accessible Dashboard Summary aloud"
+            >
+              {isSpeakingOverview ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              <span>{isSpeakingOverview ? 'Stop Speech' : 'Listen Dashboard Overview'}</span>
+            </button>
+          </div>
+
+          {/* Section 1 & 2: Uploaded Syllabus & Recommended Next Lesson */}
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* My Uploaded Syllabus */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">
+                  <BookOpen size={15} />
+                  <span>My Uploaded Syllabus</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = subjects.length
+                      ? `Uploaded Syllabus contains ${subjects.length} subjects: ${subjects.join(', ')}.`
+                      : 'No syllabus uploaded yet.'
+                    speakText(text, 'Uploaded Syllabus')
+                  }}
+                  className="text-xs font-bold px-2 py-1 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                  aria-label="Read uploaded syllabus details"
+                >
+                  <Volume2 size={12} />
+                  <span>Listen</span>
+                </button>
+              </div>
+              <div>
+                <div className="text-base font-bold text-slate-900 dark:text-white">
+                  {curriculum?.board_or_university || curriculum?.institution_name || (subjects.length > 0 ? `${subjects.length} Enrolled Courses` : 'No Syllabus Uploaded')}
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  {subjects.length > 0 ? `Subjects: ${subjects.join(', ')}` : 'Upload your semester syllabus to unlock automated concept breakdowns.'}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate('/app/settings')}
+                  className="text-xs font-bold"
+                >
+                  Manage Syllabus
+                </Button>
+              </div>
+            </div>
+
+            {/* Recommended Next Lesson (from authentic adaptive_learning_path) */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <Sparkles size={15} />
+                  <span>Recommended Next Lesson</span>
+                </div>
+                {blindLearningPath?.steps?.[0] && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const s = blindLearningPath.steps[0]
+                      speakText(`Next recommended lesson: ${s.title}. Reason: ${s.reason || s.description || 'Targeted concept understanding'}.`, 'Next Lesson')
+                    }}
+                    className="text-xs font-bold px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Volume2 size={12} />
+                    <span>Listen</span>
+                  </button>
+                )}
+              </div>
+              <div>
+                <div className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                  {blindLearningPath?.steps?.[0]?.title || (blindGaps[0]?.topic ? `Reinforce: ${blindGaps[0].topic}` : 'Study Core Concepts with Personal Trainer')}
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  {blindLearningPath?.steps?.[0]?.reason || (blindGaps[0]?.observed_gap ? `Diagnosed gap: ${blindGaps[0].observed_gap}` : 'Personalized based on your validated syllabus.')}
+                </p>
+              </div>
+              <div className="pt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const targetTopic = blindLearningPath?.steps?.[0]?.topic || blindGaps[0]?.topic || ''
+                    const targetSubject = blindLearningPath?.steps?.[0]?.subject || blindGaps[0]?.subject || subjects[0] || ''
+                    navigate('/app/trainer', { state: { topic: targetTopic, subject: targetSubject } })
+                  }}
+                  className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  Start Audio Lesson <ArrowRight size={13} className="ml-1" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Concepts I Need to Improve (from authentic blind_learning_gaps) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                <Target size={15} />
+                <span>Concepts I Need to Improve ({blindGaps.length})</span>
+              </div>
+              {blindGaps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = `You have ${blindGaps.length} concept areas diagnosed with gaps: ${blindGaps.map((g, i) => `Concept ${i + 1}: ${g.topic || g.concept}. ${g.observed_gap || ''}`).join('. ')}`
+                    speakText(text, 'Diagnosed Learning Gaps')
+                  }}
+                  className="text-xs font-bold px-2 py-1 rounded bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <Volume2 size={12} />
+                  <span>Listen All Gaps</span>
+                </button>
+              )}
+            </div>
+
+            {blindGaps.length === 0 ? (
+              <p className="text-xs text-slate-500 py-1">
+                No learning gaps identified yet. Complete tests or challenges to detect areas needing reinforcement.
+              </p>
+            ) : (
+              <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                {blindGaps.slice(0, 6).map((gap, gIdx) => (
+                  <div
+                    key={gIdx}
+                    className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-2 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                        <span className="truncate">{gap.subject || 'Syllabus'}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 text-[10px]">
+                          {gap.status || 'Needs Practice'}
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-extrabold text-slate-900 dark:text-white mt-1 line-clamp-1">
+                        {gap.topic || gap.concept}
+                      </h4>
+                      {gap.observed_gap && (
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 line-clamp-2">
+                          {gap.observed_gap}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 dark:border-amber-800/40">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const speech = `Subject: ${gap.subject}. Topic: ${gap.topic}. Diagnosed gap: ${gap.observed_gap || 'Concept needs more guided practice'}.`
+                          speakText(speech, `Gap: ${gap.topic}`)
+                        }}
+                        className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 hover:underline cursor-pointer"
+                      >
+                        <Volume2 size={11} />
+                        <span>Listen</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/app/trainer', { state: { topic: gap.topic, subject: gap.subject } })}
+                        className="text-[11px] font-bold text-amber-700 dark:text-amber-300 flex items-center gap-0.5 hover:underline cursor-pointer"
+                      >
+                        <span>Practice</span>
+                        <ChevronRight size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Practice and Mastery Accessible Suite */}
+          <div className="space-y-2">
+            <div className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+              <Award size={14} />
+              <span>Practice &amp; Mastery Suite (Accessible)</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+              {[
+                { label: 'Personal Trainer', path: '/app/trainer', desc: 'Audio lesson tutor', icon: Brain },
+                { label: 'Reality Lab', path: '/app/reality-lab', desc: 'Audio lab experiments', icon: Microscope },
+                { label: 'Learn From Anywhere', path: '/app/learn-anywhere', desc: 'Low cost practicals', icon: Compass },
+                { label: 'Knowledge Challenge', path: '/app/knowledge-challenge', desc: 'Spoken Q&A', icon: Zap },
+                { label: 'Memory Cards', path: '/app/memory', desc: 'Audio revision cards', icon: BookOpen }
+              ].map((item, idx) => {
+                const Icon = item.icon
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => navigate(item.path)}
+                    className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 hover:border-indigo-500 text-left transition-all cursor-pointer shadow-2xs group"
+                    aria-label={`Open ${item.label}`}
+                  >
+                    <Icon size={18} className="text-indigo-600 dark:text-indigo-400 mb-1 group-hover:scale-110 transition-transform" />
+                    <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">{item.label}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{item.desc}</div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Executive Student Header Banner */}
       <div className="relative overflow-hidden rounded-3xl bg-[var(--surface)] border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">

@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react'
 import { Card, CardHeader, PageHead, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
-import { BookOpen, Trash2, Plus, CheckCircle2, RotateCcw, Brain, Sparkles, AlertCircle } from 'lucide-react'
+import {
+  BookOpen, Trash2, Plus, CheckCircle2, RotateCcw, Brain, Sparkles, AlertCircle,
+  Headphones, Volume2, VolumeX, Target, AlertTriangle
+} from 'lucide-react'
+import { speakText, stopSpeech, narrateMathClient } from '../utils/blindAudio.js'
 
 export default function Memory() {
   const { user } = useApp()
@@ -37,9 +41,69 @@ export default function Memory() {
     }
   }
 
+  // Blind Learning Companion Integration (Prompt 6)
+  const isBlindCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+  const [learningGaps, setLearningGaps] = useState([])
+  const [isSpeakingAll, setIsSpeakingAll] = useState(false)
+
   useEffect(() => {
     loadMemory()
-  }, [user])
+    if (isBlindCompanionEnabled) {
+      api.getBlindLearningGaps().then(res => {
+        if (res && res.success && Array.isArray(res.learning_gaps)) {
+          setLearningGaps(res.learning_gaps)
+        }
+      }).catch(() => {})
+    }
+  }, [user, isBlindCompanionEnabled])
+
+  const handleGenerateCardsFromGaps = async () => {
+    if (!learningGaps.length) {
+      showToast('No diagnosed learning gaps found to convert.')
+      return
+    }
+    setActionLoading(true)
+    let addedCount = 0
+    try {
+      for (const gap of learningGaps.slice(0, 5)) {
+        const topicName = gap.topic || gap.concept
+        if (!topicName) continue
+        const exists = cards.some(c => c.topic && c.topic.toLowerCase() === topicName.toLowerCase())
+        if (!exists) {
+          await api.createMemoryCard({
+            subject: gap.subject || 'Syllabus Studies',
+            topic: topicName,
+            mastery: 45, // starts as difficult concept needing revision
+            retention_rate: 45,
+            status: 'Learning'
+          })
+          addedCount++
+        }
+      }
+      await loadMemory()
+      showToast(addedCount > 0 ? `Created ${addedCount} revision cards from diagnosed gaps!` : 'All diagnosed gaps already have memory cards.')
+    } catch {
+      showToast('Failed to create cards from gaps.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleSpeakAllDifficult = () => {
+    if (isSpeakingAll) {
+      stopSpeech()
+      setIsSpeakingAll(false)
+      return
+    }
+    const difficult = cards.filter(c => (c.mastery || 0) < 70)
+    if (!difficult.length) {
+      speakText('Great job! You have no difficult concepts with mastery below 70 percent.', 'Revision Complete')
+      return
+    }
+    const script = difficult.map((c, idx) => `Card ${idx + 1}: Subject: ${c.subject}. Topic: ${c.topic}. Current mastery: ${c.mastery ?? 0} percent. Needs review.`).join('. ')
+    speakText(`Starting audio revision for ${difficult.length} difficult concepts. ${script}`, 'Difficult Concepts Revision')
+    setIsSpeakingAll(true)
+  }
 
   useEffect(() => {
     if (!showAddModal) return
@@ -142,11 +206,13 @@ export default function Memory() {
   const filteredCards = cards.filter((c) => {
     if (filter === 'MASTERED') return c.status === 'Mastered' || (c.mastery || 0) >= 80
     if (filter === 'LEARNING') return c.status !== 'Mastered' && (c.mastery || 0) < 80
+    if (filter === 'DIFFICULT') return (c.mastery || 0) < 70
     return true
   })
 
   const masteredCount = cards.filter((c) => c.status === 'Mastered' || (c.mastery || 0) >= 80).length
   const learningCount = cards.length - masteredCount
+  const difficultCount = cards.filter((c) => (c.mastery || 0) < 70).length
   const avgRetention = cards.length ? Math.round(cards.reduce((acc, c) => acc + (c.retention_rate || c.mastery || 0), 0) / cards.length) : 0
 
   return (
@@ -210,8 +276,46 @@ export default function Memory() {
         </div>
       </div>
 
+      {/* Blind Learning Companion Audio Revision (Prompt 6) */}
+      {isBlindCompanionEnabled && (
+        <div className="mb-5 p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                Blind Learning Companion · Audio Revision Engine
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSpeakAllDifficult}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                aria-label="Listen to all difficult cards"
+              >
+                {isSpeakingAll ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                <span>{isSpeakingAll ? 'Stop Speech' : `Revise Difficult Cards (${difficultCount})`}</span>
+              </button>
+
+              {learningGaps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleGenerateCardsFromGaps}
+                  disabled={actionLoading}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-indigo-900/60 border border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 text-xs font-bold flex items-center gap-1.5 hover:bg-indigo-100 cursor-pointer shadow-2xs disabled:opacity-50"
+                  aria-label="Generate revision cards from diagnosed gaps"
+                >
+                  <Sparkles size={13} className="text-amber-500" />
+                  <span>Generate Cards From Diagnosed Mistakes ({learningGaps.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <button
           onClick={() => setFilter('ALL')}
           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
@@ -235,6 +339,14 @@ export default function Memory() {
           }`}
         >
           Learning ({learningCount})
+        </button>
+        <button
+          onClick={() => setFilter('DIFFICULT')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+            filter === 'DIFFICULT' ? 'bg-rose-600 text-white' : 'bg-[var(--surface)] text-[var(--text-soft)] border border-[var(--border)] hover:bg-[var(--surface-alt)]'
+          }`}
+        >
+          Difficult &lt;70% ({difficultCount})
         </button>
       </div>
 
@@ -281,6 +393,20 @@ export default function Memory() {
                       <Badge tone={isMastered ? 'success' : 'warning'}>
                         {isMastered ? 'Mastered' : 'Learning'}
                       </Badge>
+                      {isBlindCompanionEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const speech = `Subject: ${c.subject || 'General'}. Concept: ${c.topic}. Mastery: ${c.mastery ?? 0} percent. Retention index: ${c.retention_rate ?? c.mastery ?? 0} percent. ${isMastered ? 'Concept is currently mastered.' : 'Requires active revision.'}`
+                            speakText(speech, `Memory Card: ${c.topic}`)
+                          }}
+                          title="Listen to this card read aloud"
+                          aria-label={`Listen to ${c.topic} card`}
+                          className="p-1.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 transition-colors cursor-pointer"
+                        >
+                          <Volume2 size={15} />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => handleDeleteCard(cardId, e)}
                         title="Delete this memory card"

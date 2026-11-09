@@ -39,8 +39,15 @@ import {
   CheckCheck,
   ArrowUpRight,
   ListOrdered,
-  AlertCircle
+  AlertCircle,
+  Headphones,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  Activity
 } from 'lucide-react'
+import { speakText, stopSpeech, narrateMathClient } from '../utils/blindAudio.js'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -551,6 +558,12 @@ export default function Trainer() {
   const [answerEvaluating, setAnswerEvaluating] = useState(false)
   const [evaluationFeedback, setEvaluationFeedback] = useState(null)
   const [evalError, setEvalError] = useState(null)
+
+  // Blind Learning Companion Integration (Prompt 6)
+  const isBlindCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+  const [isSpeakingLesson, setIsSpeakingLesson] = useState(false)
+  const [voiceFollowUpListening, setVoiceFollowUpListening] = useState(false)
+  const [voiceAnswerListening, setVoiceAnswerListening] = useState(false)
 
   // Topic filter in Step 2 ('all', 'in_progress', 'completed')
   const [topicFilter, setTopicFilter] = useState('all')
@@ -1367,6 +1380,67 @@ export default function Trainer() {
             </Button>
           </div>
 
+          {/* Blind Learning Companion Audio Bar (Only when Blind Companion is Enabled) */}
+          {isBlindCompanionEnabled && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                    Blind Learning Companion · Audio Assistant
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isSpeakingLesson) {
+                        stopSpeech()
+                        setIsSpeakingLesson(false)
+                      } else {
+                        speakText(lessonContent || 'No lesson content loaded yet.', `Personal Trainer: ${selectedTopic}`)
+                        setIsSpeakingLesson(true)
+                      }
+                    }}
+                    disabled={!lessonContent}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    aria-label="Listen to Personal Trainer lesson narrated aloud"
+                  >
+                    {isSpeakingLesson ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    <span>{isSpeakingLesson ? 'Stop Speech' : 'Listen Lesson'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const mathSpoken = narrateMathClient(lessonContent)
+                      speakText(mathSpoken || 'No mathematical expressions found.', 'Equation Narrator')
+                    }}
+                    disabled={!lessonContent}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 text-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    aria-label="Translate mathematical equations to natural spoken words"
+                  >
+                    <BookOpen size={13} />
+                    <span>Equation Narrator</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const msg = `Concept-to-Sense Mental Model for ${selectedTopic} in ${selectedSubject}. This concept explains the fundamental relationship between circuit parameters and operating constraints, cascading from input laws into step-by-step practical applications.`
+                      speakText(msg, 'Concept to Sense')
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-950/60 hover:bg-blue-200 text-blue-900 dark:text-blue-200 border border-blue-300 dark:border-blue-800 flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to Concept-to-Sense sensory mental model"
+                  >
+                    <Activity size={13} />
+                    <span>Concept-to-Sense</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Clean Lesson Reading Container */}
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8 shadow-xs min-h-[350px]">
             {lessonLoading ? (
@@ -1522,14 +1596,27 @@ export default function Trainer() {
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 flex items-center gap-1.5">
                 <HelpCircle size={14} /> Knowledge Check
               </span>
-              <button
-                onClick={handleProceedToCheckUnderstanding}
-                disabled={quizLoading}
-                className="text-xs font-semibold text-[var(--text-soft)] hover:text-[var(--accent)] flex items-center gap-1 cursor-pointer"
-                title="Generate another question"
-              >
-                <RefreshCw size={12} /> Try New Question
-              </button>
+              <div className="flex items-center gap-2">
+                {isBlindCompanionEnabled && quizQuestion && (
+                  <button
+                    type="button"
+                    onClick={() => speakText(quizQuestion, 'Quiz Question')}
+                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to quiz question spoken aloud"
+                  >
+                    <Volume2 size={13} />
+                    <span>Listen Question</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleProceedToCheckUnderstanding}
+                  disabled={quizLoading}
+                  className="text-xs font-semibold text-[var(--text-soft)] hover:text-[var(--accent)] flex items-center gap-1 cursor-pointer"
+                  title="Generate another question"
+                >
+                  <RefreshCw size={12} /> Try New Question
+                </button>
+              </div>
             </div>
 
             {quizLoading ? (
@@ -1595,8 +1682,21 @@ export default function Trainer() {
             {/* AI Tutor Feedback */}
             {evaluationFeedback && (
               <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 space-y-3 mt-4 animate-in fade-in">
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                  <CheckCheck size={16} /> Tutor Evaluation & Feedback
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                    <CheckCheck size={16} /> Tutor Evaluation & Feedback
+                  </div>
+                  {isBlindCompanionEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => speakText(evaluationFeedback, 'Tutor Feedback')}
+                      className="text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:underline flex items-center gap-1 cursor-pointer"
+                      aria-label="Listen to evaluation feedback read aloud"
+                    >
+                      <Volume2 size={13} />
+                      <span>Listen Feedback</span>
+                    </button>
+                  )}
                 </div>
                 <FormattedContent text={evaluationFeedback} />
               </div>

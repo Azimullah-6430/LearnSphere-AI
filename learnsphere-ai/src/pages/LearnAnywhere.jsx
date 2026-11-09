@@ -53,6 +53,12 @@ import {
   BookOpenCheck,
   GraduationCap,
   User,
+  Headphones,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  Activity,
   Calculator,
   CheckSquare,
   Award,
@@ -64,6 +70,7 @@ import {
   MessageSquare,
   Bot
 } from 'lucide-react'
+import { speakText, stopSpeech, narrateMathClient } from '../utils/blindAudio.js'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -315,6 +322,42 @@ export default function LearnAnywhere() {
   const [historyPage, setHistoryPage] = useState(1)
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historyHasMore, setHistoryHasMore] = useState(false)
+
+  // Blind Learning Companion Integration (Prompt 6)
+  const isBlindCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+  const [weakConcepts, setWeakConcepts] = useState([])
+
+  useEffect(() => {
+    if (isBlindCompanionEnabled) {
+      api.getBlindLearningGaps().then(res => {
+        if (res && res.success && Array.isArray(res.learning_gaps)) {
+          setWeakConcepts(res.learning_gaps)
+        }
+      }).catch(() => {})
+    }
+  }, [isBlindCompanionEnabled])
+  const [isSpeakingConcept, setIsSpeakingConcept] = useState(false)
+  const [isSpeakingActivity, setIsSpeakingActivity] = useState(false)
+  const [isListeningVoice, setIsListeningVoice] = useState(false)
+
+  const handleVoiceInput = (setter) => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser.')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    setIsListeningVoice(true)
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript
+      setter(transcript)
+      setIsListeningVoice(false)
+    }
+    recognition.onerror = () => setIsListeningVoice(false)
+    recognition.onend = () => setIsListeningVoice(false)
+    recognition.start()
+  }
   const [editingReflectionId, setEditingReflectionId] = useState(null)
   const [reflectionText, setReflectionText] = useState('')
   const [savingReflection, setSavingReflection] = useState(false)
@@ -1484,6 +1527,38 @@ export default function LearnAnywhere() {
             </button>
           </div>
 
+          {/* Blind Learning Companion - Weak Concepts Direct Recommendations */}
+          {isBlindCompanionEnabled && weakConcepts.length > 0 && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+                <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                  Blind Companion · Concepts Needing Practical Reinforcement
+                </span>
+              </div>
+              <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                These topics were diagnosed with learning gaps from your assessments. Practice them with hands-on household activities:
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {weakConcepts.slice(0, 6).map((gap, gIdx) => (
+                  <button
+                    key={gIdx}
+                    type="button"
+                    onClick={() => {
+                      if (gap.topic) handleTopicSelect(gap.topic)
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-indigo-900/60 border border-indigo-300 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 hover:bg-indigo-100 flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                    aria-label={`Select weak concept ${gap.topic}`}
+                  >
+                    <Target size={12} className="text-indigo-500" />
+                    <span>{gap.topic}</span>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">({gap.status || 'Needs Practice'})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Optional Collapsible Surroundings & Materials Customizer */}
           {showSetupPanel && (
             <div className="p-4 md:p-5 rounded-2xl bg-[var(--surface-alt)]/60 border border-[var(--border)] space-y-5 animate-fadeIn">
@@ -1750,6 +1825,53 @@ export default function LearnAnywhere() {
               </button>
             </div>
           </div>
+
+          {/* Blind Learning Companion Audio Bar (Prompt 6) */}
+          {isBlindCompanionEnabled && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                    Blind Learning Companion · Audio Assistant
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isSpeakingConcept) {
+                        stopSpeech()
+                        setIsSpeakingConcept(false)
+                      } else {
+                        const text = narrateMathClient(
+                          `${activity.title || selectedTopic}. Core concept: ${activity.overview || ''}. Scientific principle: ${activity.scientific_principle || ''}`
+                        )
+                        speakText(text, `Learn From Anywhere: ${selectedTopic}`)
+                        setIsSpeakingConcept(true)
+                      }
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to concept explanation"
+                  >
+                    {isSpeakingConcept ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    <span>{isSpeakingConcept ? 'Stop Speech' : 'Listen Concept'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = `Everyday Analogy: ${activity.household_analogy || activity.everyday_analogy || 'No analogy provided'}`
+                      speakText(text, 'Analogy')
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-100 dark:bg-indigo-900 hover:bg-indigo-200 text-indigo-900 dark:text-indigo-100 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles size={13} />
+                    <span>Hear Everyday Analogy</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Learning Objective Box */}
           <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-sm text-[var(--text)] space-y-2">
@@ -2187,6 +2309,53 @@ export default function LearnAnywhere() {
               Follow these sequential steps using zero-cost materials from your surroundings. Check off each step as you complete it.
             </p>
           </div>
+
+          {/* Blind Learning Companion Practical Audio Assistant (Prompt 6) */}
+          {isBlindCompanionEnabled && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                    Blind Learning Companion · Audio Practical Guide
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isSpeakingActivity) {
+                        stopSpeech()
+                        setIsSpeakingActivity(false)
+                      } else {
+                        const mats = cleanMaterialsList.length > 0 ? `Materials needed: ${cleanMaterialsList.join(', ')}.` : ''
+                        const steps = (activity.steps || activity.practical_steps || []).map((s, i) => `Step ${i + 1}: ${typeof s === 'string' ? s : s.instruction || s.title}`).join('. ')
+                        const full = `${mats} Practical instructions: ${steps}`
+                        speakText(full, `Practical Activity: ${selectedTopic}`)
+                        setIsSpeakingActivity(true)
+                      }
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to practical instructions"
+                  >
+                    {isSpeakingActivity ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    <span>{isSpeakingActivity ? 'Stop Speech' : 'Listen Activity Steps'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sensory = activity.sensory_guidance || 'Feel the textures, sound vibrations, and thermal temperature changes during each action.'
+                      speakText(`Tactile and sensory guidance: ${sensory}`, 'Tactile Guidance')
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/60 hover:bg-purple-200 text-purple-900 dark:text-purple-100 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Activity size={13} />
+                    <span>Tactile & Sensory Guidance</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Materials Checklist */}
           {cleanMaterialsList.length > 0 && (
@@ -2637,6 +2806,17 @@ export default function LearnAnywhere() {
                         Q{qIdx + 1}
                       </span>
                       <span className="leading-snug">{qObj.question}</span>
+                      {isBlindCompanionEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => speakText(qObj.question, `Checkpoint Question ${qIdx + 1}`)}
+                          className="ml-1 p-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 shrink-0 cursor-pointer"
+                          aria-label={`Listen to question ${qIdx + 1}`}
+                          title="Listen to question"
+                        >
+                          <Volume2 size={13} />
+                        </button>
+                      )}
                     </div>
                     {attemptNum > 0 && (
                       <span className="text-[11px] font-semibold text-[var(--text-faint)] shrink-0">
@@ -2660,6 +2840,18 @@ export default function LearnAnywhere() {
                       }}
                       className="flex-1 px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] min-h-[42px]"
                     />
+                    {isBlindCompanionEnabled && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleVoiceInput((val) => setUserAnswers(prev => ({ ...prev, [qIdx]: (prev[qIdx] ? prev[qIdx] + ' ' : '') + val })))}
+                        title="Dictate answer with voice"
+                        className="px-3 min-h-[42px] cursor-pointer"
+                      >
+                        <Mic size={14} className={isListeningVoice ? "text-rose-500 animate-pulse" : "text-indigo-600"} />
+                      </Button>
+                    )}
                     <Button
                       onClick={() => handleSubmitAnswer(qIdx, qObj)}
                       disabled={isEvaluating || !(userAnswers[qIdx] || '').trim()}
@@ -2678,9 +2870,21 @@ export default function LearnAnywhere() {
                         ? 'bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 border border-emerald-500/20'
                         : 'bg-amber-500/10 text-amber-900 dark:text-amber-200 border border-amber-500/20'
                     }`}>
-                      <div className="font-bold mb-0.5 flex items-center gap-1.5">
-                        {evalResult.is_correct ? <CheckCircle2 size={14} className="text-emerald-600" /> : <AlertTriangle size={14} className="text-amber-600" />}
-                        <span>{evalResult.is_correct ? 'Correct understanding!' : 'Needs review:'}</span>
+                      <div className="font-bold mb-0.5 flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {evalResult.is_correct ? <CheckCircle2 size={14} className="text-emerald-600" /> : <AlertTriangle size={14} className="text-amber-600" />}
+                          <span>{evalResult.is_correct ? 'Correct understanding!' : 'Needs review:'}</span>
+                        </div>
+                        {isBlindCompanionEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => speakText(evalResult.feedback, 'Evaluation Feedback')}
+                            className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-600 text-white flex items-center gap-1 cursor-pointer"
+                          >
+                            <Volume2 size={11} />
+                            <span>Listen Feedback</span>
+                          </button>
+                        )}
                       </div>
                       <p>{evalResult.feedback}</p>
                     </div>

@@ -38,8 +38,14 @@ import {
   Cpu,
   RefreshCw,
   Compass,
+  Headphones,
+  Volume2,
+  VolumeX,
+  ShieldAlert,
+  Mic,
   GraduationCap
 } from 'lucide-react'
+import { speakText, stopSpeech, narrateMathClient } from '../utils/blindAudio.js'
 
 const difficultyTone = { Easy: 'success', Medium: 'warning', Hard: 'error' }
 
@@ -354,6 +360,35 @@ export default function RealityLab() {
   }, [generatedScenarios, dynamicFallbackScenarios])
 
   const scenario = scenarios[scenarioIdx] || scenarios[0]
+
+  // Blind Learning Companion Integration (Prompt 6)
+  const isBlindCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+
+  const safetyHazardInfo = useMemo(() => {
+    if (!scenario) return null
+    const text = `${scenario.title || ''} ${scenario.description || ''} ${scenario.activity || ''} ${scenario.concept_being_demonstrated || ''} ${activeSubject || ''}`.toLowerCase()
+    const hazards = []
+    if (text.includes('chemical') || text.includes('acid') || text.includes('base') || text.includes('reaction') || text.includes('reagent')) {
+      hazards.push('Chemical Reagents')
+    }
+    if (text.includes('electr') || text.includes('circuit') || text.includes('voltage') || text.includes('current') || text.includes('wire')) {
+      hazards.push('Electrical Current & Voltage')
+    }
+    if (text.includes('heat') || text.includes('thermal') || text.includes('flame') || text.includes('burner') || text.includes('temperature')) {
+      hazards.push('Heat & Thermal Energy')
+    }
+    if (text.includes('sharp') || text.includes('blade') || text.includes('cut') || text.includes('glass') || text.includes('needle')) {
+      hazards.push('Sharp Instruments / Glassware')
+    }
+    if (hazards.length > 0) {
+      return {
+        hasHazard: true,
+        hazards,
+        warning: `Safety Notice: This practical activity involves ${hazards.join(', ')}. Suitable adult or lab instructor supervision, heat/chemical-resistant gloves, and eye protection are strictly required.`
+      }
+    }
+    return null
+  }, [scenario, activeSubject])
 
   const resetLabState = () => {
     setAnswer('')
@@ -710,6 +745,66 @@ export default function RealityLab() {
               <Badge tone="neutral">{activeSubject}</Badge>
             </div>
           </div>
+
+          {/* Blind Learning Companion Sensory & Audio Lab Suite */}
+          {isBlindCompanionEnabled && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Headphones size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                    Accessible Lab Companion · Audio & Non-Visual Assistance
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const desc = `Experiment: ${scenario.title}. Setup Description: ${scenario.concept_being_demonstrated || scenario.description || ''} Scientific Apparatus: ${(scenario.tools || []).join(', ') || 'Standard laboratory equipment'}.`
+                      speakText(desc, 'Lab Setup Audio')
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to audio described experimental setup and apparatus"
+                  >
+                    <Volume2 size={13} />
+                    <span>Audio Description</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sensoryMsg = `Non-Visual Alternative: To perceive this phenomenon without sight, use auditory and tactile indicators. Measure circuit voltage using an acoustic continuity beeper, evaluate thermal heat dissipation using a touch-safe probe, or track chemical reaction progress via gas bubbling effervescence.`
+                      speakText(sensoryMsg, 'Sensory Alternative')
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-purple-100 dark:bg-purple-950/60 hover:bg-purple-200 text-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-800 flex items-center gap-1 cursor-pointer"
+                    aria-label="Listen to non-visual sensory alternative techniques"
+                  >
+                    <Activity size={13} />
+                    <span>Non-Visual Alternative</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Safety Precautions Alert (Prompt 6 Requirement 2) */}
+              {safetyHazardInfo?.hasHazard && (
+                <div className="p-3 rounded-xl bg-amber-100/80 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                  <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <strong className="block font-bold">Lab Safety Precaution & Supervision Notice:</strong>
+                    <p className="leading-relaxed">{safetyHazardInfo.warning}</p>
+                    <button
+                      type="button"
+                      onClick={() => speakText(safetyHazardInfo.warning, 'Safety Warning')}
+                      className="text-[11px] font-bold text-amber-800 dark:text-amber-300 underline flex items-center gap-1 cursor-pointer pt-0.5"
+                    >
+                      <Volume2 size={11} />
+                      <span>Hear Safety Instructions</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <Card className="border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2">
