@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Card, PageHead, SearchBox, Badge, Button } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
@@ -11,7 +11,19 @@ import {
 
 export default function History() {
   const { role, user, activeClass } = useApp()
+  const navigate = useNavigate()
   const location = useLocation()
+  const isBlindStudent = role === 'student' && Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+
+  useEffect(() => {
+    if (isBlindStudent) {
+      navigate('/app/blind-companion', { replace: true })
+    }
+  }, [isBlindStudent, navigate])
+
+  if (isBlindStudent) {
+    return null
+  }
   const [evaluations, setEvaluations] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

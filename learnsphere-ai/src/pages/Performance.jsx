@@ -7,12 +7,13 @@ import { api } from '../services/api.js'
 import {
   FileText, ArrowRight, TrendingUp, TrendingDown, Award,
   CheckCircle2, AlertTriangle, AlertCircle, BookOpen, Brain,
-  Sparkles, History, Eye, X, HelpCircle, Layers, Trash2
+  Sparkles, History, Eye, X, HelpCircle, Layers, Trash2, Headphones
 } from 'lucide-react'
 
 export default function Performance() {
   const { user } = useApp()
   const navigate = useNavigate()
+  const isBlind = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
   const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selectedEvalDetail, setSelectedEvalDetail] = useState(null)
@@ -114,7 +115,9 @@ export default function Performance() {
     <>
       <PageHead
         title="Performance Analytics"
-        subtitle="Track evaluation scores, subject performance averages, and longitudinal mastery trends."
+        subtitle={isBlind
+          ? "Track mastery progress, subject performance averages, and longitudinal concept trends."
+          : "Track evaluation scores, subject performance averages, and longitudinal mastery trends."}
       />
 
       {loading ? (
@@ -124,14 +127,29 @@ export default function Performance() {
         </Card>
       ) : !hasData ? (
         <Card className="p-12 text-center my-6 border-dashed border-2">
-          <FileText size={48} className="text-[var(--accent)] mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Evaluation Data Recorded Yet</h3>
-          <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-5 leading-relaxed">
-            You haven't completed any graded evaluations yet. Submit an exam question paper and answer script in Self-Evaluation to generate your performance analytics.
-          </p>
-          <Button onClick={() => navigate('/app/self-evaluation')} className="mx-auto flex items-center gap-2">
-            Run Your First Self-Evaluation <ArrowRight size={15} />
-          </Button>
+          {isBlind ? (
+            <>
+              <Headphones size={48} className="text-indigo-600 dark:text-indigo-400 mx-auto mb-3" />
+              <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Learning Activity Recorded Yet</h3>
+              <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-5 leading-relaxed">
+                You haven't completed any audio learning checkpoints or knowledge challenges yet. Complete interactive voice quizzes and trainer checkpoints to generate your accessible performance analytics.
+              </p>
+              <Button onClick={() => navigate('/app/knowledge-challenge')} className="mx-auto flex items-center gap-2 bg-indigo-600 text-white hover:bg-indigo-700">
+                Start Knowledge Challenge <ArrowRight size={15} />
+              </Button>
+            </>
+          ) : (
+            <>
+              <FileText size={48} className="text-[var(--accent)] mx-auto mb-3" />
+              <h3 className="text-lg font-bold mb-1 text-[var(--text)]">No Evaluation Data Recorded Yet</h3>
+              <p className="text-xs text-[var(--text-soft)] max-w-md mx-auto mb-5 leading-relaxed">
+                You haven't completed any graded evaluations yet. Submit an exam question paper and answer script in Self-Evaluation to generate your performance analytics.
+              </p>
+              <Button onClick={() => navigate('/app/self-evaluation')} className="mx-auto flex items-center gap-2">
+                Run Your First Self-Evaluation <ArrowRight size={15} />
+              </Button>
+            </>
+          )}
         </Card>
       ) : (
         <div className="space-y-6">
@@ -139,13 +157,13 @@ export default function Performance() {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="p-5 border-l-4 border-l-[var(--accent)] shadow-xs">
               <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-1">
-                Completed Evaluations
+                {isBlind ? 'Completed Checkpoints' : 'Completed Evaluations'}
               </div>
               <div className="text-3xl font-extrabold text-[var(--text)]">
                 {analytics.total_evaluations}
               </div>
               <div className="text-xs text-[var(--text-soft)] font-medium mt-1">
-                Stored in academic database
+                {isBlind ? 'Recorded in Accessible Hub' : 'Stored in academic database'}
               </div>
             </Card>
 

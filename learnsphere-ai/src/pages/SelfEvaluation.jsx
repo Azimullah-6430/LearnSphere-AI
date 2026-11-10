@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHead, Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp } from '../context/AppContext.jsx'
@@ -22,6 +22,18 @@ export default function SelfEvaluation() {
   const { user, recordActivity } = useApp()
   const navigate = useNavigate()
   const activeProfile = user
+
+  const isBlind = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+
+  useEffect(() => {
+    if (isBlind) {
+      navigate('/app/blind-companion', { replace: true })
+    }
+  }, [isBlind, navigate])
+
+  if (isBlind) {
+    return null
+  }
 
   // Manual inputs for Student Name and Subject
   const [studentName, setStudentName] = useState(user?.name || '')

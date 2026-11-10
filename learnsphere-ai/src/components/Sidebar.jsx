@@ -62,6 +62,7 @@ function Item({ to, icon: Icon, children, onClick, badge }) {
 export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
   const { role, user, logout } = useApp()
   const isTeacher = role === 'teacher'
+  const isBlindStudent = !isTeacher && Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
 
   return (
     <aside
@@ -156,15 +157,19 @@ export default function Sidebar({ open, onClose, onOpenSyllabusModal }) {
         {!isTeacher && (
           <>
             <NavLabel>My Academics</NavLabel>
-            <Item to="/app/self-evaluation" icon={CheckCircle2} badge="Grading">
-              Self Evaluation
-            </Item>
+            {!isBlindStudent && (
+              <Item to="/app/self-evaluation" icon={CheckCircle2} badge="Grading">
+                Self Evaluation
+              </Item>
+            )}
             <Item to="/app/performance" icon={LineChart}>
               My Performance
             </Item>
-            <Item to="/app/history" icon={History}>
-              My Evaluated Papers
-            </Item>
+            {!isBlindStudent && (
+              <Item to="/app/history" icon={History}>
+                My Evaluated Papers
+              </Item>
+            )}
 
             <NavLabel>AI Learning Studios</NavLabel>
             <Item to="/app/trainer" icon={Bot} badge="Tutor">

@@ -175,12 +175,13 @@ def extract_student_learning_evidence(
     student_id: str,
     student_name: str,
     mongo_db: Any = None,
-    sqlite_conn: Any = None
+    sqlite_conn: Any = None,
+    include_self_eval: bool = True
 ) -> List[Dict[str, Any]]:
     """
     Collect authentic learning records strictly belonging to the authenticated student:
     - Knowledge Challenge attempts
-    - Student Self-Evaluations (STUDENT_SELF_EVALUATION or created_by_role == 'student')
+    - Student Self-Evaluations (STUDENT_SELF_EVALUATION or created_by_role == 'student', excluded for blind mode)
     - Blind Companion Practice Attempts
     """
     evidence_items = []
@@ -307,81 +308,82 @@ def extract_student_learning_evidence(
         except Exception as exc:
             logger.debug("[LearningGapDetector] SQLite KC error: %s", exc)
 
-    # 3. Student Self-Evaluations (Strictly student role evaluations)
-    if mongo_db is not None:
-        try:
-            self_evals = list(mongo_db["evaluations"].find({
-                "$and": [
-                    {"$or": [{"student_id": clean_id}, {"created_by_user_id": clean_id}]},
-                    {"$or": [
-                        {"evaluation_source": "STUDENT_SELF_EVALUATION"},
-                        {"created_by_role": "student"},
-                        {"role": "student"}
-                    ]}
-                ]
-            }))
-            for se in self_evals:
-                subj = se.get("subject") or "General Academic"
-                eval_id = str(se.get("_id") or se.get("id"))
-                questions = se.get("questions") or []
-                if isinstance(questions, list):
-                    for q in questions:
-                        q_awarded = float(q.get("awarded_marks", 0))
-                        q_max = float(q.get("maximum_marks", 5))
-                        is_corr = q_awarded >= (q_max * 0.7)
-                        evidence_items.append({
-                            "source": "self_evaluation",
-                            "subject": subj,
-                            "unit": se.get("unit") or "",
-                            "topic": q.get("topic") or subj,
-                            "subtopic": q.get("subtopic") or q.get("topic") or subj,
-                            "question_text": q.get("question_number") or q.get("question_type") or "Evaluation Question",
-                            "student_answer": q.get("student_answer") or q.get("answer_summary") or "",
-                            "expected_answer": q.get("expected_answer") or "",
-                            "is_correct": is_corr,
-                            "score": q_awarded,
-                            "max_score": q_max,
-                            "missing_points": q.get("missing_points") or "",
-                            "feedback": q.get("improvement_advice") or "",
-                            "created_at": se.get("created_at")
-                        })
-        except Exception as exc:
-            logger.debug("[LearningGapDetector] Mongo Self-Evaluation error: %s", exc)
-    elif sqlite_conn is not None:
-        try:
-            cursor = sqlite_conn.cursor()
-            cursor.execute("""
-                SELECT e.id as eval_id, e.subject, eq.*
-                FROM evaluations e
-                JOIN evaluation_questions eq ON e.id = eq.evaluation_id
-                WHERE (e.student_id = ? OR e.created_by_user_id = ?)
-                  AND (e.evaluation_source = 'STUDENT_SELF_EVALUATION' OR e.created_by_role = 'student')
-                ORDER BY e.created_at DESC
-            """, (clean_id, clean_id))
-            rows = cursor.fetchall()
-            for row in rows:
-                r = dict(row)
-                q_awarded = float(r.get("awarded_marks") or 0.0)
-                q_max = float(r.get("maximum_marks") or 5.0)
-                is_corr = q_awarded >= (q_max * 0.7)
-                evidence_items.append({
-                    "source": "self_evaluation",
-                    "subject": r.get("subject") or "General Academic",
-                    "unit": "",
-                    "topic": r.get("question_type") or r.get("subject"),
-                    "subtopic": r.get("question_type") or r.get("subject"),
-                    "question_text": f"Question {r.get('question_number')}",
-                    "student_answer": r.get("student_answer") or r.get("answer_summary") or "",
-                    "expected_answer": r.get("expected_answer") or "",
-                    "is_correct": is_corr,
-                    "score": q_awarded,
-                    "max_score": q_max,
-                    "missing_points": r.get("missing_points") or "",
-                    "feedback": r.get("improvement_advice") or "",
-                    "created_at": r.get("created_at")
-                })
-        except Exception as exc:
-            logger.debug("[LearningGapDetector] SQLite Self-Evaluation error: %s", exc)
+    # 3. Student Self-Evaluations (Only for non-blind students)
+    if include_self_eval:
+        if mongo_db is not None:
+            try:
+                self_evals = list(mongo_db["evaluations"].find({
+                    "$and": [
+                        {"$or": [{"student_id": clean_id}, {"created_by_user_id": clean_id}]},
+                        {"$or": [
+                            {"evaluation_source": "STUDENT_SELF_EVALUATION"},
+                            {"created_by_role": "student"},
+                            {"role": "student"}
+                        ]}
+                    ]
+                }))
+                for se in self_evals:
+                    subj = se.get("subject") or "General Academic"
+                    eval_id = str(se.get("_id") or se.get("id"))
+                    questions = se.get("questions") or []
+                    if isinstance(questions, list):
+                        for q in questions:
+                            q_awarded = float(q.get("awarded_marks", 0))
+                            q_max = float(q.get("maximum_marks", 5))
+                            is_corr = q_awarded >= (q_max * 0.7)
+                            evidence_items.append({
+                                "source": "self_evaluation",
+                                "subject": subj,
+                                "unit": se.get("unit") or "",
+                                "topic": q.get("topic") or subj,
+                                "subtopic": q.get("subtopic") or q.get("topic") or subj,
+                                "question_text": q.get("question_number") or q.get("question_type") or "Evaluation Question",
+                                "student_answer": q.get("student_answer") or q.get("answer_summary") or "",
+                                "expected_answer": q.get("expected_answer") or "",
+                                "is_correct": is_corr,
+                                "score": q_awarded,
+                                "max_score": q_max,
+                                "missing_points": q.get("missing_points") or "",
+                                "feedback": q.get("improvement_advice") or "",
+                                "created_at": se.get("created_at")
+                            })
+            except Exception as exc:
+                logger.debug("[LearningGapDetector] Mongo Self-Evaluation error: %s", exc)
+        elif sqlite_conn is not None:
+            try:
+                cursor = sqlite_conn.cursor()
+                cursor.execute("""
+                    SELECT e.id as eval_id, e.subject, eq.*
+                    FROM evaluations e
+                    JOIN evaluation_questions eq ON e.id = eq.evaluation_id
+                    WHERE (e.student_id = ? OR e.created_by_user_id = ?)
+                      AND (e.evaluation_source = 'STUDENT_SELF_EVALUATION' OR e.created_by_role = 'student')
+                    ORDER BY e.created_at DESC
+                """, (clean_id, clean_id))
+                rows = cursor.fetchall()
+                for row in rows:
+                    r = dict(row)
+                    q_awarded = float(r.get("awarded_marks") or 0.0)
+                    q_max = float(r.get("maximum_marks") or 5.0)
+                    is_corr = q_awarded >= (q_max * 0.7)
+                    evidence_items.append({
+                        "source": "self_evaluation",
+                        "subject": r.get("subject") or "General Academic",
+                        "unit": "",
+                        "topic": r.get("question_type") or r.get("subject"),
+                        "subtopic": r.get("question_type") or r.get("subject"),
+                        "question_text": f"Question {r.get('question_number')}",
+                        "student_answer": r.get("student_answer") or r.get("answer_summary") or "",
+                        "expected_answer": r.get("expected_answer") or "",
+                        "is_correct": is_corr,
+                        "score": q_awarded,
+                        "max_score": q_max,
+                        "missing_points": r.get("missing_points") or "",
+                        "feedback": r.get("improvement_advice") or "",
+                        "created_at": r.get("created_at")
+                    })
+            except Exception as exc:
+                logger.debug("[LearningGapDetector] SQLite Self-Evaluation error: %s", exc)
 
     return evidence_items
 
@@ -391,7 +393,8 @@ def analyze_student_learning_gaps(
     student_name: str,
     syllabus_doc: Dict[str, Any] = None,
     mongo_db: Any = None,
-    sqlite_conn: Any = None
+    sqlite_conn: Any = None,
+    is_blind: bool = True
 ) -> Dict[str, Any]:
     """
     Main diagnostic engine for Learning Gap Detector.
@@ -400,7 +403,7 @@ def analyze_student_learning_gaps(
     Computes Topic Learning Status and Evidence Strength.
     """
     clean_id = str(student_id or "").strip()
-    evidence_items = extract_student_learning_evidence(clean_id, student_name, mongo_db, sqlite_conn)
+    evidence_items = extract_student_learning_evidence(clean_id, student_name, mongo_db, sqlite_conn, include_self_eval=not is_blind)
 
     # 1. Build syllabus catalog from authoritative syllabus
     syllabus_tree: Dict[str, Any] = {}
@@ -438,7 +441,11 @@ def analyze_student_learning_gaps(
             "total_attempts": 0,
             "learning_gaps": [],
             "topic_status_map": status_map,
-            "audio_summary": "No practice or evaluation records detected yet. Start exploring your syllabus lessons and attempt checkpoints to unlock personalized learning gap insights."
+            "audio_summary": (
+                "No practice or checkpoint records detected yet. Start exploring your syllabus lessons and attempt checkpoints to unlock personalized learning gap insights."
+                if is_blind else
+                "No practice or evaluation records detected yet. Start exploring your syllabus lessons and attempt checkpoints to unlock personalized learning gap insights."
+            )
         }
 
     # 2. Group evidence items by Subject -> Topic
@@ -604,12 +611,13 @@ def analyze_student_learning_gaps(
 
     # 4. Generate supportive spoken summary (Prompt 3 Requirement 5)
     if not learning_gaps:
-        audio_summary = f"Great work, {student_name}! Based on your evaluated attempts across {len(topic_attempts)} syllabus topics, no active conceptual learning gaps were observed. Keep exploring new units."
+        audio_summary = f"Great work, {student_name}! Based on your practice attempts across {len(topic_attempts)} syllabus topics, no active conceptual learning gaps were observed. Keep exploring new units."
     else:
         gap_count = len(learning_gaps)
         first_gap = learning_gaps[0]
+        analysis_source = "practice attempts and concept checkpoints" if is_blind else "recent practice and self-evaluations"
         audio_summary = (
-            f"Hello {student_name}. We analyzed your recent practice and self-evaluations. "
+            f"Hello {student_name}. We analyzed your {analysis_source}. "
             f"You have {gap_count} specific learning point{'' if gap_count == 1 else 's'} to improve. "
             f"For {first_gap['topic']} in {first_gap['subject']}, the observed area is {first_gap['mistake_nature']}. "
             f"{first_gap['why_learning_gap']} {first_gap['recommended_action']}"

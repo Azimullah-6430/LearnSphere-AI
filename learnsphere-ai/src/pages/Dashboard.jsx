@@ -231,7 +231,7 @@ function StudentDashboard() {
                   const nextStepDesc = blindLearningPath?.steps?.[0]?.title || 'Personal Tutor Lesson'
                   const gapsCount = blindGaps.length
                   const syllabusText = subjects.length ? `Your enrolled subjects are: ${subjects.join(', ')}.` : 'No uploaded syllabus found.'
-                  const speech = `Welcome to your Accessible Learning Hub. ${syllabusText} You have ${gapsCount} diagnosed concept areas to improve. Your recommended next lesson is: ${nextStepDesc}. Total evaluated papers: ${totalEvalsCount}. Average mastery: ${avgScore ?? 75} percent.`
+                  const speech = `Welcome to your Accessible Learning Hub. ${syllabusText} You have ${gapsCount} diagnosed concept areas to improve. Your recommended next lesson is: ${nextStepDesc}. Average mastery: ${avgScore ?? 75} percent.`
                   speakText(speech, 'Accessible Hub Overview')
                   setIsSpeakingOverview(true)
                 }
@@ -468,12 +468,21 @@ function StudentDashboard() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0 flex-wrap">
-            <Button
-              onClick={() => navigate('/app/self-evaluation')}
-              className="flex items-center gap-2 shadow-xs px-4 sm:px-5 py-2.5 text-sm sm:text-base font-extrabold"
-            >
-              <FileCheck size={18} /> Self-Evaluation
-            </Button>
+            {!isBlindCompanionEnabled ? (
+              <Button
+                onClick={() => navigate('/app/self-evaluation')}
+                className="flex items-center gap-2 shadow-xs px-4 sm:px-5 py-2.5 text-sm sm:text-base font-extrabold"
+              >
+                <FileCheck size={18} /> Self-Evaluation
+              </Button>
+            ) : (
+              <Button
+                onClick={() => navigate('/app/blind-companion')}
+                className="flex items-center gap-2 shadow-xs px-4 sm:px-5 py-2.5 text-sm sm:text-base font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                <Headphones size={18} /> Blind Companion
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => navigate('/app/trainer')}
@@ -498,13 +507,19 @@ function StudentDashboard() {
             <div className="text-base sm:text-lg md:text-xl font-extrabold text-slate-900 dark:text-white leading-snug">
               {topWeakConcept
                 ? `Targeted Concept Review: ${topWeakConcept}`
+                : isBlindCompanionEnabled
+                ? (blindLearningPath?.steps?.[0]?.title || 'Advance Syllabus Mastery with Audio Companion')
                 : !hasEvaluations
                 ? 'Upload and Grade Your Handwritten Exam Script'
                 : 'Advance Syllabus Mastery with Personal AI Trainer'}
             </div>
             <div className="text-xs sm:text-sm md:text-[15px] text-slate-700 dark:text-slate-300 font-medium mt-1 leading-relaxed max-w-2xl">
               {topWeakConcept
-                ? `Diagnostic evaluations identified a learning gap in "${topWeakConcept}". Review foundational principles and step-by-step solutions to secure full credit.`
+                ? (isBlindCompanionEnabled
+                    ? `Audio diagnostic identified a concept to reinforce: "${topWeakConcept}". Listen to step-by-step audio explanations and test understanding.`
+                    : `Diagnostic evaluations identified a learning gap in "${topWeakConcept}". Review foundational principles and step-by-step solutions to secure full credit.`)
+                : isBlindCompanionEnabled
+                ? 'Listen to interactive audio explanations, intuitive real-world analogies, and spoken concept checks for your syllabus topics.'
                 : !hasEvaluations
                 ? 'Use automated OCR and rubric evaluation to grade your paper against curriculum marking schemes and detect knowledge gaps.'
                 : 'Get interactive Feynman derivations, intuitive real-world examples, and practice questions for your current syllabus topics.'}
@@ -517,10 +532,12 @@ function StudentDashboard() {
             if (topWeakConcept) {
               navigate('/app/trainer', {
                 state: {
-                  subject: recentEvals[0]?.subject || 'General',
+                  subject: recentEvals[0]?.subject || subjects[0] || 'General',
                   concept: topWeakConcept,
                 },
               })
+            } else if (isBlindCompanionEnabled) {
+              navigate('/app/blind-companion')
             } else if (!hasEvaluations) {
               navigate('/app/self-evaluation')
             } else {
@@ -532,6 +549,8 @@ function StudentDashboard() {
           <span>
             {topWeakConcept
               ? `Master ${topWeakConcept.length > 20 ? topWeakConcept.slice(0, 18) + '…' : topWeakConcept}`
+              : isBlindCompanionEnabled
+              ? 'Start Audio Learning'
               : !hasEvaluations
               ? 'Start First Evaluation'
               : 'Resume AI Tutoring'}
@@ -557,13 +576,23 @@ function StudentDashboard() {
 
       {/* Metric Cards Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-        <StatCard
-          label="Graded Papers"
-          value={loading ? '…' : totalEvalsCount}
-          delta="Verified answer scripts"
-          deltaTone="up"
-          icon={FileText}
-        />
+        {!isBlindCompanionEnabled ? (
+          <StatCard
+            label="Graded Papers"
+            value={loading ? '…' : totalEvalsCount}
+            delta="Verified answer scripts"
+            deltaTone="up"
+            icon={FileText}
+          />
+        ) : (
+          <StatCard
+            label="Accessible Topics"
+            value={loading ? '…' : (blindGaps.length > 0 ? `${blindGaps.length} In Progress` : (subjects.length > 0 ? `${subjects.length} Enrolled` : 'Ready'))}
+            delta="Audio-enabled syllabus"
+            deltaTone="up"
+            icon={Headphones}
+          />
+        )}
         <StatCard
           label="Mastery Average"
           value={loading ? '…' : avgScore !== null ? `${avgScore}%` : '—'}
@@ -576,6 +605,8 @@ function StudentDashboard() {
                 : avgScore >= 40
                 ? 'Passing Tier (40%+)'
                 : 'Needs Support (<40%)'
+              : isBlindCompanionEnabled
+              ? 'Awaiting first audio quiz'
               : 'Awaiting first evaluation'
           }
           deltaTone={avgScore >= 75 ? 'up' : avgScore >= 50 ? 'warning' : 'down'}
@@ -709,71 +740,148 @@ function StudentDashboard() {
           </div>
         </div>
 
-        {/* Right Column: Recent Evaluated Papers */}
+        {/* Right Column: Accessible Learning Hub (for blind students) or Evaluated Papers (for non-blind) */}
         <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title="Recent Evaluated Papers"
-              subtitle="Verified scores and diagnostic breakdown"
-              action={
-                <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')} className="font-bold">
-                  View all <ChevronRight size={15} className="ml-1" />
-                </Button>
-              }
-            />
-
-            {loading ? (
-              <div className="py-12 text-center text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-semibold animate-pulse">
-                Loading recent evaluation records…
-              </div>
-            ) : !hasEvaluations ? (
-              <div className="py-10 text-center border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl p-6 bg-[var(--surface-alt)]/30">
-                <FileText size={40} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
-                <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mb-1">
-                  No Evaluated Papers Found
+          {isBlindCompanionEnabled ? (
+            <Card className="p-5 sm:p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Accessible Learning Hub</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Syllabus-guided audio learning &amp; practice</p>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-medium max-w-xs mx-auto mb-4 leading-relaxed">
-                  Upload a Question Paper and your Handwritten Answer Script in Self-Evaluation for instant step-by-step grading.
-                </p>
-                <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto text-xs sm:text-sm font-extrabold">
-                  Start First Evaluation
-                </Button>
+                <Badge tone="accent">Audio Mode</Badge>
               </div>
-            ) : (
-              <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                {recentEvals.slice(0, 5).map((e, idx) => {
-                  const pct = Number(e.percentage) || 0
-                  return (
-                    <div
-                      key={e.id || e._id || idx}
-                      onClick={() => navigate('/app/history')}
-                      className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-3 rounded-xl cursor-pointer transition-colors"
-                    >
-                      <div className="min-w-0 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-extrabold text-xs">
-                          <FileText size={18} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
-                            {e.subject || 'Subject'}
-                          </div>
-                          <div className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-400 font-semibold mt-0.5 truncate">
-                            {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
-                          </div>
-                        </div>
+
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => navigate('/app/blind-companion')}
+                  className="w-full p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 hover:border-indigo-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                      <Headphones size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors">
+                        Blind Companion
                       </div>
-                      <div className="shrink-0 flex items-center gap-2">
-                        <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
-                          {pct}%
-                        </Badge>
-                        <ChevronRight size={15} className="text-slate-500" />
+                      <div className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                        10-step audio lessons, equation narration &amp; concept diagrams
                       </div>
                     </div>
-                  )
-                })}
+                    <ChevronRight size={16} className="text-indigo-500 shrink-0" />
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/app/knowledge-challenge')}
+                  className="w-full p-4 rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                      <Sparkles size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-amber-600 transition-colors">
+                        Knowledge Challenge
+                      </div>
+                      <div className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                        Spoken adaptive quizzes with voice &amp; keyboard responses
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-amber-500 shrink-0" />
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/app/trainer')}
+                  className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-[var(--surface-alt)]/60 hover:border-[var(--accent)] text-left transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0">
+                      <Brain size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-[var(--accent)] transition-colors">
+                        Personal AI Trainer
+                      </div>
+                      <div className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                        Audio Feynman lessons and gap-targeted practice
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                  </div>
+                </button>
               </div>
-            )}
-          </Card>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader
+                title="Recent Evaluated Papers"
+                subtitle="Verified scores and diagnostic breakdown"
+                action={
+                  <Button variant="ghost" size="sm" onClick={() => navigate('/app/history')} className="font-bold">
+                    View all <ChevronRight size={15} className="ml-1" />
+                  </Button>
+                }
+              />
+
+              {loading ? (
+                <div className="py-12 text-center text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-semibold animate-pulse">
+                  Loading recent evaluation records…
+                </div>
+              ) : !hasEvaluations ? (
+                <div className="py-10 text-center border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl p-6 bg-[var(--surface-alt)]/30">
+                  <FileText size={40} className="text-[var(--accent)] mx-auto mb-2.5 opacity-80" />
+                  <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mb-1">
+                    No Evaluated Papers Found
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 font-medium max-w-xs mx-auto mb-4 leading-relaxed">
+                    Upload a Question Paper and your Handwritten Answer Script in Self-Evaluation for instant step-by-step grading.
+                  </p>
+                  <Button size="sm" onClick={() => navigate('/app/self-evaluation')} className="mx-auto text-xs sm:text-sm font-extrabold">
+                    Start First Evaluation
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {recentEvals.slice(0, 5).map((e, idx) => {
+                    const pct = Number(e.percentage) || 0
+                    return (
+                      <div
+                        key={e.id || e._id || idx}
+                        onClick={() => navigate('/app/history')}
+                        className="py-3.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-alt)] px-3 rounded-xl cursor-pointer transition-colors"
+                      >
+                        <div className="min-w-0 flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 font-extrabold text-xs">
+                            <FileText size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
+                              {e.subject || 'Subject'}
+                            </div>
+                            <div className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-400 font-semibold mt-0.5 truncate">
+                              {e.assessment_title || 'Assessment'} · {e.created_at || 'Recently'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                          <Badge tone={pct >= 75 ? 'success' : pct >= 50 ? 'warning' : 'error'}>
+                            {pct}%
+                          </Badge>
+                          <ChevronRight size={15} className="text-slate-500" />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Academic Profile Tile */}
           <Card className="p-5 sm:p-6">

@@ -28,8 +28,13 @@ Detects common extraction problems:
 - page number treated as subject
 - unrelated semester subjects included
 """
+import os
 import re
+import logging
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
+
+logger = logging.getLogger(__name__)
 
 
 # ── Noise Patterns for Headers, Footers, and Page Numbers ───────────────────────
@@ -125,10 +130,61 @@ class CurriculumCompletenessValidator:
         # Extract raw text representation
         raw_doc_text = ""
         if raw_content_or_file:
-            if isinstance(raw_content_or_file, str):
-                raw_doc_text = raw_content_or_file.lower()
+            is_file = False
+            file_str = str(raw_content_or_file).strip()
+            try:
+                if (
+                    any(file_str.lower().endswith(ext) for ext in [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".docx"])
+                    or os.path.isfile(file_str)
+                    or Path(file_str).is_file()
+                ):
+                    is_file = True
+            except Exception:
+                is_file = False
+
+            if is_file:
+                candidate_path = file_str
+                if not os.path.isfile(candidate_path):
+                    from pathlib import Path
+                    backend_dir = Path(__file__).resolve().parent.parent
+                    for alt in [
+                        backend_dir / file_str,
+                        backend_dir / "uploads" / file_str,
+                        backend_dir / "uploads" / "syllabus" / file_str,
+                        backend_dir / "uploads" / Path(file_str).name,
+                        backend_dir / "uploads" / "syllabus" / Path(file_str).name
+                    ]:
+                        if alt.is_file():
+                            candidate_path = str(alt)
+                            break
+
+                if os.path.isfile(candidate_path):
+                    if candidate_path.lower().endswith(".pdf"):
+                        try:
+                            import pymupdf as fitz
+                            doc = fitz.open(candidate_path)
+                            raw_doc_text = "\n".join(page.get_text("text") or "" for page in doc).lower()
+                        except Exception as e:
+                            logger.warning("[CurriculumValidator] PyMuPDF PDF extract notice: %s", e)
+                    elif candidate_path.lower().endswith(".txt"):
+                        try:
+                            with open(candidate_path, "r", encoding="utf-8", errors="ignore") as f:
+                                raw_doc_text = f.read().lower()
+                        except Exception:
+                            pass
+                # Notice: If it's an image or missing file where text cannot be extracted directly,
+                # raw_doc_text remains empty, NEVER the file path string!
             else:
                 raw_doc_text = str(raw_content_or_file).lower()
+
+        # Fallback to text provided directly in analysis if raw_doc_text is still empty
+        if not raw_doc_text or len(raw_doc_text) < 30:
+            if analysis.get("raw_text"):
+                raw_doc_text = str(analysis.get("raw_text")).lower()
+            elif analysis.get("document_text"):
+                raw_doc_text = str(analysis.get("document_text")).lower()
+            elif analysis.get("sliced_content"):
+                raw_doc_text = str(analysis.get("sliced_content")).lower()
 
         # ── 1. Correct Student ────────────────────────────────────────────────
         c1_passed = bool(student_id)
@@ -379,15 +435,16 @@ class CurriculumCompletenessValidator:
                 continue
 
             # 6. Anti-Hallucination: Verify existence in document if text is present
-            if raw_doc_text and len(raw_doc_text) > 20:
+            if raw_doc_text and len(raw_doc_text) > 30 and not any(raw_doc_text.endswith(ext) for ext in [".pdf", ".png", ".jpg", ".jpeg"]):
                 name_clean = re.sub(r"[^\w\s]", "", s_name.lower()).strip()
                 name_tokens = [w for w in name_clean.split() if len(w) > 3 and w not in ("core", "theory", "laboratory", "elective", "course", "unit", "paper", "project")]
                 code_clean = re.sub(r"[^\w]", "", s_code.lower()).strip() if s_code else ""
                 
                 name_in_doc = (name_clean in raw_doc_text) or (any(tok in raw_doc_text for tok in name_tokens) if name_tokens else False)
                 code_in_doc = bool(code_clean and code_clean in raw_doc_text.replace(" ", ""))
+                has_extracted_evidence = bool((s_text and len(s_text) > 5) or (s_sec and len(s_sec) > 5) or sub.get("semester_evidence"))
                 
-                if not name_in_doc and not code_in_doc:
+                if not name_in_doc and not code_in_doc and not has_extracted_evidence:
                     uncertain_count += 1
                     issues.append(f"Anti-hallucination error: Subject '{s_name}' ({s_code}) does not appear in the uploaded syllabus document.")
                     extraction_problems.append("unrelated semester subjects included")
@@ -534,7 +591,7 @@ class CurriculumCompletenessValidator:
         suspicious_missing = False
         suspicious_reasons = []
 
-        if raw_doc_text:
+        if raw_doc_text and len(raw_doc_text) > 30 and not any(raw_doc_text.endswith(ext) for ext in [".pdf", ".png", ".jpg", ".jpeg"]):
             # Check if practical/laboratory is explicitly in semester table but 0 labs detected
             if re.search(r"\b(?:practical|laboratory|practical\s+courses|laboratories)\b", raw_doc_text) and lab_count == 0:
                 sem_kw = f"semester {student_sem}" if student_sem else "semester"

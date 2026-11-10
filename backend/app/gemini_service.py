@@ -1661,6 +1661,10 @@ RETURN ONLY A VALID JSON OBJECT MATCHING THIS EXACT SCHEMA:
         if not isinstance(res, dict):
             res = det_res
 
+        # Preserve extracted raw text for downstream completeness validation
+        if 'raw_text' in locals() and raw_text and not res.get("raw_text"):
+            res["raw_text"] = raw_text[:50000]
+
         # ── Python Post-Processing & Evidence Normalization ────────────────────
         val_status = str(res.get("validation_status") or "").upper().strip()
         

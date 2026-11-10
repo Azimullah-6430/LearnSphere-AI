@@ -933,7 +933,7 @@ def _normalize_curriculum_doc(doc: dict, user_id: str, user: dict = None) -> dic
                             s_topics.append(u)
 
             deduped_topics = list(dict.fromkeys(s_topics))
-            normalized_subjects.append({
+            subj_entry = {
                 "id": s_id,
                 "subject_id": s_id,
                 "subjectId": s_id,
@@ -943,7 +943,11 @@ def _normalize_curriculum_doc(doc: dict, user_id: str, user: dict = None) -> dic
                 "units": s_units or (chapters_dict.get(s_name) if isinstance(chapters_dict.get(s_name), list) else []),
                 "type": s.get("type") or s.get("category") or "Core Theory",
                 "credits": s.get("credits")
-            })
+            }
+            for prov_key in ("source_section", "source_page", "source_text", "semester_evidence", "confidence", "verified"):
+                if prov_key in s:
+                    subj_entry[prov_key] = s[prov_key]
+            normalized_subjects.append(subj_entry)
             all_topics.extend(deduped_topics)
         elif isinstance(s, str) and s.strip():
             s_name = s.strip()
@@ -2690,7 +2694,7 @@ def analyze_syllabus():
         validation_report = CurriculumCompletenessValidator.validate(
             user=user,
             analysis=analysis,
-            raw_content_or_file=file_input,
+            raw_content_or_file=analysis.get("raw_text") or file_input,
             target_semester=target_semester
         )
 
