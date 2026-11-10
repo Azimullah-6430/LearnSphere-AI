@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Headphones,
   Volume2,
@@ -30,168 +30,212 @@ import {
   Cpu,
   Zap,
   Activity,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Check,
+  Edit3,
+  FileText,
+  AlertCircle,
+  Clock,
+  ArrowUpRight
 } from 'lucide-react'
 import { Card, Button, Badge } from '../components/ui/Primitives.jsx'
 import { useApp, useAuthoritativeCurriculum } from '../context/AppContext.jsx'
 import { api } from '../services/api.js'
+import { narrateMathClient } from '../utils/blindAudio.js'
+
+// ── HOTKEY MAP ───────────────────────────────────────────────────────────────
+// Alt+1: My Syllabus
+// Alt+2: Listen & Learn
+// Alt+3: Practice
+// Alt+4: My Progress
+// Alt+5: Learning Settings
+// Space: Pause / Resume Speech
+// R: Repeat Current Audio
+// S: Stop Speech
+// M: Toggle Microphone
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function BlindCompanion() {
-  const { user, onOpenSyllabusModal } = useApp()
-  const { curriculum, isValid: hasValidCurriculum, subjects, subjectObjects, units: allUnits } = useAuthoritativeCurriculum()
+  const navigate = useNavigate()
+  const { user, onOpenSyllabusModal, updateUserProfile } = useApp()
+  const {
+    curriculum,
+    isValid: hasValidCurriculum,
+    subjects,
+    subjectObjects,
+    units: allUnits
+  } = useAuthoritativeCurriculum()
 
-  // Companion Settings
+  // Master Activation State
+  const isCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
+
+  // Section State: 'syllabus' | 'learn' | 'practice' | 'progress' | 'settings'
+  const [activeSection, setActiveSection] = useState('syllabus')
+
+  // Live Screen Reader Announcement
+  const [liveAnnouncement, setLiveAnnouncement] = useState('')
+  const announceTimerRef = useRef(null)
+
+  const announce = useCallback((text) => {
+    if (!text) return
+    setLiveAnnouncement('')
+    if (announceTimerRef.current) clearTimeout(announceTimerRef.current)
+    announceTimerRef.current = setTimeout(() => {
+      setLiveAnnouncement(text)
+    }, 50)
+  }, [])
+
+  // User Preferences
   const userSettings = user?.blind_companion_settings || {}
   const [audioSpeed, setAudioSpeed] = useState(userSettings.audio_speed || 1.0)
   const [explanationMode, setExplanationMode] = useState(userSettings.explanation_mode || 'detailed')
-  const [audioFirst] = useState(userSettings.audio_first !== false)
-  const [voiceQuestions] = useState(userSettings.voice_questions !== false)
-  const [spokenDiagrams] = useState(userSettings.spoken_diagrams !== false)
+  const [audioFirstNav, setAudioFirstNav] = useState(userSettings.audio_first !== false)
+  const [voiceInputEnabled, setVoiceInputEnabled] = useState(userSettings.voice_questions !== false)
+  const [spokenDiagrams, setSpokenDiagrams] = useState(userSettings.spoken_diagrams !== false)
+  const [highContrast, setHighContrast] = useState(Boolean(userSettings.high_contrast))
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [settingsSuccess, setSettingsSuccess] = useState('')
 
-  // Speech Synthesis State
+  // Speech Synthesis Controller
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentSpeechText, setCurrentSpeechText] = useState('')
-  const [speechLabel, setSpeechLabel] = useState('Ready to assist')
-  const synthRef = useRef(window.speechSynthesis || null)
+  const [speechLabel, setSpeechLabel] = useState('Audio Assistant Ready')
+  const synthRef = useRef(typeof window !== 'undefined' ? window.speechSynthesis : null)
+  const currentUtteranceRef = useRef(null)
 
-  // Speech Recognition (Voice Input) State
+  // Speech Recognition (Voice Input) Controller
   const [isListening, setIsListening] = useState(false)
-  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [pendingTranscript, setPendingTranscript] = useState('')
+  const [transcriptTarget, setTranscriptTarget] = useState(null) // 'question' | 'practice'
+  const [isReviewingTranscript, setIsReviewingTranscript] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
   const recognitionRef = useRef(null)
 
-  // Curriculum Navigation State
+  // Active Curriculum Selection
   const [selectedSubject, setSelectedSubject] = useState('')
   const [selectedUnit, setSelectedUnit] = useState(null)
   const [selectedTopic, setSelectedTopic] = useState(null)
 
-  // AI Tutor Teaching Intelligence State (Integrated with Personal Trainer)
-  const [teachingMode, setTeachingMode] = useState('structured_10_step') // 'structured_10_step' | 'concept_to_sense' | 'simple' | 'detailed' | 'quick_revision'
+  // Listen & Learn State
+  const [teachingMode, setTeachingMode] = useState('structured_10_step')
   const [activeLesson, setActiveLesson] = useState(null)
+  const [activeLessonSections, setActiveLessonSections] = useState([])
+  const [activeSectionIndex, setActiveSectionIndex] = useState(0)
   const [loadingLesson, setLoadingLesson] = useState(false)
-  const [conversationHistory, setConversationHistory] = useState([])
   const [studentQuestion, setStudentQuestion] = useState('')
+  const [conversationHistory, setConversationHistory] = useState([])
+  const [askingQuestion, setAskingQuestion] = useState(false)
 
-  // Concept-to-Sense Component Explorer State
-  const [activeComponent, setActiveComponent] = useState(null)
+  // Practice State
+  const [practiceQuestion, setPracticeQuestion] = useState(null)
+  const [loadingQuestion, setLoadingQuestion] = useState(false)
+  const [practiceAnswer, setPracticeAnswer] = useState('')
+  const [submittingPractice, setSubmittingPractice] = useState(false)
+  const [practiceFeedback, setPracticeFeedback] = useState(null)
 
-  // Evidence-Based Learning Gaps & Topic Status State
+  // Progress & Learning Gaps State
   const [learningGaps, setLearningGaps] = useState([])
   const [topicStatusMap, setTopicStatusMap] = useState({})
-  const [loadingGaps, setLoadingGaps] = useState(false)
-
-  // Adaptive Learning Path State (Prompt 4)
+  const [progressSummaryText, setProgressSummaryText] = useState('')
+  const [loadingProgress, setLoadingProgress] = useState(false)
   const [learningPath, setLearningPath] = useState(null)
   const [loadingPath, setLoadingPath] = useState(false)
-  const [activeCommandResult, setActiveCommandResult] = useState(null)
-  const [voiceListening, setVoiceListening] = useState(false)
 
-  // Practice & Checkpoint State
-  const [practiceAnswer, setPracticeAnswer] = useState('')
-  const [practiceSubmitted, setPracticeSubmitted] = useState(false)
-  const [practiceFeedback, setPracticeFeedback] = useState('')
-  const [assessingPractice, setAssessingPractice] = useState(false)
-
-  // Accessible Mastery Assessment State (Prompt 5)
-  const [masteryQuestions, setMasteryQuestions] = useState([])
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
-  const [masteryAnswer, setMasteryAnswer] = useState('')
-  const [submissionMode, setSubmissionMode] = useState('keyboard')
-  const [isDictating, setIsDictating] = useState(false)
-  const [transcriptReviewed, setTranscriptReviewed] = useState(false)
-  const [showConfirmModal, setShowConfirmModal] = useState(false)
-  const [loadingQuestions, setLoadingQuestions] = useState(false)
-  const [evaluatingMastery, setEvaluatingMastery] = useState(false)
-  const [masteryResult, setMasteryResult] = useState(null)
-  const [selectedTier, setSelectedTier] = useState('adaptive')
-
-  // Accessible Display States
-  const [showHelpModal, setShowHelpModal] = useState(false)
-  const [highContrast, setHighContrast] = useState(false)
-
-  // Access Isolation Check
-  const isCompanionEnabled = Boolean(user?.is_disabled_student || user?.blind_companion_enabled)
-
-  // ── Speech Synthesis Engine ────────────────────────────────────────────────
-  const speakText = useCallback((text, label = 'Audio Reader') => {
-    if (!synthRef.current) return
-    const synth = synthRef.current
-    synth.cancel()
-
-    if (!text || typeof text !== 'string') return
-
-    // Clean formatting while verbalizing equations and punctuation pauses
-    const cleanText = text
-      .replace(/###/g, '')
-      .replace(/##/g, '')
-      .replace(/#/g, '')
-      .replace(/\*\*/g, '')
-      .replace(/\*/g, '')
-      .replace(/```mermaid[\s\S]*?```/g, ' Diagram workflow is narrated below. ')
-      .replace(/```[\s\S]*?```/g, ' Code snippet. ')
-      .replace(/\$([^\$]+)\$/g, '$1')
-      .replace(/\s+/g, ' ')
-      .trim()
-
-    if (!cleanText) return
-
-    const utterance = new SpeechSynthesisUtterance(cleanText)
-    utterance.rate = audioSpeed
-    utterance.pitch = 1.0
-
-    const voices = synth.getVoices ? synth.getVoices() : []
-    const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha')))
-    if (preferredVoice) utterance.voice = preferredVoice
-
-    utterance.onstart = () => {
-      setIsSpeaking(true)
-      setIsPaused(false)
-      setCurrentSpeechText(cleanText)
-      setSpeechLabel(label)
+  // ── 1. Speech Synthesis Engine ─────────────────────────────────────────────
+  const stopSpeech = useCallback(() => {
+    if (synthRef.current) {
+      synthRef.current.cancel()
     }
+    setIsSpeaking(false)
+    setIsPaused(false)
+    setSpeechLabel('Audio stopped')
+  }, [])
 
-    utterance.onend = () => {
-      setIsSpeaking(false)
-      setIsPaused(false)
-    }
+  const speakText = useCallback(
+    (text, label = 'Audio Reader', onComplete) => {
+      if (!synthRef.current) return
+      stopSpeech()
 
-    utterance.onerror = () => {
-      setIsSpeaking(false)
-      setIsPaused(false)
-    }
+      if (!text || typeof text !== 'string') return
 
-    synth.speak(utterance)
-  }, [audioSpeed])
+      // Translate math notation and strip markdown symbols
+      let clean = text
+        .replace(/\$([^\$]+)\$/g, (_, expr) => narrateMathClient(expr))
+        .replace(/###/g, '')
+        .replace(/##/g, '')
+        .replace(/#/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/```mermaid[\s\S]*?```/g, ' Diagram workflow is narrated below. ')
+        .replace(/```[\s\S]*?```/g, ' Code snippet. ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+      if (!clean) return
+
+      const utterance = new SpeechSynthesisUtterance(clean)
+      utterance.rate = audioSpeed
+      utterance.pitch = 1.0
+
+      const voices = synthRef.current.getVoices ? synthRef.current.getVoices() : []
+      const preferred = voices.find(
+        (v) =>
+          v.lang.startsWith('en') &&
+          (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha'))
+      )
+      if (preferred) utterance.voice = preferred
+
+      utterance.onstart = () => {
+        setIsSpeaking(true)
+        setIsPaused(false)
+        setCurrentSpeechText(clean)
+        setSpeechLabel(label)
+        announce(label)
+      }
+
+      utterance.onend = () => {
+        setIsSpeaking(false)
+        setIsPaused(false)
+        if (onComplete) onComplete()
+      }
+
+      utterance.onerror = () => {
+        setIsSpeaking(false)
+        setIsPaused(false)
+      }
+
+      currentUtteranceRef.current = utterance
+      synthRef.current.speak(utterance)
+    },
+    [audioSpeed, stopSpeech, announce]
+  )
 
   const pauseSpeech = useCallback(() => {
     if (synthRef.current && synthRef.current.speaking && !synthRef.current.paused) {
       synthRef.current.pause()
       setIsPaused(true)
+      setSpeechLabel('Audio paused')
+      announce('Audio paused')
     }
-  }, [])
+  }, [announce])
 
   const resumeSpeech = useCallback(() => {
     if (synthRef.current && synthRef.current.paused) {
       synthRef.current.resume()
       setIsPaused(false)
+      setSpeechLabel('Audio resumed')
+      announce('Audio resumed')
     }
-  }, [])
-
-  const stopSpeech = useCallback(() => {
-    if (synthRef.current) {
-      synthRef.current.cancel()
-      setIsSpeaking(false)
-      setIsPaused(false)
-      setSpeechLabel('Audio stopped')
-    }
-  }, [])
+  }, [announce])
 
   const repeatSpeech = useCallback(() => {
     if (currentSpeechText) {
       speakText(currentSpeechText, speechLabel)
+    } else {
+      announce('Nothing to repeat')
     }
-  }, [currentSpeechText, speechLabel, speakText])
+  }, [currentSpeechText, speechLabel, speakText, announce])
 
   // Stop speech on unmount
   useEffect(() => {
@@ -200,2067 +244,2096 @@ export default function BlindCompanion() {
     }
   }, [])
 
-  // ── Speech Recognition Engine (Voice Questions) ───────────────────────────
+  // ── 2. Speech Recognition (Voice Input) Engine ─────────────────────────────
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (SpeechRecognition) {
+    const SpeechRec = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
+    if (SpeechRec) {
       setVoiceSupported(true)
-      const recognizer = new SpeechRecognition()
-      recognizer.continuous = false
-      recognizer.interimResults = true
-      recognizer.lang = 'en-US'
+      const instance = new SpeechRec()
+      instance.continuous = false
+      instance.interimResults = false
+      instance.lang = 'en-US'
 
-      recognizer.onstart = () => {
+      instance.onstart = () => {
         setIsListening(true)
-        setSpeechLabel('Listening to your spoken question...')
+        announce('Listening. Please speak your answer or question clearly.')
       }
 
-      recognizer.onresult = (event) => {
-        const transcript = Array.from(event.results)
-          .map(r => r[0].transcript)
-          .join('')
-        setVoiceTranscript(transcript)
-        setStudentQuestion(transcript)
+      instance.onresult = (evt) => {
+        const transcript = evt.results?.[0]?.[0]?.transcript || ''
+        if (transcript.trim()) {
+          setPendingTranscript(transcript.trim())
+          setIsReviewingTranscript(true)
+          const readout = `Recognized speech: "${transcript.trim()}". Please review and confirm before submission.`
+          speakText(readout, 'Voice Transcript Review')
+        }
       }
 
-      recognizer.onerror = () => {
+      instance.onerror = (err) => {
+        console.warn('[BlindCompanion] Speech recognition error:', err)
+        setIsListening(false)
+        announce('Speech recognition error. You can type using your keyboard.')
+      }
+
+      instance.onend = () => {
         setIsListening(false)
       }
 
-      recognizer.onend = () => {
-        setIsListening(false)
-      }
-
-      recognitionRef.current = recognizer
-    }
-  }, [])
-
-  const toggleVoiceInput = useCallback(() => {
-    if (!recognitionRef.current) {
-      speakText('Speech recognition is not supported in this browser. You can type your question in the text box.', 'Voice Notice')
-      return
-    }
-
-    if (isListening) {
-      recognitionRef.current.stop()
-      setIsListening(false)
+      recognitionRef.current = instance
     } else {
-      // Pause TTS before listening
-      if (synthRef.current) synthRef.current.cancel()
-      setIsSpeaking(false)
-      setVoiceTranscript('')
-      try {
-        recognitionRef.current.start()
-      } catch (err) {
-        console.warn('Recognition start error', err)
-      }
+      setVoiceSupported(false)
     }
-  }, [isListening, speakText])
+  }, [announce, speakText])
 
-  // ── Keyboard Shortcuts Listener ───────────────────────────────────────────
+  const startVoiceDictation = useCallback(
+    (target) => {
+      if (!voiceSupported) {
+        announce('Speech recognition is not supported in this browser. Please use the keyboard text input.')
+        return
+      }
+      stopSpeech()
+      setTranscriptTarget(target)
+      setPendingTranscript('')
+      setIsReviewingTranscript(false)
+      try {
+        recognitionRef.current?.start()
+      } catch (err) {
+        console.debug('Recognition restart:', err)
+      }
+    },
+    [voiceSupported, announce, stopSpeech]
+  )
+
+  const cancelVoiceDictation = useCallback(() => {
+    try {
+      recognitionRef.current?.stop()
+    } catch {
+      // ignore
+    }
+    setIsListening(false)
+    setIsReviewingTranscript(false)
+    setPendingTranscript('')
+    announce('Voice dictation cancelled.')
+  }, [announce])
+
+  const confirmPendingTranscript = useCallback(() => {
+    if (transcriptTarget === 'question') {
+      setStudentQuestion(pendingTranscript)
+      setIsReviewingTranscript(false)
+      announce(`Question confirmed: ${pendingTranscript}`)
+    } else if (transcriptTarget === 'practice') {
+      setPracticeAnswer(pendingTranscript)
+      setIsReviewingTranscript(false)
+      announce(`Practice answer confirmed: ${pendingTranscript}`)
+    }
+    setPendingTranscript('')
+  }, [transcriptTarget, pendingTranscript, announce])
+
+  // ── 3. Navigation Switcher ─────────────────────────────────────────────────
+  const switchSection = useCallback(
+    (sectionKey) => {
+      setActiveSection(sectionKey)
+      stopSpeech()
+
+      const labels = {
+        syllabus: 'Section 1: My Syllabus. Browse your uploaded curriculum subjects, units, and learning objectives.',
+        learn: 'Section 2: Listen & Learn. Central audio teaching and concept exploration.',
+        practice: 'Section 3: Practice. Accessible topic-based practice with voice and keyboard answers.',
+        progress: 'Section 4: My Progress. Review evidence-based learning gaps and your personalized learning path.',
+        settings: 'Section 5: Learning Settings. Customize your speech speed, voice input, and display preferences.'
+      }
+
+      const announcement = labels[sectionKey] || `Switched to ${sectionKey}`
+      announce(announcement)
+      if (audioFirstNav) {
+        speakText(announcement, `Navigation: ${sectionKey}`)
+      }
+    },
+    [stopSpeech, announce, audioFirstNav, speakText]
+  )
+
+  // ── 4. Global Keyboard Shortcuts ──────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return
+      // Avoid hotkeys when user is typing inside an input or textarea
+      const tag = e.target?.tagName?.toLowerCase()
+      const isInput = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable
 
-      const key = e.key.toLowerCase()
-
-      if (key === 'p' || e.code === 'Space') {
+      // Navigation Hotkeys: Alt+1 to Alt+5 (works even in inputs)
+      if (e.altKey && e.key === '1') {
         e.preventDefault()
-        if (isSpeaking) {
-          if (isPaused) resumeSpeech()
-          else pauseSpeech()
-        } else if (currentSpeechText) {
+        switchSection('syllabus')
+        return
+      }
+      if (e.altKey && e.key === '2') {
+        e.preventDefault()
+        switchSection('learn')
+        return
+      }
+      if (e.altKey && e.key === '3') {
+        e.preventDefault()
+        switchSection('practice')
+        return
+      }
+      if (e.altKey && e.key === '4') {
+        e.preventDefault()
+        switchSection('progress')
+        return
+      }
+      if (e.altKey && e.key === '5') {
+        e.preventDefault()
+        switchSection('settings')
+        return
+      }
+
+      // Audio Control Shortcuts (when not typing in an input)
+      if (!isInput) {
+        if (e.code === 'Space') {
+          e.preventDefault()
+          if (isSpeaking && !isPaused) pauseSpeech()
+          else if (isPaused) resumeSpeech()
+        } else if (e.key === 'r' || e.key === 'R') {
+          e.preventDefault()
           repeatSpeech()
+        } else if (e.key === 's' || e.key === 'S') {
+          e.preventDefault()
+          stopSpeech()
+        } else if (e.key === 'm' || e.key === 'M') {
+          e.preventDefault()
+          if (isListening) cancelVoiceDictation()
+          else startVoiceDictation(activeSection === 'practice' ? 'practice' : 'question')
         }
-      } else if (key === 's') {
-        e.preventDefault()
-        stopSpeech()
-      } else if (key === 'r') {
-        e.preventDefault()
-        repeatSpeech()
-      } else if (key === 'v') {
-        e.preventDefault()
-        toggleVoiceInput()
-      } else if (key === '?' || key === 'h') {
-        e.preventDefault()
-        setShowHelpModal(prev => !prev)
-      } else if (key === 'c') {
-        e.preventDefault()
-        setHighContrast(prev => !prev)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isSpeaking, isPaused, resumeSpeech, pauseSpeech, repeatSpeech, stopSpeech, toggleVoiceInput, currentSpeechText])
+  }, [
+    switchSection,
+    isSpeaking,
+    isPaused,
+    pauseSpeech,
+    resumeSpeech,
+    repeatSpeech,
+    stopSpeech,
+    isListening,
+    cancelVoiceDictation,
+    startVoiceDictation,
+    activeSection
+  ])
 
-  // ── Load Authentic Learning Gaps & Topic Status ────────────────────────────
-  const fetchLearningGaps = useCallback(async () => {
-    setLoadingGaps(true)
+  // ── 5. Auto-Initialize Curriculum Selection ────────────────────────────────
+  useEffect(() => {
+    if (subjects && subjects.length > 0 && !selectedSubject) {
+      setSelectedSubject(subjects[0])
+    }
+  }, [subjects, selectedSubject])
+
+  // Derive current subject's units & topics
+  const currentUnits = useMemo(() => {
+    if (!selectedSubject) return []
+
+    // 1. Try subjectObjects
+    const matchObj = (subjectObjects || []).find((s) => s.name === selectedSubject || s.code === selectedSubject)
+    if (matchObj && Array.isArray(matchObj.units) && matchObj.units.length > 0) {
+      return matchObj.units.map((u, idx) => ({
+        id: u.id || `unit_${idx + 1}`,
+        title: u.name || `Unit ${idx + 1}`,
+        concepts: u.concepts || u.topics || []
+      }))
+    }
+
+    // 2. Try curriculum.chapters or curriculum.units
+    const chaps = curriculum?.chapters?.[selectedSubject] || curriculum?.units?.[selectedSubject]
+    if (Array.isArray(chaps) && chaps.length > 0) {
+      return chaps.map((u, idx) => {
+        if (typeof u === 'string') {
+          return { id: `unit_${idx + 1}`, title: u, concepts: [u] }
+        }
+        return {
+          id: u.id || `unit_${idx + 1}`,
+          title: u.name || `Unit ${idx + 1}`,
+          concepts: u.concepts || u.topics || []
+        }
+      })
+    }
+
+    // 3. Fallback to global topics
+    if (matchObj && Array.isArray(matchObj.topics) && matchObj.topics.length > 0) {
+      return [{ id: 'unit_1', title: 'Curriculum Core Units', concepts: matchObj.topics }]
+    }
+
+    return []
+  }, [selectedSubject, subjectObjects, curriculum])
+
+  // When units change, auto-select first unit & first topic
+  useEffect(() => {
+    if (currentUnits.length > 0) {
+      const u = currentUnits[0]
+      setSelectedUnit(u)
+      if (u.concepts && u.concepts.length > 0) {
+        setSelectedTopic({
+          title: u.concepts[0],
+          unit: u.title,
+          subject: selectedSubject,
+          objectives: [`Master foundational concepts of ${u.concepts[0]}`]
+        })
+      }
+    }
+  }, [currentUnits, selectedSubject])
+
+  // ── 6. Load Progress, Learning Gaps & Adaptive Path ────────────────────────
+  const fetchProgressAndGaps = useCallback(async () => {
+    setLoadingProgress(true)
     try {
-      const res = await api.getBlindLearningGaps()
-      if (res && res.success) {
-        setLearningGaps(res.learning_gaps || [])
-        setTopicStatusMap(res.topic_status_map || {})
+      const gapsRes = await api.getBlindLearningGaps()
+      if (gapsRes && gapsRes.success) {
+        setLearningGaps(gapsRes.learning_gaps || [])
+        setTopicStatusMap(gapsRes.topic_status_map || {})
+        setProgressSummaryText(gapsRes.audio_summary || '')
       }
     } catch (err) {
-      console.warn('Failed to load learning gaps', err)
+      console.warn('[BlindCompanion] Error fetching learning gaps:', err)
     } finally {
-      setLoadingGaps(false)
+      setLoadingProgress(false)
     }
-  }, [])
 
-  useEffect(() => {
-    fetchLearningGaps()
-  }, [fetchLearningGaps])
-
-  // ── Load Personalized Adaptive Learning Path (Prompt 4) ────────────────────
-  const fetchLearningPath = useCallback(async () => {
     setLoadingPath(true)
     try {
-      const res = await api.getBlindLearningPath()
-      if (res && res.success) {
-        setLearningPath(res)
+      const pathRes = await api.getBlindLearningPath()
+      if (pathRes && pathRes.success && pathRes.learning_path) {
+        setLearningPath(pathRes.learning_path)
       }
     } catch (err) {
-      console.warn('Failed to load adaptive learning path', err)
+      console.warn('[BlindCompanion] Error fetching learning path:', err)
     } finally {
       setLoadingPath(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchLearningPath()
-  }, [fetchLearningPath])
+    if (isCompanionEnabled) {
+      fetchProgressAndGaps()
+    }
+  }, [isCompanionEnabled, fetchProgressAndGaps])
 
-  // ── Determine Active Subjects & Structure ────────────────────────────────
-  const authoritativeSubjects = useMemo(() => {
-    if (Array.isArray(subjects) && subjects.length > 0) return subjects
-    if (curriculum && Array.isArray(curriculum.subjects)) {
-      return curriculum.subjects.map(s => (typeof s === 'string' ? s : s.name)).filter(Boolean)
-    }
-    return []
-  }, [subjects, curriculum])
-
-  useEffect(() => {
-    if (!selectedSubject && authoritativeSubjects.length > 0) {
-      setSelectedSubject(authoritativeSubjects[0])
-    }
-  }, [authoritativeSubjects, selectedSubject])
-
-  const activeSubjectData = useMemo(() => {
-    if (!selectedSubject) return null
-    if (Array.isArray(subjectObjects)) {
-      const match = subjectObjects.find(s => s.name?.toLowerCase() === selectedSubject.toLowerCase())
-      if (match) return match
-    }
-    if (curriculum?.subjects && Array.isArray(curriculum.subjects)) {
-      const match = curriculum.subjects.find(s => (s.name || s)?.toLowerCase() === selectedSubject.toLowerCase())
-      if (match && typeof match === 'object') return match
-    }
-    return null
-  }, [selectedSubject, subjectObjects, curriculum])
-
-  const activeUnits = useMemo(() => {
-    if (activeSubjectData?.units && Array.isArray(activeSubjectData.units)) {
-      return activeSubjectData.units
-    }
-    if (activeSubjectData?.chapters && Array.isArray(activeSubjectData.chapters)) {
-      return activeSubjectData.chapters
-    }
-    if (Array.isArray(allUnits) && allUnits.length > 0) {
-      return allUnits.filter(u => !u.subject || u.subject.toLowerCase() === selectedSubject.toLowerCase())
-    }
-    return []
-  }, [activeSubjectData, allUnits, selectedSubject])
-
-  useEffect(() => {
-    if (activeUnits.length > 0) {
-      if (!selectedUnit || !activeUnits.some(u => (u.title || u.name) === (selectedUnit.title || selectedUnit.name))) {
-        setSelectedUnit(activeUnits[0])
+  // ── 7. Generate & Play Audio Lesson ────────────────────────────────────────
+  const generateLesson = useCallback(
+    async (modeOverride) => {
+      if (!selectedTopic) {
+        announce('Please select a topic from My Syllabus first.')
+        return
       }
-    } else {
-      setSelectedUnit(null)
-    }
-  }, [activeUnits, selectedUnit])
 
-  const activeTopics = useMemo(() => {
-    if (!selectedUnit) return []
-    const rawTopics = selectedUnit.topics || selectedUnit.concepts || selectedUnit.subtopics || []
-    if (Array.isArray(rawTopics)) {
-      return rawTopics.map((t, idx) => {
-        if (typeof t === 'string') {
-          return { id: `topic-${idx}`, title: t, description: `Core topic in ${selectedUnit.title || selectedUnit.name}` }
-        }
-        return {
-          id: t.id || `topic-${idx}`,
-          title: t.title || t.name || `Topic ${idx + 1}`,
-          description: t.description || t.summary || `Syllabus topic: ${t.title || t.name}`,
-          objectives: t.objectives || t.learning_outcomes || []
-        }
-      })
-    }
-    return []
-  }, [selectedUnit])
+      const mode = modeOverride || teachingMode
+      setLoadingLesson(true)
+      stopSpeech()
 
-  useEffect(() => {
-    if (activeTopics.length > 0) {
-      if (!selectedTopic || !activeTopics.some(t => t.title === selectedTopic.title)) {
-        setSelectedTopic(activeTopics[0])
-      }
-    } else {
-      setSelectedTopic(null)
-    }
-  }, [activeTopics, selectedTopic])
+      const topicTitle = selectedTopic.title
+      const unitTitle = selectedUnit?.title || 'Unit'
+      const subjectTitle = selectedSubject || 'Curriculum Subject'
 
-  // ── Core Teaching Intelligence Invocation (Personal Trainer Integration) ──
-  const requestAITeaching = useCallback(async (mode = teachingMode, customMsg = null) => {
-    if (!selectedTopic) {
-      speakText('Please select a syllabus subject and topic first.', 'Notice')
-      return
-    }
-
-    setLoadingLesson(true)
-    const topicTitle = selectedTopic.title
-    const unitTitle = selectedUnit?.title || selectedUnit?.name || 'Unit'
-    const subjectTitle = selectedSubject || 'Curriculum Subject'
-
-    let promptMessage = customMsg
-    if (!promptMessage) {
+      let promptMsg = ''
       if (mode === 'structured_10_step') {
-        promptMessage = `Teach me ${topicTitle} from ${unitTitle} in ${subjectTitle} following the complete 10-step structured teaching workflow.`
+        promptMsg = `Teach me ${topicTitle} from ${unitTitle} in ${subjectTitle} following the complete 10-step structured teaching workflow.`
       } else if (mode === 'concept_to_sense') {
-        promptMessage = `Explain the visual diagram, circuit architecture, mathematical equations, and component breakdown for ${topicTitle} using Concept-to-Sense audio intelligence.`
-      } else if (mode === 'quick_revision') {
-        promptMessage = `Provide a rapid-fire high-yield exam revision for ${topicTitle} in ${subjectTitle}.`
+        promptMsg = `Explain the visual diagram, circuit architecture, mathematical equations, and component breakdown for ${topicTitle} using Concept-to-Sense audio intelligence.`
       } else if (mode === 'simple') {
-        promptMessage = `Explain ${topicTitle} using simple language, everyday analogies, and clear intuition.`
+        promptMsg = `Explain ${topicTitle} in simple everyday language with intuitive analogies.`
+      } else if (mode === 'quick_revision') {
+        promptMsg = `Provide a rapid-fire high-yield exam revision for ${topicTitle} in ${subjectTitle}.`
       } else {
-        promptMessage = `Provide a detailed subject-specific explanation of ${topicTitle} grounded in our syllabus.`
+        promptMsg = `Provide a detailed subject-specific explanation of ${topicTitle} grounded in our syllabus.`
       }
-    }
 
-    const payload = {
-      message: promptMessage,
-      subject: subjectTitle,
-      unit: unitTitle,
-      chapter: unitTitle,
-      topic: topicTitle,
-      concept: topicTitle,
-      subtopic: topicTitle,
-      learning_objectives: selectedTopic.objectives || [],
-      teaching_mode: mode,
-      diagram_type: (subjectTitle.toLowerCase().includes('physic') || subjectTitle.toLowerCase().includes('electr') || subjectTitle.toLowerCase().includes('circuit'))
-        ? 'Circuit Diagram'
-        : (subjectTitle.toLowerCase().includes('math') ? 'Mathematical Graph / Expression' : 'Architectural Flowchart'),
-      audio_friendly: true,
-      explanation_mode: mode === 'simple' ? 'simple' : 'detailed',
-      history: conversationHistory.slice(-6)
-    }
-
-    try {
-      const res = await api.trainerChat(payload)
-      if (res && res.success && res.reply) {
-        const replyText = res.reply
-        setActiveLesson({
-          mode,
-          title: topicTitle,
-          unit: unitTitle,
-          subject: subjectTitle,
-          text: replyText,
-          timestamp: new Date()
-        })
-
-        // Update multi-turn history
-        setConversationHistory(prev => [
-          ...prev,
-          { role: 'user', text: promptMessage },
-          { role: 'model', text: replyText }
-        ])
-
-        // Auto-narrate if audioFirst is enabled
-        const labelText = mode === 'concept_to_sense'
-          ? `Concept-to-Sense Audio: ${topicTitle}`
-          : (mode === 'structured_10_step' ? `10-Step Lesson: ${topicTitle}` : `Tutor: ${topicTitle}`)
-        speakText(replyText, labelText)
-      } else {
-        const errMsg = res?.error || 'Teaching engine could not generate explanation. Please try again.'
-        speakText(errMsg, 'AI Error')
+      const payload = {
+        message: promptMsg,
+        subject: subjectTitle,
+        unit: unitTitle,
+        topic: topicTitle,
+        subtopic: topicTitle,
+        learning_objectives: selectedTopic.objectives || [],
+        teaching_mode: mode,
+        diagram_type:
+          subjectTitle.toLowerCase().includes('physic') ||
+          subjectTitle.toLowerCase().includes('electr') ||
+          subjectTitle.toLowerCase().includes('circuit')
+            ? 'Circuit Diagram'
+            : subjectTitle.toLowerCase().includes('math')
+            ? 'Mathematical Graph / Expression'
+            : 'Architectural Flowchart',
+        audio_friendly: true,
+        explanation_mode: explanationMode,
+        history: conversationHistory.slice(-4)
       }
-    } catch (err) {
-      console.error('Teaching intelligence error', err)
-      speakText('Connection error communicating with the Personal Trainer teaching engine.', 'Connection Error')
-    } finally {
-      setLoadingLesson(false)
-    }
-  }, [selectedTopic, selectedUnit, selectedSubject, teachingMode, conversationHistory, speakText])
 
-  // Handle Asking Custom Question
-  const handleAskQuestion = (e) => {
-    if (e) e.preventDefault()
-    if (!studentQuestion.trim()) return
-    const q = studentQuestion.trim()
-    setStudentQuestion('')
-    requestAITeaching(teachingMode, q)
-  }
+      try {
+        const res = await api.trainerChat(payload)
+        if (res && res.success && res.reply) {
+          const lessonText = res.reply
 
-  // Handle Practice Submit & AI Assessment
-  const handlePracticeSubmit = async (e) => {
-    e.preventDefault()
-    if (!practiceAnswer.trim()) return
-    setAssessingPractice(true)
+          // Parse into manageable sections by headings or numbers
+          const rawSections = lessonText
+            .split(/(?=###?\s+\d+\.|\n\d+\.\s+)/)
+            .map((s) => s.trim())
+            .filter(Boolean)
 
-    const evaluationPrompt = `Evaluate the student's answer for the topic '${selectedTopic?.title || 'this topic'}'.
-Student Answer: "${practiceAnswer.trim()}"
-Provide concise verbal marks/score out of 5, highlight what was done correctly, and explain any missing points or arithmetic/conceptual errors.`
+          const sections = rawSections.length > 1 ? rawSections : [lessonText]
 
-    try {
-      const res = await api.trainerChat({
-        message: evaluationPrompt,
-        subject: selectedSubject,
-        unit: selectedUnit?.title || selectedUnit?.name || '',
-        topic: selectedTopic?.title,
-        teaching_mode: 'practice_assessment',
-        audio_friendly: true
-      })
-      if (res && res.success && res.reply) {
-        const feedbackText = res.reply
-        const isCorrect = !feedbackText.toLowerCase().includes('0/5') &&
-                          !feedbackText.toLowerCase().includes('1/5') &&
-                          !feedbackText.toLowerCase().includes('incorrect')
-        const scoreVal = isCorrect ? 4.5 : 2.0
-
-        // Dynamically submit attempt to Learning Gap Detector to update status & gaps without reload
-        try {
-          const submitRes = await api.submitBlindPractice({
-            subject: selectedSubject,
-            unit: selectedUnit?.title || selectedUnit?.name || '',
-            topic: selectedTopic?.title,
-            subtopic: selectedTopic?.title,
-            question_text: `State the core principle of ${selectedTopic?.title} and explain how it solves an everyday engineering or theoretical problem.`,
-            student_answer: practiceAnswer.trim(),
-            expected_answer: `Core theoretical definitions, boundary constraints, and practical applications for ${selectedTopic?.title}.`,
-            is_correct: isCorrect,
-            score: scoreVal,
-            max_score: 5.0,
-            feedback: feedbackText
+          setActiveLesson({
+            title: topicTitle,
+            subject: subjectTitle,
+            unit: unitTitle,
+            mode: mode,
+            fullText: lessonText,
+            sections: sections
           })
-          if (submitRes && submitRes.success) {
-            if (submitRes.learning_gaps) setLearningGaps(submitRes.learning_gaps)
-            if (submitRes.topic_status_map) setTopicStatusMap(submitRes.topic_status_map)
-            fetchLearningPath()
-          }
-        } catch (subErr) {
-          console.warn('Practice attempt record error', subErr)
-        }
+          setActiveLessonSections(sections)
+          setActiveSectionIndex(0)
 
-        setPracticeSubmitted(true)
-        setPracticeFeedback(feedbackText)
-        if (voiceQuestions) {
-          speakText(feedbackText, 'Checkpoint Assessment Result')
-        }
-      }
-    } catch (err) {
-      setPracticeFeedback('Thank you. Your answer has been registered.')
-    } finally {
-      setAssessingPractice(false)
-    }
-  }
-
-  // ── Adaptive Learning Path Voice Commands & Step Progression (Prompt 4) ───
-  const handlePathCommand = useCallback(async (cmdText) => {
-    if (!cmdText) return
-    try {
-      speakText(`Processing audio command: ${cmdText}`, 'Voice Command')
-      const res = await api.executeBlindPathCommand({ command: cmdText })
-      if (res && res.spoken_response) {
-        setActiveCommandResult(res)
-        speakText(res.spoken_response, `Assistant: ${res.command || 'Recommendation'}`)
-
-        // If action is load_lesson, switch to the topic and begin teaching
-        if (res.action === 'load_lesson' && res.active_step) {
-          const step = res.active_step
-          if (step.subject) {
-            setSelectedSubject(step.subject)
-          }
-          if (res.suggested_teaching_mode) {
-            setTeachingMode(res.suggested_teaching_mode)
-          }
-          setTimeout(() => {
-            requestAITeaching(res.suggested_teaching_mode || 'simple', `Teach me ${step.topic} following ${step.title}`)
-          }, 350)
-        }
-      }
-    } catch (err) {
-      console.error('Learning path command error', err)
-      speakText('Sorry, could not process that command right now.', 'Error')
-    }
-  }, [speakText, requestAITeaching])
-
-  const toggleVoiceCommandInput = useCallback(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      speakText('Speech recognition is not supported in this browser. Please use the quick command buttons.', 'Notice')
-      return
-    }
-
-    if (voiceListening) {
-      setVoiceListening(false)
-      return
-    }
-
-    try {
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'en-US'
-      recognition.interimResults = false
-      recognition.maxAlternatives = 1
-
-      recognition.onstart = () => {
-        setVoiceListening(true)
-        speakText('Listening for command. Say: What should I study next, Why was this topic recommended, Start learning, Give me another example, or Show my learning progress.', 'Listening')
-      }
-
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript
-        setVoiceListening(false)
-        handlePathCommand(transcript)
-      }
-
-      recognition.onerror = () => {
-        setVoiceListening(false)
-      }
-
-      recognition.onend = () => {
-        setVoiceListening(false)
-      }
-
-      recognition.start()
-    } catch (err) {
-      console.warn('Speech recognition start error', err)
-      setVoiceListening(false)
-    }
-  }, [voiceListening, speakText, handlePathCommand])
-
-  const handleCompleteStep = useCallback(async (step) => {
-    if (!step) return
-    try {
-      const res = await api.completeBlindPathStep({
-        step_id: step.step_id,
-        subject: step.subject,
-        topic: step.topic,
-        unit: step.unit
-      })
-      if (res && res.success) {
-        if (res.path) {
-          setLearningPath(res.path)
+          const intro = `Lesson ready for ${topicTitle}. Playing section 1.`
+          speakText(`${intro} ${sections[0]}`, `Lesson: ${topicTitle}`)
         } else {
-          fetchLearningPath()
+          const msg = res?.error || 'Teaching engine could not generate lesson. Please retry.'
+          announce(msg)
+          speakText(msg, 'Lesson Generation Notice')
         }
-        speakText(`Step completed: ${step.title}. Your syllabus progress has been saved.`, 'Progress Saved')
+      } catch (err) {
+        console.error('[BlindCompanion] Lesson generation error:', err)
+        announce('Network error generating lesson. Please check connection.')
+      } finally {
+        setLoadingLesson(false)
       }
-    } catch (err) {
-      console.error('Failed to complete step', err)
-      speakText('Could not save step progress.', 'Error')
-    }
-  }, [fetchLearningPath, speakText])
+    },
+    [selectedTopic, selectedUnit, selectedSubject, teachingMode, explanationMode, conversationHistory, stopSpeech, announce, speakText]
+  )
 
-  // ── Accessible Mastery Assessment Handlers (Prompt 5) ────────────────────
-  const fetchMasteryQuestions = useCallback(async (tier = selectedTier) => {
-    if (!selectedTopic || !selectedSubject) return
-    setLoadingQuestions(true)
-    try {
-      const res = await api.generateBlindMasteryQuestions({
+  const playLessonSection = useCallback(
+    (index) => {
+      if (!activeLessonSections || index < 0 || index >= activeLessonSections.length) return
+      setActiveSectionIndex(index)
+      const secText = activeLessonSections[index]
+      speakText(`Section ${index + 1} of ${activeLessonSections.length}. ${secText}`, `Section ${index + 1}`)
+    },
+    [activeLessonSections, speakText]
+  )
+
+  const nextLessonSection = useCallback(() => {
+    if (activeSectionIndex < activeLessonSections.length - 1) {
+      playLessonSection(activeSectionIndex + 1)
+    } else {
+      speakText('You have reached the end of this audio lesson. You can replay sections or start topic practice.', 'Lesson Completed')
+    }
+  }, [activeSectionIndex, activeLessonSections, playLessonSection, speakText])
+
+  const prevLessonSection = useCallback(() => {
+    if (activeSectionIndex > 0) {
+      playLessonSection(activeSectionIndex - 1)
+    }
+  }, [activeSectionIndex, playLessonSection])
+
+  // ── 8. Conversational Q&A Inside Topic ─────────────────────────────────────
+  const submitStudentQuestion = useCallback(
+    async (qText) => {
+      const questionToSend = qText || studentQuestion
+      if (!questionToSend.trim()) return
+
+      if (!selectedTopic) {
+        announce('Please select a topic from My Syllabus first.')
+        return
+      }
+
+      setAskingQuestion(true)
+      stopSpeech()
+
+      const payload = {
+        message: questionToSend,
         subject: selectedSubject,
-        unit: selectedUnit?.title || selectedUnit?.name || 'Unit',
+        unit: selectedUnit?.title || 'Unit',
         topic: selectedTopic.title,
         subtopic: selectedTopic.title,
-        tier
+        learning_objectives: selectedTopic.objectives || [],
+        teaching_mode: teachingMode,
+        audio_friendly: true,
+        explanation_mode: explanationMode,
+        history: conversationHistory.slice(-6)
+      }
+
+      try {
+        const res = await api.trainerChat(payload)
+        if (res && res.success && res.reply) {
+          const reply = res.reply
+          setConversationHistory((prev) => [
+            ...prev,
+            { role: 'user', content: questionToSend },
+            { role: 'assistant', content: reply }
+          ])
+          setStudentQuestion('')
+          speakText(`Answer: ${reply}`, 'Tutor Reply')
+        } else {
+          announce('Could not answer question. Please try asking again.')
+        }
+      } catch (err) {
+        console.error('[BlindCompanion] Question error:', err)
+        announce('Network error answering question.')
+      } finally {
+        setAskingQuestion(false)
+      }
+    },
+    [studentQuestion, selectedTopic, selectedSubject, selectedUnit, teachingMode, explanationMode, conversationHistory, stopSpeech, speakText, announce]
+  )
+
+  // ── 9. Practice Engine ─────────────────────────────────────────────────────
+  const loadPracticeQuestion = useCallback(async () => {
+    if (!selectedTopic) {
+      announce('Select a topic first to practice.')
+      return
+    }
+
+    setLoadingQuestion(true)
+    setPracticeAnswer('')
+    setPracticeFeedback(null)
+    stopSpeech()
+
+    const subjectTitle = selectedSubject || 'Curriculum Subject'
+    const topicTitle = selectedTopic.title
+
+    try {
+      // Use existing mastery question generator
+      const res = await api.generateBlindMasteryQuestions({
+        subject: subjectTitle,
+        unit: selectedUnit?.title || 'Unit',
+        topic: topicTitle,
+        learning_objectives: selectedTopic.objectives || [],
+        tier: 'adaptive'
       })
+
       if (res && res.success && Array.isArray(res.questions) && res.questions.length > 0) {
-        setMasteryQuestions(res.questions)
-        setCurrentQuestionIndex(0)
-        setMasteryAnswer('')
-        setMasteryResult(null)
-        setTranscriptReviewed(false)
-        const firstQ = res.questions[0]
-        const announcement = `Loaded ${res.questions.length} syllabus mastery questions for ${selectedTopic.title}. Question 1: ${firstQ.spoken_prompt || firstQ.question_text}`
-        speakText(announcement, `Assessment: Question 1`)
-      }
-    } catch (err) {
-      console.warn('Failed to generate mastery questions', err)
-      speakText('Could not generate assessment questions. Please try again.', 'Error')
-    } finally {
-      setLoadingQuestions(false)
-    }
-  }, [selectedTopic, selectedSubject, selectedUnit, selectedTier, speakText])
-
-  useEffect(() => {
-    if (selectedTopic && selectedSubject) {
-      fetchMasteryQuestions(selectedTier)
-    }
-  }, [selectedTopic, selectedSubject, selectedTier, fetchMasteryQuestions])
-
-  const currentMasteryQuestion = useMemo(() => {
-    if (!masteryQuestions || masteryQuestions.length === 0) return null
-    return masteryQuestions[currentQuestionIndex] || masteryQuestions[0]
-  }, [masteryQuestions, currentQuestionIndex])
-
-  const handleRepeatQuestion = useCallback(() => {
-    if (!currentMasteryQuestion) return
-    const msg = `Question ${currentQuestionIndex + 1}: ${currentMasteryQuestion.spoken_prompt || currentMasteryQuestion.question_text}`
-    speakText(msg, `Question ${currentQuestionIndex + 1}`)
-  }, [currentMasteryQuestion, currentQuestionIndex, speakText])
-
-  const handleNarrateMath = useCallback(() => {
-    if (!currentMasteryQuestion) return
-    const mathText = currentMasteryQuestion.math_narration || currentMasteryQuestion.spoken_prompt
-    speakText(`Mathematical Expression Narration: ${mathText}`, 'Math Narration')
-  }, [currentMasteryQuestion, speakText])
-
-  const handleNarrateDiagram = useCallback(() => {
-    if (!currentMasteryQuestion) return
-    const diagText = currentMasteryQuestion.diagram_description || 'No visual diagram associated with this question.'
-    speakText(`Diagram Topology Description: ${diagText}`, 'Diagram Description')
-  }, [currentMasteryQuestion, speakText])
-
-  const toggleAssessmentDictation = useCallback(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      speakText('Voice dictation is not supported in this browser. Please use keyboard typing.', 'Notice')
-      return
-    }
-
-    if (isDictating) {
-      setIsDictating(false)
-      return
-    }
-
-    try {
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'en-US'
-      recognition.interimResults = false
-      recognition.maxAlternatives = 1
-
-      recognition.onstart = () => {
-        setIsDictating(true)
-        speakText('Dictation active. Please speak your answer clearly. When done, you can review and edit before submitting.', 'Dictating')
-      }
-
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript
-        setIsDictating(false)
-        setSubmissionMode('voice')
-        setMasteryAnswer(prev => (prev ? `${prev} ${transcript}` : transcript))
-        setTranscriptReviewed(false)
-        speakText(`Captured text: ${transcript}. Use the Review Answer button to hear the full text or edit in the answer box.`, 'Dictation Captured')
-      }
-
-      recognition.onerror = () => {
-        setIsDictating(false)
-      }
-
-      recognition.onend = () => {
-        setIsDictating(false)
-      }
-
-      recognition.start()
-    } catch (err) {
-      console.warn('Dictation start error', err)
-      setIsDictating(false)
-    }
-  }, [isDictating, speakText])
-
-  const handleReviewAnswer = useCallback(() => {
-    if (!masteryAnswer.trim()) {
-      speakText('Your answer box is currently empty. Please type or dictate your answer first.', 'Notice')
-      return
-    }
-    setTranscriptReviewed(true)
-    const reviewMsg = `Reviewing your answer: ${masteryAnswer}. If this is accurate, confirm submission. You can also edit text directly in the box.`
-    speakText(reviewMsg, 'Answer Review')
-  }, [masteryAnswer, speakText])
-
-  const handleEvaluateMastery = useCallback(async () => {
-    if (!masteryAnswer.trim() || !currentMasteryQuestion) return
-    setEvaluatingMastery(true)
-    setShowConfirmModal(false)
-
-    try {
-      const res = await api.evaluateBlindMasteryAssessment({
-        question: currentMasteryQuestion,
-        student_answer: masteryAnswer.trim(),
-        submission_mode: submissionMode,
-        transcript_reviewed: transcriptReviewed
-      })
-
-      if (res && res.success) {
-        setMasteryResult(res)
-        speakText(res.spoken_feedback, `Mastery Result: ${res.evaluation_result}`)
-        fetchLearningGaps()
-        fetchLearningPath()
+        const q = res.questions[0]
+        setPracticeQuestion(q)
+        const qSpeech = `Practice question for ${topicTitle}: ${q.question_text || q.question}. You can speak your answer by pressing M or type your response.`
+        speakText(qSpeech, 'Practice Question')
       } else {
-        speakText('Evaluation could not be completed. Please try again.', 'Error')
+        // Fallback to targeted question from AI tutor
+        const tutorRes = await api.trainerChat({
+          message: `Give me 1 single diagnostic practice question to test my understanding of ${topicTitle}. Do not reveal the answer.`,
+          subject: subjectTitle,
+          unit: selectedUnit?.title || 'Unit',
+          topic: topicTitle,
+          teaching_mode: 'structured_10_step',
+          audio_friendly: true
+        })
+
+        if (tutorRes && tutorRes.success && tutorRes.reply) {
+          const q = {
+            id: `q_${Date.now()}`,
+            subject: subjectTitle,
+            topic: topicTitle,
+            question_text: tutorRes.reply,
+            expected_answer: 'Thorough explanation of core principles'
+          }
+          setPracticeQuestion(q)
+          speakText(`Diagnostic Practice Question: ${tutorRes.reply}`, 'Practice Question')
+        } else {
+          announce('Could not generate practice question. Please retry.')
+        }
       }
     } catch (err) {
-      console.error('Mastery evaluation error', err)
-      speakText('Network error during evaluation.', 'Connection Error')
+      console.error('[BlindCompanion] Practice question error:', err)
+      announce('Error retrieving practice question.')
     } finally {
-      setEvaluatingMastery(false)
+      setLoadingQuestion(false)
     }
-  }, [masteryAnswer, currentMasteryQuestion, submissionMode, transcriptReviewed, speakText, fetchLearningGaps, fetchLearningPath])
+  }, [selectedTopic, selectedSubject, selectedUnit, stopSpeech, speakText, announce])
 
-  // Welcome Announcement
-  const handleAnnounceWelcome = () => {
-    const welcomeMsg = `Welcome to the Blind Learning Companion teaching suite, ${user?.name || 'Student'}. ` +
-      (hasValidCurriculum
-        ? `You are enrolled in ${authoritativeSubjects.length} subjects. Selected subject is ${selectedSubject || 'none'}. Selected topic is ${selectedTopic?.title || 'none'}. You can press P to play or pause, V to dictate a question, or question mark for keyboard help.`
-        : `You currently have no validated syllabus uploaded. Please select Upload Syllabus to import your course document.`)
-    speakText(welcomeMsg, 'Welcome Greeting')
-  }
+  const submitPracticeAnswer = useCallback(async () => {
+    if (!practiceAnswer.trim() || !practiceQuestion) {
+      announce('Please enter or speak your answer before submitting.')
+      return
+    }
 
-  // Component-by-Component Explorer Audio
-  const handleExploreComponent = (compName, compDetails) => {
-    setActiveComponent(compName)
-    const msg = `Component Inspection: ${compName}. ${compDetails}`
-    speakText(msg, `Component: ${compName}`)
-  }
+    setSubmittingPractice(true)
+    stopSpeech()
 
-  // Access check
+    const payload = {
+      subject: practiceQuestion.subject || selectedSubject,
+      unit: selectedUnit?.title || 'Unit',
+      topic: practiceQuestion.topic || selectedTopic?.title,
+      subtopic: practiceQuestion.topic || selectedTopic?.title,
+      question_text: practiceQuestion.question_text || practiceQuestion.question,
+      expected_answer: practiceQuestion.expected_answer || 'Accurate syllabus response',
+      student_answer: practiceAnswer.trim(),
+      submission_mode: 'accessible_companion'
+    }
+
+    try {
+      const res = await api.submitBlindPractice(payload)
+      if (res && res.success) {
+        const isCorr = res.is_correct
+        const score = res.score ?? (isCorr ? 5 : 2)
+        const maxScore = res.max_score ?? 5
+        const advice = res.feedback || (isCorr ? 'Excellent concept understanding demonstrated.' : 'Review foundational definitions and retry.')
+
+        const fb = {
+          is_correct: isCorr,
+          score: score,
+          max_score: maxScore,
+          feedback: advice,
+          raw: res
+        }
+        setPracticeFeedback(fb)
+
+        const fbSpeech = isCorr
+          ? `Correct! Score: ${score} out of ${maxScore}. ${advice}`
+          : `Needs practice. Score: ${score} out of ${maxScore}. ${advice}`
+
+        speakText(fbSpeech, 'Evaluation Feedback')
+        // Refresh gaps in background
+        fetchProgressAndGaps()
+      } else {
+        announce('Could not evaluate answer. Please try again.')
+      }
+    } catch (err) {
+      console.error('[BlindCompanion] Practice submission error:', err)
+      announce('Network error during evaluation.')
+    } finally {
+      setSubmittingPractice(false)
+    }
+  }, [practiceAnswer, practiceQuestion, selectedSubject, selectedUnit, selectedTopic, stopSpeech, speakText, announce, fetchProgressAndGaps])
+
+  // ── 10. Save Learning Settings ─────────────────────────────────────────────
+  const handleSaveSettings = useCallback(async () => {
+    setSavingSettings(true)
+    setSettingsSuccess('')
+    try {
+      const payload = {
+        blind_companion_enabled: true,
+        settings: {
+          audio_speed: audioSpeed,
+          explanation_mode: explanationMode,
+          audio_first: audioFirstNav,
+          voice_questions: voiceInputEnabled,
+          spoken_diagrams: spokenDiagrams,
+          high_contrast: highContrast,
+          keyboard_nav: true
+        }
+      }
+      const res = await api.updateBlindCompanionSettings(payload)
+      if (res && res.success) {
+        setSettingsSuccess('Preferences saved successfully.')
+        announce('Preferences saved successfully to your account.')
+        speakText('Your learning settings have been saved.', 'Settings Updated')
+        if (updateUserProfile) {
+          updateUserProfile({
+            blind_companion_settings: payload.settings,
+            blind_companion_enabled: true
+          })
+        }
+      } else {
+        announce('Failed to save settings. Please try again.')
+      }
+    } catch (err) {
+      console.error('[BlindCompanion] Settings save error:', err)
+      announce('Network error saving settings.')
+    } finally {
+      setSavingSettings(false)
+    }
+  }, [audioSpeed, explanationMode, audioFirstNav, voiceInputEnabled, spokenDiagrams, highContrast, announce, speakText, updateUserProfile])
+
+  // ── 11. Enable Blind Companion for Student ─────────────────────────────────
+  const handleEnableCompanion = useCallback(async () => {
+    try {
+      const res = await api.updateBlindCompanionSettings({
+        blind_companion_enabled: true,
+        is_disabled_student: true
+      })
+      if (res && res.success) {
+        if (updateUserProfile) {
+          updateUserProfile({ blind_companion_enabled: true, is_disabled_student: true })
+        }
+        announce('Blind Learning Companion enabled. Welcome to your audio-first learning hub.')
+      }
+    } catch (err) {
+      console.error('[BlindCompanion] Enable error:', err)
+    }
+  }, [updateUserProfile, announce])
+
+  // ── RENDER: NOT ENABLED STATE ──────────────────────────────────────────────
   if (!isCompanionEnabled) {
     return (
-      <div className="max-w-3xl mx-auto py-12 px-4 text-center">
-        <div className="w-16 h-16 rounded-3xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 mx-auto flex items-center justify-center mb-4">
+      <div className="max-w-3xl mx-auto py-12 px-4 space-y-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white mx-auto flex items-center justify-center shadow-md">
           <Headphones size={32} />
         </div>
-        <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2">
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
           Blind Learning Companion
-        </h2>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 max-w-xl mx-auto leading-relaxed">
-          The Blind Learning Companion is an audio-first accessibility suite specifically designed for blind and low-vision students. By default, it remains turned OFF to ensure non-disabled profiles remain completely undisturbed.
+        </h1>
+        <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 max-w-xl mx-auto leading-relaxed">
+          An independent, audio-first learning environment designed specifically for blind and low-vision students.
+          Features syllabus-grounded audio teaching, Concept-to-Sense visual descriptions, and accessible voice practice.
         </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link to="/app/settings">
-            <Button className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5">
-              Enable in Settings
-            </Button>
-          </Link>
-          <Link to="/app/dashboard">
-            <Button variant="secondary" className="font-bold text-xs px-5 py-2.5">
-              Back to Main Dashboard
-            </Button>
-          </Link>
+
+        <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Button
+            onClick={handleEnableCompanion}
+            className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-md cursor-pointer"
+          >
+            Enable Blind Learning Companion
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/app/dashboard')}
+            className="w-full sm:w-auto px-6 py-3 font-bold text-sm sm:text-base rounded-xl cursor-pointer"
+          >
+            Return to Dashboard
+          </Button>
         </div>
       </div>
     )
   }
 
+  // ── RENDER: REDESIGNED COMPANION ───────────────────────────────────────────
+  const themeClasses = highContrast
+    ? 'bg-black text-yellow-300 min-h-screen selection:bg-yellow-400 selection:text-black'
+    : 'min-h-screen space-y-6 pb-20'
+
   return (
-    <main
-      role="main"
-      aria-label="Blind Learning Companion Teaching Suite"
-      className={`space-y-6 pb-12 transition-colors ${highContrast ? 'bg-black text-yellow-300 font-bold' : ''}`}
-    >
-      {/* Hidden Live Region for Screen Readers */}
-      <div aria-live="assertive" aria-atomic="true" className="sr-only">
-        {speechLabel}: {currentSpeechText}
-      </div>
-
-      {/* Top Page Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-[var(--border)]">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20">
-              <Headphones size={22} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Blind Learning Companion · Teaching Suite
-                </h1>
-                <Badge className="bg-indigo-600 text-white font-bold text-[10px] uppercase tracking-wider">
-                  Concept-to-Sense
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                Syllabus-aware AI teaching, 10-step structured lessons, and mental-mapping visual explanations.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Global Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setHighContrast(prev => !prev)}
-            className="text-xs font-bold flex items-center gap-1.5 focus-visible:ring-4 focus-visible:ring-indigo-500"
-            aria-label="Toggle High Contrast Display Mode (Hotkey: C)"
-          >
-            {highContrast ? 'Standard Contrast' : 'High Contrast'}
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setShowHelpModal(true)}
-            className="text-xs font-bold flex items-center gap-1.5 focus-visible:ring-4 focus-visible:ring-indigo-500"
-            aria-label="Open Keyboard Shortcuts Help (Hotkey: ?)"
-          >
-            <HelpCircle size={15} />
-            <span>Shortcuts (?)</span>
-          </Button>
-
-          <Link to="/app/settings">
-            <Button
-              variant="secondary"
-              className="text-xs font-bold flex items-center gap-1.5 focus-visible:ring-4 focus-visible:ring-indigo-500"
-              aria-label="Open Companion Settings"
-            >
-              <SettingsIcon size={15} />
-              <span>Settings</span>
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      {/* ── Persistent Audio Control Bar ──────────────────────────────────── */}
-      <section
-        aria-label="Audio Reader Bar"
-        className="sticky top-2 z-20 p-4 rounded-2xl bg-slate-900 text-white shadow-xl border-2 border-indigo-500/50 flex flex-col md:flex-row md:items-center justify-between gap-4"
+    <div className={themeClasses} role="region" aria-label="Blind Learning Companion Workspace">
+      {/* ── ARIA LIVE REGION FOR SCREEN READERS ────────────────────────────── */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isSpeaking ? 'bg-emerald-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400'}`}>
-            {isSpeaking ? <Volume2 size={22} /> : <VolumeX size={22} />}
+        {liveAnnouncement}
+      </div>
+
+      {/* ── TOP ACCESSIBLE CONTROLLER BAR ──────────────────────────────────── */}
+      <header
+        role="banner"
+        className={`p-4 sm:p-5 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs ${
+          highContrast
+            ? 'bg-black border-yellow-400 text-yellow-300'
+            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+        }`}
+      >
+        <div className="flex items-center gap-3.5">
+          <div
+            className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
+              highContrast ? 'bg-yellow-400 text-black' : 'bg-indigo-600 text-white shadow-xs'
+            }`}
+          >
+            <Headphones size={24} />
           </div>
-          <div className="min-w-0">
+          <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wider font-extrabold text-indigo-400">
-                {isSpeaking ? (isPaused ? 'Paused' : 'Now Speaking') : 'Audio Status'}
+              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight">
+                Blind Learning Companion
+              </h1>
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded uppercase tracking-wider ${
+                  highContrast ? 'bg-yellow-400 text-black' : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+                }`}
+              >
+                Audio-First
               </span>
-              <span className="text-[11px] text-slate-400">· Speed: {audioSpeed}x</span>
             </div>
-            <div className="text-xs sm:text-sm font-semibold truncate text-slate-200" title={speechLabel}>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               {speechLabel}
-            </div>
+            </p>
           </div>
         </div>
 
-        {/* Audio Action Buttons */}
-        <div className="flex items-center gap-2 self-start md:self-center shrink-0">
-          {voiceSupported && (
-            <Button
-              type="button"
-              onClick={toggleVoiceInput}
-              className={`text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white transition-all ${
-                isListening ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-              }`}
-              aria-label={isListening ? 'Stop Listening' : 'Speak a Question (Hotkey: V)'}
-            >
-              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-              <span>{isListening ? 'Listening...' : 'Voice Question'}</span>
-            </Button>
-          )}
-
-          {isSpeaking ? (
-            isPaused ? (
-              <Button
-                type="button"
-                onClick={resumeSpeech}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white"
-                aria-label="Resume Speech (Hotkey: P or Space)"
-              >
-                <Play size={16} />
-                <span>Resume</span>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                onClick={pauseSpeech}
-                className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white"
-                aria-label="Pause Speech (Hotkey: P or Space)"
-              >
-                <Pause size={16} />
-                <span>Pause</span>
-              </Button>
-            )
-          ) : (
-            <Button
-              type="button"
-              onClick={() => requestAITeaching(teachingMode)}
-              disabled={!selectedTopic || loadingLesson}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-white disabled:opacity-50"
-              aria-label="Start AI Lesson (Hotkey: P or Space)"
-            >
-              <Play size={16} />
-              <span>{loadingLesson ? 'Generating...' : 'Start Lesson'}</span>
-            </Button>
-          )}
-
-          <Button
+        {/* Global Audio Controls Bar */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
             type="button"
-            variant="secondary"
+            onClick={() => {
+              if (isSpeaking && !isPaused) pauseSpeech()
+              else if (isPaused) resumeSpeech()
+              else if (currentSpeechText) repeatSpeech()
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all focus-visible:ring-4 ${
+              highContrast
+                ? 'bg-yellow-400 text-black hover:bg-yellow-300 focus-visible:ring-white'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white focus-visible:ring-indigo-300'
+            }`}
+            aria-label={isSpeaking && !isPaused ? 'Pause Audio (Space)' : 'Play / Resume Audio (Space)'}
+          >
+            {isSpeaking && !isPaused ? <Pause size={15} /> : <Play size={15} />}
+            <span>{isSpeaking && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Play'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={repeatSpeech}
-            disabled={!currentSpeechText}
-            className="text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-indigo-400 text-white bg-slate-800 hover:bg-slate-700 border-slate-700 disabled:opacity-40"
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border focus-visible:ring-4 ${
+              highContrast
+                ? 'border-yellow-400 text-yellow-300 hover:bg-yellow-950 focus-visible:ring-white'
+                : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
             aria-label="Repeat Audio (Hotkey: R)"
           >
-            <RotateCcw size={15} />
-            <span>Repeat</span>
-          </Button>
+            <RotateCcw size={14} />
+            <span>Repeat (R)</span>
+          </button>
 
-          <Button
+          <button
             type="button"
-            variant="secondary"
             onClick={stopSpeech}
-            disabled={!isSpeaking && !isPaused}
-            className="text-xs font-bold flex items-center gap-1.5 px-3 py-2 rounded-xl focus-visible:ring-4 focus-visible:ring-red-400 text-red-300 bg-slate-800 hover:bg-slate-700 border-slate-700 disabled:opacity-40"
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border focus-visible:ring-4 ${
+              highContrast
+                ? 'border-yellow-400 text-yellow-300 hover:bg-yellow-950 focus-visible:ring-white'
+                : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
             aria-label="Stop Audio (Hotkey: S)"
           >
-            <VolumeX size={15} />
-            <span>Stop</span>
-          </Button>
-        </div>
-      </section>
-
-      {/* ── Section: Active Syllabus Navigation ────────────────────────────── */}
-      <section aria-labelledby="curriculum-select-heading" className="space-y-4">
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] pb-2">
-          <div className="flex items-center gap-2">
-            <BookOpen size={18} className="text-indigo-600" />
-            <h2 id="curriculum-select-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Syllabus Selection (Subject · Unit · Topic)
-            </h2>
-          </div>
-          <button
-            onClick={onOpenSyllabusModal}
-            className="text-xs font-semibold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-500 rounded p-1"
-          >
-            <UploadCloud size={14} />
-            <span>Switch Syllabus</span>
-          </button>
-        </div>
-
-        {!hasValidCurriculum || authoritativeSubjects.length === 0 ? (
-          <Card className="p-8 text-center border-dashed border-2 border-slate-300 dark:border-slate-700">
-            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 mx-auto flex items-center justify-center mb-3">
-              <AlertTriangle size={24} />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
-              No Validated Syllabus Uploaded Yet
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-4">
-              To experience syllabus-grounded audio teaching, please upload your official semester course document.
-            </p>
-            <Button
-              type="button"
-              onClick={onOpenSyllabusModal}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl"
-            >
-              Upload Official Syllabus PDF
-            </Button>
-          </Card>
-        ) : (
-          <div className="grid md:grid-cols-3 gap-4">
-            {/* Subject Selector */}
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
-              <label htmlFor="subject-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                1. Subject ({authoritativeSubjects.length})
-              </label>
-              <select
-                id="subject-select"
-                value={selectedSubject}
-                onChange={(e) => {
-                  setSelectedSubject(e.target.value)
-                  speakText(`Selected subject: ${e.target.value}`, 'Subject Switch')
-                }}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-xs font-semibold focus-visible:ring-4 focus-visible:ring-indigo-500"
-              >
-                {authoritativeSubjects.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Unit Selector */}
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
-              <label htmlFor="unit-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                2. Unit / Module ({activeUnits.length})
-              </label>
-              <select
-                id="unit-select"
-                value={selectedUnit ? (selectedUnit.title || selectedUnit.name) : ''}
-                onChange={(e) => {
-                  const unit = activeUnits.find(u => (u.title || u.name) === e.target.value)
-                  setSelectedUnit(unit)
-                  speakText(`Selected unit: ${e.target.value}`, 'Unit Switch')
-                }}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-xs font-semibold focus-visible:ring-4 focus-visible:ring-indigo-500"
-              >
-                {activeUnits.map((u, i) => (
-                  <option key={i} value={u.title || u.name}>
-                    {u.unit_number ? `Unit ${u.unit_number}: ` : ''}{u.title || u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Topic Selector */}
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
-              <label htmlFor="topic-select" className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                3. Topic / Subtopic ({activeTopics.length})
-              </label>
-              <select
-                id="topic-select"
-                value={selectedTopic ? selectedTopic.title : ''}
-                onChange={(e) => {
-                  const t = activeTopics.find(top => top.title === e.target.value)
-                  setSelectedTopic(t)
-                  const st = topicStatusMap[`${selectedSubject}::${e.target.value}`] || 'Not started'
-                  speakText(`Selected topic: ${e.target.value}. Learning status: ${st}.`, 'Topic Switch')
-                }}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-xs font-semibold focus-visible:ring-4 focus-visible:ring-indigo-500"
-              >
-                {activeTopics.map((top, idx) => {
-                  const status = topicStatusMap[`${selectedSubject}::${top.title}`] || 'Not started'
-                  return (
-                    <option key={idx} value={top.title}>
-                      {top.title} · [{status}]
-                    </option>
-                  )
-                })}
-              </select>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* ── Section: Teaching Mode & Intelligent Action Bar ───────────────── */}
-      <section aria-labelledby="teaching-modes-heading" className="p-5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/60 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 id="teaching-modes-heading" className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Sparkles size={16} className="text-indigo-600" />
-              <span>Teaching Intelligence Mode</span>
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-              Select how the AI Personal Trainer delivers this syllabus concept.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              type="button"
-              onClick={() => {
-                setTeachingMode('structured_10_step')
-                requestAITeaching('structured_10_step')
-              }}
-              disabled={loadingLesson}
-              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
-                teachingMode === 'structured_10_step'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              10-Step Master Lesson
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() => {
-                setTeachingMode('concept_to_sense')
-                requestAITeaching('concept_to_sense')
-              }}
-              disabled={loadingLesson}
-              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
-                teachingMode === 'concept_to_sense'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Concept-to-Sense Audio
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() => {
-                setTeachingMode('simple')
-                requestAITeaching('simple')
-              }}
-              disabled={loadingLesson}
-              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
-                teachingMode === 'simple'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Simple Mode
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() => {
-                setTeachingMode('detailed')
-                requestAITeaching('detailed')
-              }}
-              disabled={loadingLesson}
-              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
-                teachingMode === 'detailed'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Detailed Mode
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() => {
-                setTeachingMode('quick_revision')
-                requestAITeaching('quick_revision')
-              }}
-              disabled={loadingLesson}
-              className={`text-xs font-bold px-3 py-2 rounded-xl transition-all ${
-                teachingMode === 'quick_revision'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Quick Revision
-            </Button>
-          </div>
-        </div>
-
-        {/* Quick Conversational Prompt Actions */}
-        <div className="pt-2 border-t border-indigo-200/60 dark:border-indigo-900/40 flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300">
-            Quick Follow-ups:
-          </span>
-          <button
-            type="button"
-            disabled={loadingLesson}
-            onClick={() => requestAITeaching(teachingMode, `Explain ${selectedTopic?.title} more simply using an everyday analogy.`)}
-            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
-          >
-            💡 Simpler Explanation
-          </button>
-          <button
-            type="button"
-            disabled={loadingLesson}
-            onClick={() => requestAITeaching(teachingMode, `Give me another concrete real-world engineering or practical example of ${selectedTopic?.title}.`)}
-            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
-          >
-            🔄 Another Example
-          </button>
-          <button
-            type="button"
-            disabled={loadingLesson}
-            onClick={() => requestAITeaching('concept_to_sense', `Break down and explore the individual components and connections of the diagram for ${selectedTopic?.title}.`)}
-            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
-          >
-            🔍 Explore Diagram Components
-          </button>
-          <button
-            type="button"
-            disabled={loadingLesson}
-            onClick={() => requestAITeaching('quick_revision', `Give me a 60-second rapid revision checklist of ${selectedTopic?.title} for exam recall.`)}
-            className="text-[11px] font-semibold bg-white dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 cursor-pointer"
-          >
-            ⚡ Short Revision
-          </button>
-        </div>
-      </section>
-
-      {/* ── Active Teaching Lesson Presentation ───────────────────────────── */}
-      {loadingLesson ? (
-        <Card className="p-8 text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 mx-auto flex items-center justify-center animate-spin">
-            <RefreshCw size={24} />
-          </div>
-          <div className="text-sm font-bold text-slate-900 dark:text-white">
-            Teaching Engine Generating Lesson for {selectedTopic?.title || 'Selected Topic'}...
-          </div>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Grounded directly in your validated syllabus ({selectedSubject} · {selectedUnit?.title || 'Unit'}). Text-to-speech narration will begin automatically.
-          </p>
-        </Card>
-      ) : activeLesson ? (
-        <Card className="p-6 space-y-4 border-2 border-indigo-200 dark:border-indigo-900/50 shadow-md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  {activeLesson.title}
-                </h3>
-                <Badge className="bg-indigo-600 text-white text-[10px] uppercase font-bold">
-                  {activeLesson.mode.replace('_', ' ')}
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {activeLesson.subject} · {activeLesson.unit}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                onClick={() => speakText(activeLesson.text, `Lesson: ${activeLesson.title}`)}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 px-3.5 py-2 rounded-xl shadow-xs"
-              >
-                <Volume2 size={16} />
-                <span>Re-Listen Lesson</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Render Lesson Content cleanly with accessible reading typography */}
-          <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed space-y-3 whitespace-pre-wrap">
-            {activeLesson.text}
-          </div>
-        </Card>
-      ) : null}
-
-      {/* ── Section: Concept-to-Sense Interactive Component Explorer ───────── */}
-      <section aria-labelledby="visual-explorer-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
-          <div className="flex items-center gap-2">
-            <Cpu size={18} className="text-indigo-600" />
-            <h2 id="visual-explorer-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Concept-to-Sense Visual Audio Explorer
-            </h2>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => requestAITeaching('concept_to_sense')}
-            disabled={loadingLesson || !selectedTopic}
-            className="text-xs font-bold flex items-center gap-1.5 self-start sm:self-center"
-          >
-            <Activity size={15} />
-            <span>Generate Full Mental Map</span>
-          </Button>
-        </div>
-
-        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-          Translates textbook diagrams, electrical circuits, mathematical curves, and scientific illustrations into tactile mental models. Select any component below to hear its isolated role, interconnections, and signal path:
-        </p>
-
-        {/* Interactive Component Pills */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-          <button
-            type="button"
-            onClick={() => handleExploreComponent(
-              'Active Potential Source (Driver V1)',
-              'Provides nominal 12 Volts DC excitation potential. Located at top-left rail, driving clockwise continuous charge/signal flow into series impedance.'
-            )}
-            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-              activeComponent?.includes('Source')
-                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
-                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
-            }`}
-          >
-            <div className="flex items-center gap-2 text-indigo-600 mb-1">
-              <Zap size={16} />
-              <span className="text-xs font-bold">1. Excitation Source</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              12V Nominal Reference Driver
-            </p>
+            <VolumeX size={14} />
+            <span>Stop (S)</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleExploreComponent(
-              'Control Gate / Series Switch S1',
-              'Located in series on the upper positive conductor rail. In closed state, establishes closed loop continuity. If opened, resistance becomes infinite, immediately interrupting loop flow.'
-            )}
-            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-              activeComponent?.includes('Switch')
-                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
-                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
-            }`}
-          >
-            <div className="flex items-center gap-2 text-indigo-600 mb-1">
-              <Sliders size={16} />
-              <span className="text-xs font-bold">2. Series Switch S1</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              Physical Loop Continuity Gate
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleExploreComponent(
-              'Primary Impedance / Load R1',
-              'Rated at 100 Ohms. Connected between upper switched rail and ground return node. Generates a proportional voltage drop according to Ohm\'s Law, drawing 120 milliamperes of current.'
-            )}
-            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-              activeComponent?.includes('Impedance')
-                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
-                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
-            }`}
-          >
-            <div className="flex items-center gap-2 text-indigo-600 mb-1">
-              <Cpu size={16} />
-              <span className="text-xs font-bold">3. Load Element R1</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              100 Ohm Rated Working Impedance
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleExploreComponent(
-              'Ground Reference / Return Node',
-              'Zero volt system reference rail. Completes the closed path back to the negative terminal of driver V1, ensuring zero floating potentials.'
-            )}
-            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-              activeComponent?.includes('Ground')
-                ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 shadow-xs'
-                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 hover:border-indigo-400'
-            }`}
-          >
-            <div className="flex items-center gap-2 text-indigo-600 mb-1">
-              <ShieldCheck size={16} />
-              <span className="text-xs font-bold">4. Ground Reference</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              0V Return Conductor Node
-            </p>
-          </button>
-        </div>
-      </section>
-
-      {/* ── Section: Interactive Spoken Q&A Box ────────────────────────────── */}
-      <section aria-labelledby="interactive-qa-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
-        <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
-          <Mic size={18} className="text-indigo-600" />
-          <h2 id="interactive-qa-heading" className="text-base font-bold text-slate-900 dark:text-white">
-            Interactive Audio Tutoring (Ask Questions via Voice or Text)
-          </h2>
-        </div>
-
-        <form onSubmit={handleAskQuestion} className="space-y-3">
-          <div className="relative">
-            <textarea
-              rows={2}
-              value={studentQuestion}
-              onChange={(e) => setStudentQuestion(e.target.value)}
-              placeholder="Ask anything about this concept (e.g. 'Why does voltage divide in series?', 'Give another example', 'Explore the current path')..."
-              className="w-full p-3 pr-24 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-900 dark:text-white outline-none focus-visible:ring-4 focus-visible:ring-indigo-500"
-            />
-            <div className="absolute right-2 top-2 flex items-center gap-1.5">
-              {voiceSupported && (
-                <button
-                  type="button"
-                  onClick={toggleVoiceInput}
-                  className={`p-2 rounded-lg text-white transition-all cursor-pointer ${
-                    isListening ? 'bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
-                  aria-label={isListening ? 'Stop Listening' : 'Speak Question (Hotkey: V)'}
-                  title="Speak your question"
-                >
-                  <Mic size={16} />
-                </button>
-              )}
+          {/* Speed Selector */}
+          <div className="flex items-center gap-1 border rounded-xl px-2 py-1 text-xs font-bold">
+            <span className="text-[11px] text-slate-400">Speed:</span>
+            {[0.75, 1.0, 1.25, 1.5].map((rate) => (
               <button
-                type="submit"
-                disabled={!studentQuestion.trim() || loadingLesson}
-                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 cursor-pointer"
-                aria-label="Submit Question to AI Tutor"
-                title="Send Question"
+                key={rate}
+                type="button"
+                onClick={() => {
+                  setAudioSpeed(rate)
+                  announce(`Speech speed set to ${rate}x`)
+                }}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-bold cursor-pointer ${
+                  audioSpeed === rate
+                    ? highContrast
+                      ? 'bg-yellow-400 text-black'
+                      : 'bg-indigo-600 text-white'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                aria-label={`Set speech speed to ${rate}x`}
               >
-                <Send size={16} />
+                {rate}x
               </button>
-            </div>
+            ))}
           </div>
-        </form>
-      </section>
 
-      {/* ── Section: Adaptive Learning Path (Syllabus-Integrated Recommendations) ─── */}
-      <section aria-labelledby="adaptive-path-heading" className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
-          <div className="flex items-center gap-2">
-            <Compass size={18} className="text-indigo-600 dark:text-indigo-400" />
-            <h2 id="adaptive-path-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Adaptive Learning Path (What to Study Next)
-            </h2>
-          </div>
-          {learningPath && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
-                Focus: {learningPath.focus_topic}
-              </span>
-              <span className="text-slate-500 dark:text-slate-400">
-                {learningPath.completed_count || 0} of {learningPath.total_steps || 0} steps completed
-              </span>
-            </div>
-          )}
+          {/* High Contrast Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !highContrast
+              setHighContrast(next)
+              announce(next ? 'High contrast enabled' : 'Normal contrast enabled')
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer ${
+              highContrast ? 'border-yellow-400 bg-yellow-400 text-black' : 'border-slate-300 dark:border-slate-700'
+            }`}
+            aria-label="Toggle High Contrast Display Mode"
+          >
+            {highContrast ? 'Normal Contrast' : 'High Contrast'}
+          </button>
         </div>
+      </header>
 
-        {/* ── Audio-First Command Bar (Prompt 4 Requirement 4) ── */}
-        <Card className="p-4 rounded-2xl bg-gradient-to-r from-indigo-900/10 via-purple-900/10 to-indigo-900/10 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800/60 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400" />
-              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                Audio-First Voice & Quick Commands
-              </span>
-            </div>
+      {/* ── 5 DEDICATED SECTIONS NAVIGATION BAR ───────────────────────────── */}
+      <nav
+        role="navigation"
+        aria-label="Blind Learning Companion Main Navigation"
+        className="grid grid-cols-2 sm:grid-cols-5 gap-2"
+      >
+        {[
+          { key: 'syllabus', label: '1. My Syllabus', hotkey: 'Alt+1', desc: 'Browse courses & topics', icon: BookOpen },
+          { key: 'learn', label: '2. Listen & Learn', hotkey: 'Alt+2', desc: 'Audio teaching & diagrams', icon: Headphones },
+          { key: 'practice', label: '3. Practice', hotkey: 'Alt+3', desc: 'Q&A checkpoints', icon: Award },
+          { key: 'progress', label: '4. My Progress', hotkey: 'Alt+4', desc: 'Gaps & learning path', icon: Compass },
+          { key: 'settings', label: '5. Settings', hotkey: 'Alt+5', desc: 'Audio & preferences', icon: Sliders }
+        ].map((item) => {
+          const Icon = item.icon
+          const isActive = activeSection === item.key
+          return (
             <button
+              key={item.key}
               type="button"
-              onClick={toggleVoiceCommandInput}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                voiceListening
-                  ? 'bg-red-600 text-white animate-pulse'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+              onClick={() => switchSection(item.key)}
+              aria-current={isActive ? 'page' : undefined}
+              className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all cursor-pointer focus-visible:ring-4 ${
+                isActive
+                  ? highContrast
+                    ? 'border-yellow-400 bg-yellow-400 text-black font-extrabold focus-visible:ring-white shadow-md'
+                    : 'border-indigo-600 bg-indigo-50/90 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-extrabold focus-visible:ring-indigo-400 shadow-xs'
+                  : highContrast
+                  ? 'border-yellow-900 bg-black text-yellow-400 hover:border-yellow-400'
+                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
               }`}
-              aria-label={voiceListening ? 'Stop Listening for Voice Command' : 'Activate Voice Command via Microphone'}
             >
-              <Mic size={14} />
-              <span>{voiceListening ? 'Listening...' : 'Voice Command'}</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => handlePathCommand('what should i study next')}
-              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
-              aria-label="Ask audio companion: What should I study next?"
-            >
-              <Headphones size={15} className="text-indigo-600 shrink-0" />
-              <span>"What should I study next?"</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handlePathCommand('why was this topic recommended')}
-              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
-              aria-label="Ask audio companion: Why was this topic recommended?"
-            >
-              <HelpCircle size={15} className="text-amber-600 shrink-0" />
-              <span>"Why this topic?"</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handlePathCommand('start learning')}
-              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
-              aria-label="Trigger audio companion: Start learning"
-            >
-              <Play size={15} className="text-emerald-600 shrink-0" />
-              <span>"Start learning."</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handlePathCommand('give me another example')}
-              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
-              aria-label="Ask audio companion: Give me another example"
-            >
-              <Zap size={15} className="text-purple-600 shrink-0" />
-              <span>"Another example."</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handlePathCommand('show my learning progress')}
-              className="p-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
-              aria-label="Ask audio companion: Show my learning progress"
-            >
-              <Award size={15} className="text-blue-600 shrink-0" />
-              <span>"Show my progress."</span>
-            </button>
-          </div>
-
-          {/* Active Command Output Card */}
-          {activeCommandResult && (
-            <div className="mt-2 p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-700/80 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                  Spoken Response Transcript
+              <div className="flex items-center justify-between mb-1">
+                <Icon size={18} className={isActive ? (highContrast ? 'text-black' : 'text-indigo-600 dark:text-indigo-400') : 'text-slate-400'} />
+                <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${highContrast ? 'bg-black text-yellow-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}`}>
+                  {item.hotkey}
                 </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => speakText(activeCommandResult.spoken_response, 'Voice Response')}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
-                    aria-label="Replay audio response"
-                  >
-                    <Volume2 size={13} />
-                    <span>Replay Audio</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveCommandResult(null)}
-                    className="text-xs text-slate-400 hover:text-slate-600 p-1"
-                    aria-label="Close command response"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
               </div>
-              <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed">
-                {activeCommandResult.spoken_response}
-              </p>
+              <div className="text-sm font-extrabold leading-tight">{item.label}</div>
+              <div className={`text-[11px] mt-0.5 truncate ${isActive ? (highContrast ? 'text-black font-semibold' : 'text-indigo-700 dark:text-indigo-300') : 'text-slate-500 dark:text-slate-400'}`}>
+                {item.desc}
+              </div>
+            </button>
+          )
+        })}
+      </nav>
 
-              {/* If an example was returned */}
-              {activeCommandResult.example && (
-                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
-                  <div className="font-bold text-slate-900 dark:text-white">
-                    Worked Problem:
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-300">
-                    {activeCommandResult.example.problem_statement}
+      {/* ── MAIN CONTENT CONTAINER ────────────────────────────────────────── */}
+      <main id="blind-main" tabIndex="-1" className="space-y-6 outline-none">
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 1: MY SYLLABUS                                            */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {activeSection === 'syllabus' && (
+          <div className="space-y-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                    <BookOpen size={20} className="text-indigo-600" />
+                    <span>My Uploaded Syllabus</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Your authenticated course curriculum is the source of truth for all lessons and practice.
                   </p>
-                  <div className="space-y-1 pt-1 font-mono text-[11px] text-indigo-700 dark:text-indigo-300">
-                    {activeCommandResult.example.worked_steps?.map((st, idx) => (
-                      <div key={idx}>{st}</div>
-                    ))}
-                  </div>
                 </div>
-              )}
-            </div>
-          )}
-        </Card>
 
-        {/* ── Sequenced Learning Path Steps (Prompt 4 Req 1, 2, 5) ── */}
-        {loadingPath ? (
-          <Card className="p-6 text-center text-xs text-slate-500">
-            Generating syllabus-integrated adaptive path...
-          </Card>
-        ) : !learningPath?.steps || learningPath.steps.length === 0 ? (
-          <Card className="p-6 text-center text-xs text-slate-500">
-            No active learning path steps found. Upload your course syllabus to begin guided learning.
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {learningPath.steps.map((step) => {
-              const isCompleted = Boolean(step.completed)
-              const badgeColor =
-                step.step_type === 'revise_prerequisite'
-                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200 border-purple-200 dark:border-purple-800'
-                  : (step.step_type === 'concept_breakdown'
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 border-blue-200 dark:border-blue-800'
-                      : (step.step_type === 'guided_example'
-                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800'
-                          : (step.step_type === 'independent_practice'
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border-amber-200 dark:border-amber-800'
-                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800')))
-
-              return (
-                <div
-                  key={step.step_id}
-                  className={`p-4 rounded-2xl border transition-all ${
-                    isCompleted
-                      ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-80'
-                      : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 shadow-xs hover:border-indigo-400'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeColor}`}>
-                        Step {step.step_number} · {step.step_type.replace('_', ' ')}
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                        {step.subject} · {step.unit}
-                      </span>
-                      {isCompleted && (
-                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200 dark:border-emerald-800">
-                          <CheckCircle2 size={11} />
-                          <span>Completed</span>
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const narration = `${step.title}. Recommended because: ${step.why_recommended} Supporting evidence: ${step.evidence_basis}. Activity: ${step.activity_description}. Mastery check: ${step.mastery_check}`
-                          speakText(narration, `Step ${step.step_number} Guidance`)
-                        }}
-                        className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
-                        aria-label={`Listen to step ${step.step_number} guidance spoken aloud`}
-                      >
-                        <Volume2 size={14} />
-                        <span>Listen</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (step.subject && authoritativeSubjects.includes(step.subject)) {
-                            setSelectedSubject(step.subject)
-                          }
-                          const mode = step.step_type === 'revise_prerequisite' ? 'simple' : 'structured_10_step'
-                          setTeachingMode(mode)
-                          requestAITeaching(mode, `Teach me ${step.topic} for ${step.title}`)
-                        }}
-                        className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer shadow-2xs"
-                        aria-label={`Start learning step ${step.step_number}: ${step.title}`}
-                      >
-                        <Play size={12} />
-                        <span>Start Step</span>
-                      </button>
-
-                      {!isCompleted && (
-                        <button
-                          type="button"
-                          onClick={() => handleCompleteStep(step)}
-                          className="text-xs font-bold bg-slate-100 hover:bg-emerald-100 dark:bg-slate-700 dark:hover:bg-emerald-950/60 text-slate-700 hover:text-emerald-800 dark:text-slate-200 dark:hover:text-emerald-300 px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer border border-slate-200 dark:border-slate-600 transition-colors"
-                          aria-label={`Mark step ${step.step_number} as completed`}
-                        >
-                          <CheckCircle2 size={12} />
-                          <span>Complete</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-2.5 space-y-2">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      {step.title}
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                      <strong>Focus:</strong> {step.what_to_study}
-                    </p>
-
-                    {/* Recommendation Transparency Box (Prompt 4 Req 5) */}
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 text-[11px] space-y-1.5">
-                      <div className="text-indigo-700 dark:text-indigo-300">
-                        <strong className="text-slate-900 dark:text-white">Why Recommended:</strong> {step.why_recommended}
-                      </div>
-                      <div className="text-slate-600 dark:text-slate-400">
-                        <strong className="text-slate-900 dark:text-white">Learning Evidence:</strong> {step.evidence_basis}
-                      </div>
-                      <div className="text-slate-600 dark:text-slate-400">
-                        <strong className="text-slate-900 dark:text-white">Activity:</strong> {step.activity_description} ({step.activity_type})
-                      </div>
-                      <div className="text-emerald-700 dark:text-emerald-400">
-                        <strong className="text-slate-900 dark:text-white">Mastery Check:</strong> {step.mastery_check}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* ── Section: Concepts I Need to Improve (Evidence-Based Learning Gaps) ─── */}
-      <section aria-labelledby="improve-heading" className="space-y-3">
-        <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={18} className="text-amber-600" />
-            <h2 id="improve-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Concepts I Need to Improve (Evidence-Based Learning Gaps)
-            </h2>
-          </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {learningGaps.length} diagnosed gap{learningGaps.length === 1 ? '' : 's'}
-          </span>
-        </div>
-
-        {loadingGaps ? (
-          <Card className="p-6 text-center text-xs text-slate-500">
-            Analyzing authentic student learning records...
-          </Card>
-        ) : learningGaps.length === 0 ? (
-          <Card className="p-5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 flex items-start gap-3">
-            <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-            <div>
-              <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                No Active Learning Gaps Detected
-              </div>
-              <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
-                Your evaluated assessments and practice attempts show solid understanding. Any specific calculation, formula, diagram, or conceptual gaps will appear here automatically when detected.
-              </p>
-            </div>
-          </Card>
-        ) : (
-          <div className="grid sm:grid-cols-2 gap-3.5">
-            {learningGaps.map((gap, i) => (
-              <div
-                key={gap.gap_id || i}
-                className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2.5 hover:border-amber-400 transition-colors shadow-xs"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded">
-                      {gap.subject}
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                      gap.mistake_nature?.includes('Calculation')
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
-                        : (gap.mistake_nature?.includes('Diagram') || gap.mistake_nature?.includes('Graph')
-                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200')
-                    }`}>
-                      {gap.mistake_nature}
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded">
-                      {gap.evidence_strength}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => {
-                      const msg = `Identified learning gap in ${gap.subject}, topic: ${gap.topic}. Nature of mistake: ${gap.mistake_nature}. Evidence strength: ${gap.evidence_strength}. Learning status: ${gap.status}. Why this occurred: ${gap.why_learning_gap}. Recommended next step: ${gap.recommended_action}`
-                      speakText(msg, `Diagnosis: ${gap.topic}`)
+                      const msg = hasValidCurriculum
+                        ? `Your uploaded syllabus contains ${subjects.length} subjects: ${subjects.join(', ')}.`
+                        : 'No validated syllabus document found. Please upload your course syllabus PDF.'
+                      speakText(msg, 'Syllabus Summary')
                     }}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 rounded p-1 shrink-0"
-                    aria-label={`Listen to spoken diagnosis and remedy for ${gap.topic}`}
+                    className="text-xs font-bold flex items-center gap-1.5"
+                    aria-label="Read syllabus overview aloud"
                   >
                     <Volume2 size={14} />
-                    <span>Listen</span>
-                  </button>
+                    <span>Read Overview</span>
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    onClick={onOpenSyllabusModal}
+                    className="text-xs font-bold flex items-center gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
+                    aria-label="Upload or update syllabus document"
+                  >
+                    <UploadCloud size={14} />
+                    <span>Upload Syllabus</span>
+                  </Button>
+                </div>
+              </div>
+
+              {!hasValidCurriculum ? (
+                <div className="p-8 text-center border-2 border-dashed border-amber-300 dark:border-amber-800 rounded-2xl space-y-3 bg-amber-50/50 dark:bg-amber-950/20">
+                  <AlertCircle size={36} className="text-amber-600 mx-auto" />
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    No Validated Syllabus Uploaded
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                    Please upload your official course syllabus PDF to auto-extract your subjects, units, and learning
+                    objectives. Your syllabus powers every audio lesson and practice checkpoint.
+                  </p>
+                  <Button
+                    onClick={onOpenSyllabusModal}
+                    className="bg-indigo-600 text-white hover:bg-indigo-700 font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs"
+                  >
+                    Upload Syllabus Document Now
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid lg:grid-cols-3 gap-5">
+                  {/* Step 1: Subjects List */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Step 1: Enrolled Subjects ({subjects.length})
+                    </label>
+                    <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                      {subjects.map((sName, sIdx) => {
+                        const isSel = selectedSubject === sName
+                        return (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSubject(sName)
+                              announce(`Subject selected: ${sName}`)
+                              speakText(`Subject: ${sName}`, `Subject ${sIdx + 1}`)
+                            }}
+                            className={`w-full p-3 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer flex items-center justify-between ${
+                              isSel
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:border-indigo-400'
+                            }`}
+                            aria-label={`Subject ${sIdx + 1}: ${sName}`}
+                          >
+                            <span className="truncate flex-1">{sName}</span>
+                            <ChevronRight size={14} className={isSel ? 'text-white' : 'text-slate-400'} />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Step 2: Units List for Selected Subject */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Step 2: Units for {selectedSubject || 'Subject'}
+                    </label>
+                    {currentUnits.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-3">No unit subdivisions detected for this subject.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                        {currentUnits.map((u, uIdx) => {
+                          const isSel = selectedUnit?.title === u.title
+                          return (
+                            <button
+                              key={uIdx}
+                              type="button"
+                              onClick={() => {
+                                setSelectedUnit(u)
+                                if (u.concepts && u.concepts.length > 0) {
+                                  setSelectedTopic({
+                                    title: u.concepts[0],
+                                    unit: u.title,
+                                    subject: selectedSubject,
+                                    objectives: [`Master ${u.concepts[0]}`]
+                                  })
+                                }
+                                announce(`Unit selected: ${u.title}`)
+                                speakText(`Unit: ${u.title}. Contains ${u.concepts.length} syllabus topics.`, `Unit ${uIdx + 1}`)
+                              }}
+                              className={`w-full p-3 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer flex items-center justify-between ${
+                                isSel
+                                ? 'bg-indigo-100 dark:bg-indigo-950/60 border-indigo-500 text-indigo-900 dark:text-indigo-200'
+                                : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:border-indigo-400'
+                              }`}
+                              aria-label={`Unit ${uIdx + 1}: ${u.title}`}
+                            >
+                              <div className="truncate flex-1">
+                                <div>{u.title}</div>
+                                <div className="text-[10px] font-normal text-slate-500 mt-0.5">
+                                  {u.concepts.length} concepts
+                                </div>
+                              </div>
+                              <ChevronRight size={14} className="text-slate-400" />
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Step 3: Topics List for Selected Unit */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Step 3: Topics in {selectedUnit?.title || 'Unit'}
+                    </label>
+                    {!selectedUnit || (selectedUnit.concepts && selectedUnit.concepts.length === 0) ? (
+                      <p className="text-xs text-slate-500 py-3">Select a unit to see topics.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                        {selectedUnit.concepts.map((conceptName, cIdx) => {
+                          const isSel = selectedTopic?.title === conceptName
+                          const statusKey = `${selectedSubject}::${conceptName}`
+                          const topicStatus = topicStatusMap[statusKey] || 'Not started'
+                          return (
+                            <button
+                              key={cIdx}
+                              type="button"
+                              onClick={() => {
+                                const tObj = {
+                                  title: conceptName,
+                                  unit: selectedUnit.title,
+                                  subject: selectedSubject,
+                                  objectives: [`Master ${conceptName} in ${selectedSubject}`]
+                                }
+                                setSelectedTopic(tObj)
+                                announce(`Topic selected: ${conceptName}. Status: ${topicStatus}`)
+                                speakText(`Topic: ${conceptName}. Learning status: ${topicStatus}.`, `Topic: ${conceptName}`)
+                              }}
+                              className={`w-full p-3 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                                isSel
+                                ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:border-indigo-400'
+                              }`}
+                              aria-label={`Topic ${cIdx + 1}: ${conceptName}, Status: ${topicStatus}`}
+                            >
+                              <div className="truncate font-bold">{conceptName}</div>
+                              <div className="flex items-center justify-between text-[10px] opacity-90">
+                                <span>Status:</span>
+                                <span className={`px-1.5 py-0.2 rounded font-extrabold ${isSel ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}>
+                                  {topicStatus}
+                                </span>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Selected Topic Action Bar */}
+              {selectedTopic && (
+                <div className="p-4 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                      Active Syllabus Topic
+                    </span>
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+                      {selectedTopic.title}
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 truncate mt-0.5">
+                      {selectedSubject} · {selectedUnit?.title || 'Unit'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      onClick={() => {
+                        switchSection('learn')
+                        generateLesson()
+                      }}
+                      className="text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 px-4 py-2 rounded-xl shadow-xs"
+                      aria-label="Start Audio Lesson in Listen and Learn"
+                    >
+                      <Headphones size={15} />
+                      <span>Start Audio Lesson</span>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        switchSection('practice')
+                        loadPracticeQuestion()
+                      }}
+                      className="text-xs font-extrabold flex items-center gap-1.5 px-4 py-2 rounded-xl"
+                      aria-label="Practice This Topic Now"
+                    >
+                      <Award size={15} />
+                      <span>Practice Topic</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 2: LISTEN & LEARN                                         */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {activeSection === 'learn' && (
+          <div className="space-y-6">
+            {/* Active Topic Banner */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                    Syllabus-Aware Audio Tutor
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white mt-0.5">
+                    {selectedTopic?.title || 'Please Select a Topic in My Syllabus'}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    {selectedSubject} · {selectedUnit?.title || 'Unit'}
+                  </p>
                 </div>
 
-                <div>
-                  <div className="font-bold text-xs text-slate-900 dark:text-white">
-                    {gap.topic} {gap.subtopic && gap.subtopic !== gap.topic ? `· ${gap.subtopic}` : ''}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => switchSection('syllabus')}
+                    className="text-xs font-bold"
+                    aria-label="Change Topic from My Syllabus"
+                  >
+                    Change Topic
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => generateLesson()}
+                    disabled={loadingLesson || !selectedTopic}
+                    className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 shadow-xs"
+                    aria-label="Generate Audio Lesson for this topic"
+                  >
+                    <RefreshCw size={13} className={loadingLesson ? 'animate-spin' : ''} />
+                    <span>{loadingLesson ? 'Generating…' : 'Generate Lesson'}</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Teaching Mode Selector */}
+              <div className="space-y-2">
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Select Teaching Mode
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {[
+                    { key: 'structured_10_step', label: '10-Step Master Lesson', desc: 'Full syllabus depth' },
+                    { key: 'concept_to_sense', label: 'Concept-to-Sense', desc: 'Diagrams & equations' },
+                    { key: 'simple', label: 'Simple Language', desc: 'Everyday analogies' },
+                    { key: 'detailed', label: 'Detailed Rigor', desc: 'Governing laws' },
+                    { key: 'quick_revision', label: 'Quick Revision', desc: 'High-yield points' }
+                  ].map((m) => {
+                    const isSel = teachingMode === m.key
+                    return (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => {
+                          setTeachingMode(m.key)
+                          announce(`Teaching mode set to ${m.label}`)
+                          generateLesson(m.key)
+                        }}
+                        className={`p-3 rounded-xl border text-left text-xs font-bold cursor-pointer transition-all ${
+                          isSel
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                        }`}
+                        aria-label={`Teaching mode: ${m.label}`}
+                      >
+                        <div className="truncate">{m.label}</div>
+                        <div className={`text-[10px] mt-0.5 ${isSel ? 'text-indigo-100' : 'text-slate-400'}`}>
+                          {m.desc}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Concept-to-Sense Verbalization Quick Actions */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-2">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-indigo-600" />
+                  <span>Concept-to-Sense Verbalization Shortcuts</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { label: 'Explain Diagram / Circuit', prompt: `Explain the visual structure, circuit components, polarity, and loops for ${selectedTopic?.title || 'this topic'} using Concept-to-Sense.` },
+                    { label: 'Explain Equations & Math', prompt: `Verbalize every equation, symbol, and derivative step for ${selectedTopic?.title || 'this topic'} in plain spoken language.` },
+                    { label: 'Explain Graphs & Trends', prompt: `Describe the graph axes, labels, units, and slope inflection points for ${selectedTopic?.title || 'this topic'}.` },
+                    { label: 'Simpler Real-Life Analogy', prompt: `Explain ${selectedTopic?.title || 'this concept'} using an intuitive everyday real-world analogy (Feynman style).` }
+                  ].map((act, aIdx) => (
+                    <button
+                      key={aIdx}
+                      type="button"
+                      onClick={() => submitStudentQuestion(act.prompt)}
+                      className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-left text-xs font-bold text-slate-800 dark:text-slate-200 hover:border-indigo-500 cursor-pointer shadow-2xs"
+                      aria-label={act.label}
+                    >
+                      {act.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Audio Lesson Presentation & Section Navigation */}
+              {loadingLesson ? (
+                <div className="py-12 text-center space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white mx-auto flex items-center justify-center animate-spin">
+                    <RefreshCw size={20} />
                   </div>
-                  {gap.question_ref && (
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                      <strong>Activity:</strong> {gap.question_ref}
+                  <div className="text-sm font-extrabold text-slate-900 dark:text-white">
+                    Generating Structured Audio Lesson for {selectedTopic?.title}…
+                  </div>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Synthesizing syllabus learning objectives, formulas, and visual diagrams. Speech will begin automatically.
+                  </p>
+                </div>
+              ) : activeLesson ? (
+                <div className="space-y-4 pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/80">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-extrabold text-indigo-900 dark:text-indigo-200">
+                        Section {activeSectionIndex + 1} of {activeLessonSections.length}
+                      </span>
+                      <span className="text-slate-400">·</span>
+                      <span className="text-xs text-slate-600 dark:text-slate-400 truncate max-w-xs sm:max-w-md">
+                        {activeLesson.title}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={prevLessonSection}
+                        disabled={activeSectionIndex === 0}
+                        className="text-xs font-bold"
+                        aria-label="Previous Lesson Section"
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => playLessonSection(activeSectionIndex)}
+                        className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+                        aria-label="Replay Current Section"
+                      >
+                        <Volume2 size={13} />
+                        <span>Replay</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={nextLessonSection}
+                        disabled={activeSectionIndex >= activeLessonSections.length - 1}
+                        className="text-xs font-bold"
+                        aria-label="Next Lesson Section"
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Section Jumper Bar */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {activeLessonSections.map((sec, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() => playLessonSection(sIdx)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                          activeSectionIndex === sIdx
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                        }`}
+                        aria-label={`Jump to Section ${sIdx + 1}`}
+                      >
+                        Sec {sIdx + 1}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Section Text Reader Box */}
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-sm leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap font-medium">
+                    {activeLessonSections[activeSectionIndex]}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-500 text-xs">
+                  Click &ldquo;Generate Lesson&rdquo; above to synthesize the 10-step audio lesson for this topic.
+                </div>
+              )}
+            </div>
+
+            {/* Explore Concepts: Conversational Tutor & Doubt Resolution */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Compass size={18} className="text-indigo-600" />
+                  <span>Explore Concepts &amp; Ask Questions</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Ask doubts through speech or keyboard. Answers remain strictly locked to your validated syllabus topic.
+                </p>
+              </div>
+
+              {/* Pending Speech Review & Confirmation Box */}
+              {isReviewingTranscript && transcriptTarget === 'question' && (
+                <div className="p-4 rounded-xl border-2 border-indigo-500 bg-indigo-50 dark:bg-indigo-950/60 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-900 dark:text-indigo-200">
+                    <CheckCircle2 size={16} className="text-indigo-600" />
+                    <span>Voice Transcript Review</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">
+                    &ldquo;{pendingTranscript}&rdquo;
+                  </p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Speech errors will not penalize your learning score. Confirm, edit, or cancel before submitting.
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        confirmPendingTranscript()
+                        submitStudentQuestion(pendingTranscript)
+                      }}
+                      className="bg-indigo-600 text-white font-extrabold text-xs px-4 py-2"
+                      aria-label="Confirm and Submit Question"
+                    >
+                      <Check size={14} /> Confirm &amp; Submit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setStudentQuestion(pendingTranscript)
+                        setIsReviewingTranscript(false)
+                        announce('Transcript placed in question input field for keyboard editing.')
+                      }}
+                      className="text-xs font-bold"
+                      aria-label="Edit Question using Keyboard"
+                    >
+                      <Edit3 size={14} /> Edit with Keyboard
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={cancelVoiceDictation}
+                      className="text-xs font-bold text-rose-600"
+                      aria-label="Cancel Voice Question"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Question Input Controls */}
+              <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                <input
+                  type="text"
+                  value={studentQuestion}
+                  onChange={(e) => setStudentQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      submitStudentQuestion()
+                    }
+                  }}
+                  placeholder={`Ask a question about ${selectedTopic?.title || 'this topic'}…`}
+                  aria-label={`Ask a doubt or question about ${selectedTopic?.title || 'current topic'}`}
+                  className="flex-1 px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isListening) cancelVoiceDictation()
+                    else startVoiceDictation('question')
+                  }}
+                  className={`px-4 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                    isListening
+                      ? 'bg-rose-600 text-white animate-pulse'
+                      : 'border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  aria-label={isListening ? 'Stop Listening' : 'Speak Question (Hotkey: M)'}
+                >
+                  {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                  <span>{isListening ? 'Listening…' : 'Speak (M)'}</span>
+                </button>
+
+                <Button
+                  onClick={() => submitStudentQuestion()}
+                  disabled={askingQuestion || !studentQuestion.trim()}
+                  className="bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold text-xs px-5 py-3 rounded-xl flex items-center justify-center gap-1.5 shadow-xs"
+                  aria-label="Send question to tutor"
+                >
+                  <Send size={15} />
+                  <span>{askingQuestion ? 'Thinking…' : 'Ask Question'}</span>
+                </Button>
+              </div>
+
+              {/* Conversation History List */}
+              {conversationHistory.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                    Topic Discussion History
+                  </div>
+                  <div className="space-y-2.5 max-h-[350px] overflow-y-auto pr-1">
+                    {conversationHistory.map((item, idx) => {
+                      const isUser = item.role === 'user'
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3.5 rounded-xl border text-xs sm:text-sm leading-relaxed space-y-1.5 ${
+                            isUser
+                              ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white'
+                              : 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 text-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between font-extrabold text-[11px]">
+                            <span className={isUser ? 'text-slate-600 dark:text-slate-400' : 'text-indigo-600 dark:text-indigo-400'}>
+                              {isUser ? 'My Question' : 'AI Tutor Explanation'}
+                            </span>
+                            {!isUser && (
+                              <button
+                                type="button"
+                                onClick={() => speakText(item.content, 'Tutor Explanation')}
+                                className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                aria-label="Listen to this explanation aloud"
+                              >
+                                <Volume2 size={13} />
+                                <span>Listen</span>
+                              </button>
+                            )}
+                          </div>
+                          <div className="whitespace-pre-wrap font-medium">{item.content}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 3: PRACTICE                                               */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {activeSection === 'practice' && (
+          <div className="space-y-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                    Accessible Topic Practice
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white mt-0.5">
+                    Practice: {selectedTopic?.title || 'Selected Topic'}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Grounded in your syllabus learning objectives. No handwriting or camera uploads required.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => switchSection('syllabus')}
+                    className="text-xs font-bold"
+                  >
+                    Change Topic
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={loadPracticeQuestion}
+                    disabled={loadingQuestion || !selectedTopic}
+                    className="text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1.5 shadow-xs"
+                    aria-label="Generate new practice question"
+                  >
+                    <RefreshCw size={13} className={loadingQuestion ? 'animate-spin' : ''} />
+                    <span>{loadingQuestion ? 'Generating…' : 'New Question'}</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Active Practice Question Card */}
+              {loadingQuestion ? (
+                <div className="py-12 text-center space-y-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white mx-auto flex items-center justify-center animate-spin">
+                    <RefreshCw size={20} />
+                  </div>
+                  <div className="text-sm font-extrabold text-slate-900 dark:text-white">
+                    Generating diagnostic practice question for {selectedTopic?.title}…
+                  </div>
+                </div>
+              ) : practiceQuestion ? (
+                <div className="space-y-5">
+                  <div className="p-5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 space-y-3">
+                    <div className="flex items-center justify-between text-xs font-extrabold text-emerald-900 dark:text-emerald-300">
+                      <span>Question</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          speakText(
+                            `Question: ${practiceQuestion.question_text || practiceQuestion.question}`,
+                            'Practice Question'
+                          )
+                        }
+                        className="text-emerald-700 dark:text-emerald-300 hover:underline flex items-center gap-1 cursor-pointer font-bold"
+                        aria-label="Repeat practice question aloud"
+                      >
+                        <Volume2 size={14} />
+                        <span>Repeat Question</span>
+                      </button>
+                    </div>
+
+                    <div className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white leading-relaxed">
+                      {practiceQuestion.question_text || practiceQuestion.question}
+                    </div>
+
+                    {practiceQuestion.learning_objective && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 font-semibold">
+                        Objective: {practiceQuestion.learning_objective}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Pending Speech Review & Confirmation for Practice */}
+                  {isReviewingTranscript && transcriptTarget === 'practice' && (
+                    <div className="p-4 rounded-xl border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-900 dark:text-emerald-200">
+                        <CheckCircle2 size={16} className="text-emerald-600" />
+                        <span>Review Recognized Voice Answer</span>
+                      </div>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        &ldquo;{pendingTranscript}&rdquo;
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          onClick={confirmPendingTranscript}
+                          className="bg-emerald-600 text-white font-extrabold text-xs px-4 py-2"
+                          aria-label="Confirm answer and place into answer box"
+                        >
+                          <Check size={14} /> Confirm Answer
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPracticeAnswer(pendingTranscript)
+                            setIsReviewingTranscript(false)
+                            announce('Transcript placed in answer area for editing.')
+                          }}
+                          className="text-xs font-bold"
+                          aria-label="Edit Answer with Keyboard"
+                        >
+                          <Edit3 size={14} /> Edit with Keyboard
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={cancelVoiceDictation}
+                          className="text-xs font-bold text-rose-600"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Answer Input Area */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Your Answer (Speak or Type)
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={practiceAnswer}
+                      onChange={(e) => setPracticeAnswer(e.target.value)}
+                      placeholder="Type or dictate your answer here. Explain your reasoning and steps clearly…"
+                      aria-label="Type your practice answer"
+                      className="w-full p-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed font-medium"
+                    />
+
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isListening) cancelVoiceDictation()
+                            else startVoiceDictation('practice')
+                          }}
+                          className={`w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                            isListening
+                              ? 'bg-rose-600 text-white animate-pulse'
+                              : 'border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                          aria-label={isListening ? 'Stop Listening' : 'Speak Answer with Microphone (Hotkey: M)'}
+                        >
+                          {isListening ? <MicOff size={15} /> : <Mic size={15} />}
+                          <span>{isListening ? 'Listening…' : 'Dictate Answer (M)'}</span>
+                        </button>
+                      </div>
+
+                      <Button
+                        onClick={submitPracticeAnswer}
+                        disabled={submittingPractice || !practiceAnswer.trim()}
+                        className="w-full sm:w-auto bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold text-xs px-6 py-2.5 rounded-xl shadow-xs"
+                        aria-label="Submit practice answer for evaluation"
+                      >
+                        {submittingPractice ? 'Evaluating Answer…' : 'Submit for Evaluation'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Feedback Box */}
+                  {practiceFeedback && (
+                    <div
+                      className={`p-5 rounded-2xl border space-y-3 ${
+                        practiceFeedback.is_correct
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+                          : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2
+                            size={18}
+                            className={practiceFeedback.is_correct ? 'text-emerald-600' : 'text-amber-600'}
+                          />
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                            {practiceFeedback.is_correct ? 'Correct Understanding' : 'Needs Reinforcement'}
+                          </h4>
+                        </div>
+                        <Badge
+                          tone={practiceFeedback.is_correct ? 'success' : 'warning'}
+                          className="font-bold text-xs"
+                        >
+                          Score: {practiceFeedback.score} / {practiceFeedback.max_score}
+                        </Badge>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                        {practiceFeedback.feedback}
+                      </p>
+
+                      <div className="pt-2 flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={loadPracticeQuestion}
+                          className="text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          Attempt Next Question
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            switchSection('learn')
+                            generateLesson('structured_10_step')
+                          }}
+                          className="text-xs font-bold"
+                        >
+                          Review Lesson in Listen &amp; Learn
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
-
-                {gap.student_answer && gap.student_answer !== 'Not provided' && (
-                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800">
-                    <span className="font-semibold block text-slate-700 dark:text-slate-300">Your Submitted Answer:</span>
-                    <p className="truncate">"{gap.student_answer}"</p>
+              ) : (
+                <div className="py-12 text-center space-y-3">
+                  <Award size={36} className="text-slate-400 mx-auto" />
+                  <div className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
+                    Ready to practice {selectedTopic?.title || 'your syllabus topic'}
                   </div>
-                )}
-
-                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                  <strong>Why this indicates a gap:</strong> {gap.why_learning_gap}
-                </p>
-
-                {gap.recommended_action && (
-                  <div className="text-[11px] text-indigo-800 dark:text-indigo-200 bg-indigo-50/70 dark:bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-200/50 dark:border-indigo-900/50">
-                    <strong>Recommended Next Step:</strong> {gap.recommended_action}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ── Section: Accessible Mastery Assessment & Continuous Improvement (Prompt 5) ── */}
-      <section aria-labelledby="assessment-heading" className="p-6 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
-          <div className="flex items-center gap-2">
-            <Award size={18} className="text-indigo-600 dark:text-indigo-400" />
-            <h2 id="assessment-heading" className="text-base font-bold text-slate-900 dark:text-white">
-              Accessible Mastery Assessment & Continuous Learning Improvement
-            </h2>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={selectedTier}
-              onChange={(e) => {
-                setSelectedTier(e.target.value)
-                fetchMasteryQuestions(e.target.value)
-              }}
-              className="text-xs font-semibold p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              aria-label="Filter assessment question difficulty tier"
-            >
-              <option value="adaptive">Tier: Adaptive (Syllabus Grounded)</option>
-              <option value="basic_understanding">Tier: Basic Understanding</option>
-              <option value="conceptual_reasoning">Tier: Conceptual Reasoning</option>
-              <option value="problem_solving">Tier: Problem Solving & Calculation</option>
-              <option value="application">Tier: Application</option>
-              <option value="advanced">Tier: Advanced Boundary Conditions</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={() => fetchMasteryQuestions(selectedTier)}
-              disabled={loadingQuestions || !selectedTopic}
-              className="text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
-              aria-label="Refresh assessment questions for current syllabus topic"
-            >
-              <RefreshCw size={13} className={loadingQuestions ? 'animate-spin' : ''} />
-              <span>Generate Questions</span>
-            </button>
-          </div>
-        </div>
-
-        {loadingQuestions ? (
-          <div className="p-8 text-center text-xs text-slate-500">
-            Generating syllabus-grounded mastery assessment questions for {selectedTopic?.title || 'selected topic'}...
-          </div>
-        ) : !currentMasteryQuestion ? (
-          <div className="p-8 text-center text-xs text-slate-500">
-            Please select a syllabus topic above and click "Generate Questions" to begin accessible mastery assessment.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Question Navigation & Narration Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
-                  Question {currentQuestionIndex + 1} of {masteryQuestions.length}
-                </span>
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
-                  {currentMasteryQuestion.tier_label || 'Syllabus Tier'} · {currentMasteryQuestion.points || 5} Points
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleRepeatQuestion}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1 p-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800"
-                  aria-label="Listen to question prompt read aloud"
-                >
-                  <Volume2 size={13} />
-                  <span>Listen Prompt</span>
-                </button>
-
-                {currentMasteryQuestion.math_narration && (
-                  <button
-                    type="button"
-                    onClick={handleNarrateMath}
-                    className="text-xs font-bold text-purple-700 dark:text-purple-300 hover:text-purple-800 flex items-center gap-1 p-1.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/50"
-                    aria-label="Listen to mathematical expression narrated in words"
+                  <Button
+                    onClick={loadPracticeQuestion}
+                    className="bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-xs"
                   >
-                    <BookOpen size={13} />
-                    <span>Math Narration</span>
-                  </button>
-                )}
-
-                {currentMasteryQuestion.diagram_description && (
-                  <button
-                    type="button"
-                    onClick={handleNarrateDiagram}
-                    className="text-xs font-bold text-blue-700 dark:text-blue-300 hover:text-blue-800 flex items-center gap-1 p-1.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50"
-                    aria-label="Listen to diagram topology description"
-                  >
-                    <Activity size={13} />
-                    <span>Diagram Description</span>
-                  </button>
-                )}
-
-                {masteryQuestions.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextIdx = (currentQuestionIndex + 1) % masteryQuestions.length
-                      setCurrentQuestionIndex(nextIdx)
-                      setMasteryAnswer('')
-                      setMasteryResult(null)
-                      setTranscriptReviewed(false)
-                      const q = masteryQuestions[nextIdx]
-                      speakText(`Moving to Question ${nextIdx + 1}: ${q.spoken_prompt || q.question_text}`, `Question ${nextIdx + 1}`)
-                    }}
-                    className="text-xs font-bold text-slate-700 dark:text-slate-300 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 flex items-center gap-1"
-                    aria-label="Next question in assessment set"
-                  >
-                    <span>Next Q</span>
-                    <ArrowRight size={13} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Question Text */}
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
-              <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white leading-relaxed">
-                {currentMasteryQuestion.question_text}
-              </p>
-              {currentMasteryQuestion.math_narration && (
-                <div className="text-[11px] text-purple-700 dark:text-purple-300 italic pt-1">
-                  <strong>Math Audio Translation:</strong> "{currentMasteryQuestion.math_narration}"
+                    Start Practice Session
+                  </Button>
                 </div>
               )}
             </div>
+          </div>
+        )}
 
-            {/* Multi-Modal Answer Input with Transcript Review */}
-            <div className="space-y-3 pt-1">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label htmlFor="mastery-answer-input" className="block text-xs font-bold text-slate-900 dark:text-white">
-                  Your Answer (Keyboard or Voice Dictation):
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={toggleAssessmentDictation}
-                    className={`text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer ${
-                      isDictating
-                        ? 'bg-red-600 text-white animate-pulse'
-                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs'
-                    }`}
-                    aria-label={isDictating ? 'Stop Voice Dictation' : 'Activate Voice Dictation for Answer'}
-                  >
-                    <Mic size={14} />
-                    <span>{isDictating ? 'Dictating...' : 'Voice Dictate'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleReviewAnswer}
-                    disabled={!masteryAnswer.trim()}
-                    className="text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 flex items-center gap-1 disabled:opacity-40 cursor-pointer"
-                    aria-label="Review dictated or typed answer read aloud before submitting"
-                  >
-                    <Volume2 size={14} />
-                    <span>Review Answer Aloud</span>
-                  </button>
-                </div>
-              </div>
-
-              <textarea
-                id="mastery-answer-input"
-                rows={4}
-                value={masteryAnswer}
-                onChange={(e) => {
-                  setMasteryAnswer(e.target.value)
-                  setTranscriptReviewed(false)
-                }}
-                placeholder="Type or dictate your answer. You can freely edit the text before submitting..."
-                className="w-full p-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus-visible:ring-4 focus-visible:ring-indigo-500 outline-none leading-relaxed"
-                aria-label="Mastery assessment answer input"
-              />
-
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {submissionMode === 'voice' ? 'Voice transcribed. ' : 'Keyboard input. '}
-                  {transcriptReviewed ? '✓ Answer transcript reviewed.' : 'Click "Review Answer Aloud" to verify before submission.'}
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmModal(true)}
-                  disabled={!masteryAnswer.trim() || evaluatingMastery}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50 shadow-xs cursor-pointer"
-                  aria-label="Submit answer for mastery assessment evaluation"
-                >
-                  <CheckCircle2 size={14} />
-                  <span>{evaluatingMastery ? 'Evaluating Understanding...' : 'Submit for Mastery Assessment'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Accessible Submission Confirmation Dialog */}
-            {showConfirmModal && (
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="confirm-modal-title"
-                className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-3"
-              >
-                <div className="flex items-center gap-2">
-                  <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-                  <h3 id="confirm-modal-title" className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                    Confirm Submission for Mastery Evaluation
-                  </h3>
-                </div>
-                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-                  You are about to submit your answer for <strong>{selectedTopic?.title}</strong>.
-                  Speech recognition requires student confirmation to prevent accidental submission.
-                </p>
-                <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 text-xs font-mono text-slate-800 dark:text-slate-200">
-                  "{masteryAnswer}"
-                </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleEvaluateMastery}
-                    className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer shadow-xs"
-                    aria-label="Confirm submission and evaluate"
-                  >
-                    <CheckCircle2 size={13} />
-                    <span>Confirm & Evaluate</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmModal(false)}
-                    className="text-xs font-bold bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-300 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 cursor-pointer"
-                    aria-label="Cancel and continue editing answer"
-                  >
-                    <span>Keep Editing</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Continuous Improvement Feedback Panel (Prompt 5 Requirement 5) */}
-            {masteryResult && (
-              <div className="mt-4 p-5 rounded-2xl bg-gradient-to-r from-indigo-50/70 via-purple-50/70 to-emerald-50/70 dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-3.5 shadow-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 dark:border-indigo-900/60 pb-2.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                      masteryResult.evaluation_result?.includes('Correct understanding')
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-                        : (masteryResult.evaluation_result?.includes('Calculation')
-                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200')
-                    }`}>
-                      {masteryResult.evaluation_result}
-                    </span>
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">
-                      Mastery State: {masteryResult.mastery_state}
-                    </span>
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                      Score: {masteryResult.score} / {masteryResult.max_score} ({masteryResult.percentage}%)
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => speakText(masteryResult.spoken_feedback, 'Assessment Diagnosis')}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 p-1 rounded"
-                    aria-label="Replay spoken assessment feedback aloud"
-                  >
-                    <Volume2 size={14} />
-                    <span>Replay Audio</span>
-                  </button>
-                </div>
-
-                {/* Strengths */}
-                <div className="space-y-1 text-xs">
-                  <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                    <CheckCircle2 size={14} />
-                    <span>What You Understood Correctly:</span>
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-5">
-                    {masteryResult.strengths_explanation}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 4: MY PROGRESS                                            */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {activeSection === 'progress' && (
+          <div className="space-y-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Compass size={20} className="text-indigo-600" />
+                    <span>My Learning Progress &amp; Gaps</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Grounded strictly in your genuine accessible practice attempts.
                   </p>
                 </div>
 
-                {/* Mistake Diagnosis in Plain Language */}
-                {masteryResult.mistake_explanation && masteryResult.mistake_explanation !== 'No conceptual errors were detected in your solution.' && (
-                  <div className="space-y-1 text-xs">
-                    <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                      <AlertTriangle size={14} />
-                      <span>Mistake Diagnosis (In Simple Language):</span>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const speech =
+                      progressSummaryText ||
+                      `You have completed practice across your syllabus. Diagnosed learning points: ${learningGaps.length}.`
+                    speakText(speech, 'Learning Progress Summary')
+                  }}
+                  className="bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold text-xs flex items-center gap-1.5 shadow-xs"
+                  aria-label="Listen to your progress summary aloud"
+                >
+                  <Volume2 size={14} />
+                  <span>Listen Progress Summary</span>
+                </Button>
+              </div>
+
+              {/* Personalized Adaptive Learning Path */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                    <Sparkles size={14} />
+                    <span>Personalized Learning Path (What to Study Next)</span>
+                  </div>
+                  {learningPath?.recommended_path?.length > 0 && (
+                    <span className="text-xs text-slate-500">
+                      {learningPath.recommended_path.length} prioritized steps
+                    </span>
+                  )}
+                </div>
+
+                {loadingPath ? (
+                  <div className="py-6 text-center text-xs text-slate-500 animate-pulse">
+                    Computing adaptive learning path from your actual practice results…
+                  </div>
+                ) : !learningPath?.recommended_path || learningPath.recommended_path.length === 0 ? (
+                  <div className="p-5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-1 bg-slate-50/50 dark:bg-slate-800/30">
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      No Prioritized Learning Path Generated Yet
                     </div>
-                    <p className="text-slate-700 dark:text-slate-300 leading-relaxed pl-5">
-                      {masteryResult.mistake_explanation}
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      Complete topic checkpoints in Practice to discover targeted recommendations.
                     </p>
                   </div>
+                ) : (
+                  <div className="space-y-2">
+                    {learningPath.recommended_path.map((step, idx) => (
+                      <div
+                        key={idx}
+                        className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/40 dark:bg-indigo-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-extrabold text-[10px] flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                              {step.title || step.topic}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 font-bold">
+                              {step.subject}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 pl-7">
+                            {step.reason || 'Recommended topic to strengthen core mastery.'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 pl-7 sm:pl-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sText = `Step ${idx + 1}: ${step.title} in ${step.subject}. Reason: ${step.reason}.`
+                              speakText(sText, `Step ${idx + 1}`)
+                            }}
+                            className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
+                            aria-label={`Listen to step ${idx + 1}`}
+                          >
+                            <Volume2 size={13} />
+                            <span>Listen</span>
+                          </button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setSelectedSubject(step.subject)
+                              setSelectedTopic({
+                                title: step.topic || step.title,
+                                unit: step.unit || 'Unit',
+                                subject: step.subject,
+                                objectives: [`Master ${step.topic || step.title}`]
+                              })
+                              switchSection('learn')
+                              generateLesson('structured_10_step')
+                            }}
+                            className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700"
+                          >
+                            Study Lesson <ArrowRight size={12} className="ml-1" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
+              </div>
 
-                {/* Related Concept & Recommended Next Steps */}
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
-                  <div className="text-slate-500 dark:text-slate-400">
-                    <strong>Related Syllabus Concept:</strong> {masteryResult.related_concept}
-                  </div>
-                  <div className="text-indigo-700 dark:text-indigo-300">
-                    <strong>Recommended Next Activity:</strong> {masteryResult.recommended_activity}
-                  </div>
-                  <div className="text-slate-700 dark:text-slate-300">
-                    <strong>Targeted Practice Checkpoint:</strong> {masteryResult.targeted_practice_question}
-                  </div>
+              {/* Diagnosed Learning Gaps List */}
+              <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                  <AlertTriangle size={14} />
+                  <span>Diagnosed Learning Difficulties ({learningGaps.length})</span>
+                </div>
 
-                  <div className="pt-2 flex flex-wrap items-center gap-2">
+                {loadingProgress ? (
+                  <div className="py-6 text-center text-xs text-slate-500 animate-pulse">
+                    Loading genuine learning evidence…
+                  </div>
+                ) : learningGaps.length === 0 ? (
+                  <div className="p-5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-1 bg-slate-50/50 dark:bg-slate-800/30">
+                    <CheckCircle2 size={24} className="text-emerald-500 mx-auto mb-1" />
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      No Learning Gaps Observed
+                    </div>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      All completed topic checkpoints demonstrate sound conceptual reasoning. Continue exploring new syllabus units.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {learningGaps.map((gap, gIdx) => (
+                      <div
+                        key={gIdx}
+                        className="p-4 rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-2 flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-extrabold text-amber-900 dark:text-amber-300">
+                            <span className="truncate">{gap.subject}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40">
+                              {gap.evidence_strength || 'Identified Gap'}
+                            </span>
+                          </div>
+
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white mt-1">
+                            {gap.topic || gap.concept}
+                          </h4>
+
+                          <p className="text-xs text-slate-700 dark:text-slate-300 mt-1 leading-relaxed">
+                            {gap.why_learning_gap || gap.observed_gap}
+                          </p>
+
+                          {gap.recommended_action && (
+                            <p className="text-[11px] text-amber-800 dark:text-amber-400 font-semibold mt-1.5">
+                              Next: {gap.recommended_action}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/40 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const speech = `Subject: ${gap.subject}. Topic: ${gap.topic}. Observed difficulty: ${gap.why_learning_gap || gap.observed_gap}. Recommended action: ${gap.recommended_action || 'Review topic lesson'}.`
+                              speakText(speech, `Gap in ${gap.topic}`)
+                            }}
+                            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <Volume2 size={13} />
+                            <span>Listen</span>
+                          </button>
+
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setSelectedSubject(gap.subject)
+                              setSelectedTopic({
+                                title: gap.topic,
+                                unit: gap.unit || 'Unit',
+                                subject: gap.subject,
+                                objectives: [`Master ${gap.topic}`]
+                              })
+                              switchSection('practice')
+                              loadPracticeQuestion()
+                            }}
+                            className="text-xs font-bold bg-amber-600 text-white hover:bg-amber-700"
+                          >
+                            Practice Now
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 5: LEARNING SETTINGS                                      */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {activeSection === 'settings' && (
+          <div className="space-y-6">
+            <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
+              <div className="pb-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Sliders size={20} className="text-indigo-600" />
+                    <span>Learning Settings &amp; Preferences</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Customize your audio speed, speech dictation, and contrast. Saved to your authenticated account.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleSaveSettings}
+                  disabled={savingSettings}
+                  className="bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-xs"
+                >
+                  {savingSettings ? 'Saving…' : 'Save Preferences'}
+                </Button>
+              </div>
+
+              {settingsSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 size={16} />
+                  <span>{settingsSuccess}</span>
+                </div>
+              )}
+
+              {/* Audio Speed Setting */}
+              <div className="space-y-2">
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Text-to-Speech Speed ({audioSpeed}x)
+                </label>
+                <div className="grid grid-cols-5 gap-2">
+                  {[0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
                     <button
+                      key={rate}
                       type="button"
-                      onClick={() => {
-                        requestAITeaching('simple', `Teach me ${selectedTopic?.title} focusing on ${masteryResult.recommended_activity}`)
-                      }}
-                      className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
-                      aria-label="Start recommended learning activity"
+                      onClick={() => setAudioSpeed(rate)}
+                      className={`p-3 rounded-xl border text-center text-xs font-extrabold cursor-pointer transition-all ${
+                        audioSpeed === rate
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                      }`}
+                      aria-label={`Set speech speed to ${rate} times`}
                     >
-                      <Play size={12} />
-                      <span>Start Recommended Activity</span>
+                      {rate}x
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMasteryAnswer('')
-                        setMasteryResult(null)
-                        setTranscriptReviewed(false)
-                        fetchMasteryQuestions('problem_solving')
-                      }}
-                      className="text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer"
-                      aria-label="Attempt targeted practice question"
-                    >
-                      <RotateCcw size={12} />
-                      <span>Attempt Next Question</span>
-                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Explanation Mode Setting */}
+              <div className="space-y-2">
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Preferred Explanation Level
+                </label>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {[
+                    { key: 'simple', title: 'Simple Explanation Mode', desc: 'Focuses on intuitive language, relatable analogies, and core conceptual foundations.' },
+                    { key: 'detailed', title: 'Detailed Subject-Specific Mode', desc: 'Comprehensive technical exposition with governing laws, formal equations, and precise terms.' }
+                  ].map((lvl) => {
+                    const isSel = explanationMode === lvl.key
+                    return (
+                      <button
+                        key={lvl.key}
+                        type="button"
+                        onClick={() => setExplanationMode(lvl.key)}
+                        className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                          isSel
+                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                        }`}
+                        aria-label={lvl.title}
+                      >
+                        <div className="text-xs font-extrabold">{lvl.title}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          {lvl.desc}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Feature Toggles */}
+              <div className="space-y-3 pt-2">
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Accessibility Preferences
+                </label>
+
+                {[
+                  {
+                    id: 'audio_nav',
+                    label: 'Audio-First Navigation',
+                    desc: 'Automatically reads page headers and section titles aloud when switching tabs.',
+                    checked: audioFirstNav,
+                    onChange: (v) => setAudioFirstNav(v)
+                  },
+                  {
+                    id: 'voice_input',
+                    label: 'Voice Dictation for Questions & Answers',
+                    desc: 'Enables microphone dictation with pre-submission transcript review.',
+                    checked: voiceInputEnabled,
+                    onChange: (v) => setVoiceInputEnabled(v)
+                  },
+                  {
+                    id: 'spoken_diag',
+                    label: 'Spoken Visual & Equation Descriptions',
+                    desc: 'Converts textbook diagrams, circuits, and formulas into mentally mappable audio narration.',
+                    checked: spokenDiagrams,
+                    onChange: (v) => setSpokenDiagrams(v)
+                  },
+                  {
+                    id: 'high_contrast',
+                    label: 'High Contrast Display (Low Vision)',
+                    desc: 'Applies an ultra-contrast black and yellow color palette with large touch targets.',
+                    checked: highContrast,
+                    onChange: (v) => setHighContrast(v)
+                  }
+                ].map((pref) => (
+                  <div
+                    key={pref.id}
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 flex items-start justify-between gap-4"
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold text-slate-900 dark:text-white">
+                        {pref.label}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {pref.desc}
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={pref.checked}
+                      onChange={(e) => pref.onChange(e.target.checked)}
+                      className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0 mt-0.5"
+                      aria-label={pref.label}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Keyboard Shortcuts Cheat Sheet */}
+              <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <HelpCircle size={14} className="text-indigo-600" />
+                  <span>Keyboard Shortcuts Quick Guide</span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2 text-xs">
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Jump to My Syllabus:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Alt + 1</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Jump to Listen &amp; Learn:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Alt + 2</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Jump to Practice:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Alt + 3</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Jump to My Progress:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Alt + 4</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Jump to Settings:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Alt + 5</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Play / Pause Speech:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">Space</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Repeat Speech:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">R</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Stop Speech:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">S</kbd>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
+                    <span className="font-bold">Toggle Dictation Mic:</span>
+                    <kbd className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border font-mono">M</kbd>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         )}
-      </section>
-
-      {/* ── Accessible Keyboard Help Modal ────────────────────────────────── */}
-      {showHelpModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="help-title"
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-        >
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <HelpCircle size={18} className="text-indigo-600" />
-                <h3 id="help-title" className="text-base font-bold text-slate-900 dark:text-white">
-                  Keyboard Shortcuts & Navigation
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg"
-                aria-label="Close Help Dialog"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Play / Pause Speech</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">P or Space</kbd>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Voice Question (Mic)</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">V</kbd>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Stop Speech</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">S</kbd>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Repeat Last Speech</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">R</kbd>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Toggle High Contrast</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">C</kbd>
-              </div>
-              <div className="flex items-center justify-between py-1.5">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Open This Help Dialog</span>
-                <kbd className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded font-mono font-bold text-slate-900 dark:text-white">? or H</kbd>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              onClick={() => setShowHelpModal(false)}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 rounded-xl"
-            >
-              Close Help
-            </Button>
-          </div>
-        </div>
-      )}
-    </main>
+      </main>
+    </div>
   )
 }

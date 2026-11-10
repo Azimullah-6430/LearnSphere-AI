@@ -104,6 +104,47 @@ class TestBlindCompanionIsolation(unittest.TestCase):
         self.assertEqual(updated_user.get("blind_companion_settings", {}).get("audio_speed"), 1.5)
         self.assertEqual(updated_user.get("blind_companion_settings", {}).get("explanation_mode"), "simple")
 
+    def test_dedicated_blind_settings_endpoint(self):
+        """User can fetch and update settings via dedicated /api/blind-companion/settings endpoint."""
+        email = f"blind_endpoint_{uuid.uuid4().hex[:6]}@example.com"
+        reg_res = self.client.post("/api/auth/register", json={
+            "name": "Endpoint Tester",
+            "email": email,
+            "password": "password123",
+            "role": "student",
+            "level": "college",
+            "degree": "B.Tech",
+            "department": "IT",
+            "semester": 5,
+            "is_disabled_student": True,
+            "blind_companion_enabled": True
+        })
+        self.assertEqual(reg_res.status_code, 201)
+
+        # 1. GET settings
+        get_res = self.client.get("/api/blind-companion/settings")
+        self.assertEqual(get_res.status_code, 200)
+        get_data = get_res.get_json()
+        self.assertTrue(get_data.get("success"))
+        self.assertTrue(get_data.get("blind_companion_enabled"))
+        self.assertTrue(get_data.get("is_disabled_student"))
+
+        # 2. POST update settings
+        post_res = self.client.post("/api/blind-companion/settings", json={
+            "blind_companion_enabled": True,
+            "settings": {
+                "audio_speed": 1.25,
+                "explanation_mode": "detailed",
+                "high_contrast": True,
+                "spoken_diagrams": True
+            }
+        })
+        self.assertEqual(post_res.status_code, 200)
+        post_data = post_res.get_json()
+        self.assertTrue(post_data.get("success"))
+        self.assertEqual(post_data.get("settings", {}).get("audio_speed"), 1.25)
+        self.assertTrue(post_data.get("settings", {}).get("high_contrast"))
+
 
 if __name__ == "__main__":
     unittest.main()

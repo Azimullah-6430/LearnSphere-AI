@@ -6462,6 +6462,80 @@ def get_blind_mastery_history_endpoint():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/blind-companion/settings", methods=["GET", "POST"])
+@require_auth
+def blind_companion_settings_endpoint():
+    """
+    Get or persist Blind Learning Companion preferences for the authenticated student.
+    Enforces strict server-side authorization and user account isolation.
+    """
+    try:
+        user_id = _current_user_id()
+        user = _lookup_user_by_id(user_id) or {}
+
+        if request.method == "GET":
+            settings = user.get("blind_companion_settings") or {}
+            return jsonify({
+                "success": True,
+                "blind_companion_enabled": bool(user.get("blind_companion_enabled") or user.get("is_disabled_student")),
+                "is_disabled_student": bool(user.get("is_disabled_student")),
+                "settings": settings
+            }), 200
+
+        data = request.get_json(force=True) or {}
+        enabled = data.get("blind_companion_enabled")
+        is_disabled = data.get("is_disabled_student")
+        new_settings = data.get("settings") or {}
+
+        current_settings = user.get("blind_companion_settings") or {
+            "audio_first": True,
+            "audio_speed": 1.0,
+            "voice_questions": True,
+            "spoken_diagrams": True,
+            "explanation_mode": "detailed",
+            "high_contrast": False,
+            "keyboard_nav": True
+        }
+        if isinstance(new_settings, dict):
+            current_settings.update(new_settings)
+
+        update_fields = {
+            "blind_companion_settings": current_settings,
+            "updated_at": datetime.utcnow()
+        }
+        if enabled is not None:
+            update_fields["blind_companion_enabled"] = bool(enabled)
+        if is_disabled is not None:
+            update_fields["is_disabled_student"] = bool(is_disabled)
+
+        mongo_db = get_mongodb()
+        if mongo_db is not None:
+            query = {"$or": [{"user_id": str(user_id)}, {"id": str(user_id)}]}
+            if ObjectId and len(str(user_id)) == 24:
+                try:
+                    query = {"_id": ObjectId(user_id)}
+                except Exception:
+                    pass
+            mongo_db["users"].update_one(query, {"$set": update_fields})
+        else:
+            conn = get_sqlite_db()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET updated_at=CURRENT_TIMESTAMP WHERE id=? OR user_id=?", (str(user_id), str(user_id)))
+            conn.commit()
+            conn.close()
+
+        updated_user = _lookup_user_by_id(user_id) or {}
+        return jsonify({
+            "success": True,
+            "blind_companion_enabled": bool(updated_user.get("blind_companion_enabled") or updated_user.get("is_disabled_student")),
+            "is_disabled_student": bool(updated_user.get("is_disabled_student")),
+            "settings": updated_user.get("blind_companion_settings") or current_settings
+        }), 200
+    except Exception as exc:
+        logger.error("[BlindCompanion] Settings error: %s", traceback.format_exc())
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SELF-EVALUATION (uses same engine as teacher portal)
 # ══════════════════════════════════════════════════════════════════════════════

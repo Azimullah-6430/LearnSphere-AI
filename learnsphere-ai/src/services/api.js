@@ -383,6 +383,10 @@ export const api = {
     request(`/api/misconceptions/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
 
   // ── Blind Learning Companion ──────────────────────────────────────────────
+  getBlindCompanionSettings: () =>
+    request('/api/blind-companion/settings'),
+  updateBlindCompanionSettings: (payload) =>
+    request('/api/blind-companion/settings', { method: 'POST', body: payload }),
   getBlindLearningGaps: () =>
     request('/api/blind-companion/learning-gaps'),
   submitBlindPractice: (payload) =>
