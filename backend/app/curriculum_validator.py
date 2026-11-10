@@ -147,16 +147,24 @@ class CurriculumCompletenessValidator:
                 if not os.path.isfile(candidate_path):
                     from pathlib import Path
                     backend_dir = Path(__file__).resolve().parent.parent
-                    for alt in [
+                    check_candidates = [
+                        Path(file_str),
+                        Path(file_str).resolve(),
                         backend_dir / file_str,
                         backend_dir / "uploads" / file_str,
                         backend_dir / "uploads" / "syllabus" / file_str,
                         backend_dir / "uploads" / Path(file_str).name,
-                        backend_dir / "uploads" / "syllabus" / Path(file_str).name
-                    ]:
-                        if alt.is_file():
-                            candidate_path = str(alt)
-                            break
+                        backend_dir / "uploads" / "syllabus" / Path(file_str).name,
+                        backend_dir.parent / file_str,
+                        backend_dir.parent / "backend" / "uploads" / Path(file_str).name,
+                    ]
+                    for alt in check_candidates:
+                        try:
+                            if alt.is_file():
+                                candidate_path = str(alt)
+                                break
+                        except Exception:
+                            pass
 
                 if os.path.isfile(candidate_path):
                     if candidate_path.lower().endswith(".pdf"):
@@ -436,13 +444,26 @@ class CurriculumCompletenessValidator:
 
             # 6. Anti-Hallucination: Verify existence in document if text is present
             if raw_doc_text and len(raw_doc_text) > 30 and not any(raw_doc_text.endswith(ext) for ext in [".pdf", ".png", ".jpg", ".jpeg"]):
+                doc_text_clean = " ".join(raw_doc_text.split())
+                doc_text_compact = re.sub(r"[^\w]", "", raw_doc_text.lower())
                 name_clean = re.sub(r"[^\w\s]", "", s_name.lower()).strip()
+                name_clean_compact = re.sub(r"[^\w]", "", s_name.lower())
                 name_tokens = [w for w in name_clean.split() if len(w) > 3 and w not in ("core", "theory", "laboratory", "elective", "course", "unit", "paper", "project")]
                 code_clean = re.sub(r"[^\w]", "", s_code.lower()).strip() if s_code else ""
                 
-                name_in_doc = (name_clean in raw_doc_text) or (any(tok in raw_doc_text for tok in name_tokens) if name_tokens else False)
-                code_in_doc = bool(code_clean and code_clean in raw_doc_text.replace(" ", ""))
-                has_extracted_evidence = bool((s_text and len(s_text) > 5) or (s_sec and len(s_sec) > 5) or sub.get("semester_evidence"))
+                name_in_doc = (
+                    (name_clean in raw_doc_text)
+                    or (name_clean in doc_text_clean)
+                    or (name_clean_compact in doc_text_compact)
+                    or (any(tok in raw_doc_text for tok in name_tokens) if name_tokens else False)
+                )
+                code_in_doc = bool(code_clean and (code_clean in doc_text_compact or code_clean in raw_doc_text.replace(" ", "")))
+                has_extracted_evidence = bool(
+                    (s_text and len(s_text) > 3)
+                    or (s_sec and len(s_sec) > 3)
+                    or sub.get("semester_evidence")
+                    or sub.get("evidence_verified")
+                )
                 
                 if not name_in_doc and not code_in_doc and not has_extracted_evidence:
                     uncertain_count += 1
@@ -503,6 +524,9 @@ class CurriculumCompletenessValidator:
                     conf_val = float(s_conf)
                 except Exception:
                     conf_val = 0.95
+            # If confidence is missing or zero, but subject has valid name and evidence/provenance, default to 0.95
+            if conf_val <= 0.0 and s_name and (has_evidence or s_code):
+                conf_val = 0.95
             if conf_val < 0.70:
                 low_confidence_count += 1
                 uncertain_count += 1

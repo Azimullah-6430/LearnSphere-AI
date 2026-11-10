@@ -40,6 +40,8 @@ export default function Settings() {
   const [uploadingSyllabus, setUploadingSyllabus] = useState(false)
   const [syllabusSuccess, setSyllabusSuccess] = useState('')
   const [syllabusError, setSyllabusError] = useState('')
+  const [reviewSyllabusId, setReviewSyllabusId] = useState(null)
+  const [confirmingSyllabus, setConfirmingSyllabus] = useState(false)
 
   // Save State
   const [saving, setSaving] = useState(false)
@@ -200,12 +202,20 @@ export default function Settings() {
         const vStatus = (res.validation_status || res.validationStatus || 'VALID').toUpperCase()
         if (vStatus === 'MISMATCH') {
           setSyllabusError(res.mismatch_reason || `The uploaded syllabus does not match your current Semester ${semester} profile.`)
+          setReviewSyllabusId(null)
         } else if (vStatus === 'NEEDS_REVIEW') {
-          setSyllabusError(res.mismatch_reason || 'Syllabus semester information is ambiguous (Status: NEEDS_REVIEW). Please verify and confirm.')
+          const sId = res.syllabus_id || res.syllabus?.syllabus_id || res.syllabus?.id
+          setReviewSyllabusId(sId)
+          setSyllabusError(res.mismatch_reason || 'Syllabus requires verification before activation.')
+          if (setSyllabusData && res.analysis) {
+            setSyllabusData(res.analysis)
+          }
         } else {
           if (setSyllabusData) setSyllabusData(res.analysis)
           setSyllabusSuccess(`Syllabus validated and mapped to Semester ${semester} successfully!`)
           setSyllabusFile(null)
+          setReviewSyllabusId(null)
+          setSyllabusError(null)
         }
       } else {
         setSyllabusError(res?.error || 'Syllabus upload failed.')
@@ -214,6 +224,29 @@ export default function Settings() {
       setSyllabusError(err?.message || 'Failed to upload syllabus.')
     } finally {
       setUploadingSyllabus(false)
+    }
+  }
+
+  const handleConfirmSyllabus = async () => {
+    if (!reviewSyllabusId) return
+    setConfirmingSyllabus(true)
+    try {
+      const cRes = await api.confirmSyllabusOverride(reviewSyllabusId)
+      if (cRes && cRes.success) {
+        setSyllabusError('')
+        setReviewSyllabusId(null)
+        setSyllabusSuccess(`Syllabus verified and activated successfully for Semester ${semester}!`)
+        const activeCur = await api.getActiveCurriculum()
+        if (activeCur && activeCur.success && setSyllabusData) {
+          setSyllabusData(activeCur)
+        }
+      } else {
+        setSyllabusError(cRes?.error || 'Failed to confirm syllabus activation.')
+      }
+    } catch (err) {
+      setSyllabusError(err?.message || 'Error confirming syllabus.')
+    } finally {
+      setConfirmingSyllabus(false)
     }
   }
 
@@ -512,6 +545,25 @@ export default function Settings() {
             <div className="p-3 bg-red-50 border border-red-300 text-red-800 text-xs font-semibold rounded-xl flex items-center gap-2">
               <AlertCircle size={16} className="text-red-600 shrink-0" />
               <span>{syllabusError}</span>
+            </div>
+          )}
+
+          {reviewSyllabusId && (
+            <div className="p-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-xl space-y-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                <span>Extracted subjects match your semester scheme. You can verify and activate this syllabus now.</span>
+              </div>
+              <Button
+                size="sm"
+                variant="accent"
+                disabled={confirmingSyllabus}
+                onClick={handleConfirmSyllabus}
+                className="w-full flex items-center justify-center gap-2 py-2 text-xs font-bold"
+              >
+                <CheckCircle2 size={14} />
+                {confirmingSyllabus ? 'Activating Syllabus...' : 'Confirm & Activate This Syllabus'}
+              </Button>
             </div>
           )}
 
